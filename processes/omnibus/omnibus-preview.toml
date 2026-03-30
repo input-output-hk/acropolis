@@ -31,7 +31,7 @@ pause = "none"
 stop = "none"
 
 [module.snapshot-bootstrapper]
-epoch = 507
+epoch = 999
 data-dir = "../../modules/snapshot_bootstrapper/data"
 
 # ============================================================================
