@@ -18,6 +18,7 @@ use anyhow::{anyhow, Result};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::time::{timeout, Duration};
 use tracing::{error, info, info_span, Instrument};
 
 mod state;
@@ -72,6 +73,92 @@ const DEFAULT_ADDRESS_DELTA_PUBLISH_MODE: &str = "compact";
 pub struct UTXOState;
 
 impl UTXOState {
+    async fn read_or_pending(
+        pending: &mut Option<Arc<Message>>,
+        subscription: &mut Box<dyn Subscription<Message>>,
+    ) -> Result<Arc<Message>> {
+        if let Some(message) = pending.take() {
+            Ok(message)
+        } else {
+            Ok(subscription.read().await?.1)
+        }
+    }
+
+    async fn drain_rollback_or_buffer(
+        pending: &mut Option<Arc<Message>>,
+        subscription: &mut Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        let message = Self::read_or_pending(pending, subscription).await?;
+        if matches!(
+            message.as_ref(),
+            Message::Cardano((
+                _,
+                CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+            ))
+        ) {
+            Ok(())
+        } else {
+            *pending = Some(message);
+            Ok(())
+        }
+    }
+
+    /// Best-effort read for validation-only side streams during rollback recovery.
+    ///
+    /// These topics are used only to improve UTxO validation, not to apply state.
+    /// When recovering from a rollback, they can lag behind the primary UTxO stream and
+    /// deadlock the pipeline. In that case we:
+    /// - drop stale messages for already-processed blocks
+    /// - buffer future messages for later
+    /// - return `None` if nothing for the current block is immediately available
+    async fn try_read_validation_message_for_block(
+        name: &str,
+        pending: &mut Option<Arc<Message>>,
+        subscription: &mut Box<dyn Subscription<Message>>,
+        current_block: &BlockInfo,
+    ) -> Result<Option<Arc<Message>>> {
+        loop {
+            let message = if let Some(message) = pending.take() {
+                message
+            } else {
+                match timeout(Duration::ZERO, subscription.read()).await {
+                    Ok(Ok((_, message))) => message,
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Ok(None),
+                }
+            };
+
+            match message.as_ref() {
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    continue;
+                }
+                Message::Cardano((block_info, _)) if block_info.number < current_block.number => {
+                    info!(
+                        stream = name,
+                        current = current_block.number,
+                        stale = block_info.number,
+                        "Skipping stale validation message during rollback recovery"
+                    );
+                    continue;
+                }
+                Message::Cardano((block_info, _)) if block_info.number > current_block.number => {
+                    *pending = Some(message);
+                    return Ok(None);
+                }
+                Message::Cardano(_) => return Ok(Some(message)),
+                _ => {
+                    error!(
+                        stream = name,
+                        "Unexpected non-Cardano message on validation side stream"
+                    );
+                }
+            }
+        }
+    }
+
     /// Main run function
     #[allow(clippy::too_many_arguments)]
     async fn run(
@@ -85,12 +172,46 @@ impl UTXOState {
         is_snapshot_mode: bool,
     ) -> Result<()> {
         let mut bootstrap_block_processed = false;
+        let mut pending_pool_registration_updates = None;
+        let mut pending_stake_registration_updates = None;
 
         loop {
             let mut current_block_info: Option<BlockInfo> = None;
             let Ok((_, message)) = utxo_deltas_subscription.read().await else {
                 return Err(anyhow!("Failed to read UTxO deltas subscription error"));
             };
+
+            if matches!(
+                message.as_ref(),
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                ))
+            ) {
+                let mut state = state.lock().await;
+                state
+                    .handle_rollback(message)
+                    .await
+                    .inspect_err(|e| error!("Rollback handling error: {e}"))
+                    .ok();
+                if is_snapshot_mode || bootstrap_block_processed {
+                    if let Some(subscription) = pool_registration_updates_subscription.as_mut() {
+                        Self::drain_rollback_or_buffer(
+                            &mut pending_pool_registration_updates,
+                            subscription,
+                        )
+                        .await?;
+                    }
+                    if let Some(subscription) = stake_registration_updates_subscription.as_mut() {
+                        Self::drain_rollback_or_buffer(
+                            &mut pending_stake_registration_updates,
+                            subscription,
+                        )
+                        .await?;
+                    }
+                }
+                continue;
+            }
 
             let new_epoch = match message.as_ref() {
                 Message::Cardano((block_info, _)) => {
@@ -117,19 +238,34 @@ impl UTXOState {
 
             // Read from pool registration updates subscription if available
             let mut pool_registration_updates = vec![];
+            let mut skipped_validation_side_stream = false;
             if is_snapshot_mode || bootstrap_block_processed {
                 if let Some(subscription) = pool_registration_updates_subscription.as_mut() {
-                    let Ok((_, message)) = subscription.read().await else {
-                        error!("Failed to read pool registration updates subscription error");
-                        continue;
-                    };
-                    if let Message::Cardano((
-                        block_info,
-                        CardanoMessage::PoolRegistrationUpdates(updates_msg),
-                    )) = message.as_ref()
+                    let message = match Self::try_read_validation_message_for_block(
+                        "pool registration updates",
+                        &mut pending_pool_registration_updates,
+                        subscription,
+                        current_block_info.as_ref().expect("current block info missing"),
+                    )
+                    .await
                     {
-                        Self::check_sync(&current_block_info, block_info);
-                        pool_registration_updates = updates_msg.updates.clone();
+                        Ok(message) => message,
+                        Err(_) => {
+                            error!("Failed to read pool registration updates subscription error");
+                            continue;
+                        }
+                    };
+                    if let Some(message) = message {
+                        if let Message::Cardano((
+                            block_info,
+                            CardanoMessage::PoolRegistrationUpdates(updates_msg),
+                        )) = message.as_ref()
+                        {
+                            Self::check_sync(&current_block_info, block_info);
+                            pool_registration_updates = updates_msg.updates.clone();
+                        }
+                    } else {
+                        skipped_validation_side_stream = true;
                     }
                 }
             }
@@ -138,18 +274,41 @@ impl UTXOState {
             let mut stake_registration_updates = vec![];
             if is_snapshot_mode || bootstrap_block_processed {
                 if let Some(subscription) = stake_registration_updates_subscription.as_mut() {
-                    let Ok((_, message)) = subscription.read().await else {
-                        error!("Failed to read stake registration updates subscription error");
-                        continue;
-                    };
-                    if let Message::Cardano((
-                        block_info,
-                        CardanoMessage::StakeRegistrationUpdates(updates_msg),
-                    )) = message.as_ref()
+                    let message = match Self::try_read_validation_message_for_block(
+                        "stake registration updates",
+                        &mut pending_stake_registration_updates,
+                        subscription,
+                        current_block_info.as_ref().expect("current block info missing"),
+                    )
+                    .await
                     {
-                        Self::check_sync(&current_block_info, block_info);
-                        stake_registration_updates = updates_msg.updates.clone();
+                        Ok(message) => message,
+                        Err(_) => {
+                            error!("Failed to read stake registration updates subscription error");
+                            continue;
+                        }
+                    };
+                    if let Some(message) = message {
+                        if let Message::Cardano((
+                            block_info,
+                            CardanoMessage::StakeRegistrationUpdates(updates_msg),
+                        )) = message.as_ref()
+                        {
+                            Self::check_sync(&current_block_info, block_info);
+                            stake_registration_updates = updates_msg.updates.clone();
+                        }
+                    } else {
+                        skipped_validation_side_stream = true;
                     }
+                }
+            }
+
+            if skipped_validation_side_stream {
+                if let Some(block_info) = current_block_info.as_ref() {
+                    info!(
+                        block = block_info.number,
+                        "Skipping validation-only registration updates"
+                    );
                 }
             }
 
@@ -206,18 +365,6 @@ impl UTXOState {
                     if !bootstrap_block_processed {
                         bootstrap_block_processed = true;
                     }
-                }
-
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
-                    let mut state = state.lock().await;
-                    state
-                        .handle_rollback(message)
-                        .await
-                        .inspect_err(|e| error!("Rollback handling error: {e}"))
-                        .ok();
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),

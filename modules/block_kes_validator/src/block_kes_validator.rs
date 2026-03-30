@@ -169,8 +169,7 @@ impl BlockKesValidator {
                     RollbackWrapper::Rollback(_) => None,
                 };
 
-            // read epoch boundary messages
-            if blocks_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if blocks_msg.as_ref().is_some_and(|(b, _)| b.new_epoch && b.epoch > 0) {
                 match ctx.consume_sync("params", params_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((_, params)) => {
                         state.handle_protocol_parameters(&params);

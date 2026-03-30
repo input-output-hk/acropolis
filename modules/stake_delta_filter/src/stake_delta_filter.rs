@@ -2,7 +2,10 @@
 //! Reads address deltas and filters out only stake addresses from it; also resolves pointer addresses.
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{
+        drain_rollback_or_buffer, read_or_pending_with_rollbacks, RollbackWrapper,
+        ValidationContext,
+    },
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -145,6 +148,38 @@ impl StakeDeltaFilterParams {
 }
 
 impl StakeDeltaFilter {
+    async fn read_current_address_deltas(
+        pending: &mut Option<RollbackWrapper<AddressDeltasMessage>>,
+        address_deltas_reader: &mut AddressDeltasReader,
+        current_block: &Arc<acropolis_common::BlockInfo>,
+    ) -> Result<RollbackWrapper<AddressDeltasMessage>> {
+        loop {
+            match read_or_pending_with_rollbacks(
+                pending,
+                address_deltas_reader.read_with_rollbacks(),
+            )
+            .await?
+            {
+                RollbackWrapper::Rollback(_) => {
+                    info!(
+                        expected = current_block.number,
+                        "Skipping delayed address-deltas rollback during recovery"
+                    );
+                }
+                RollbackWrapper::Normal((block_info, _))
+                    if block_info.number < current_block.number =>
+                {
+                    info!(
+                        expected = current_block.number,
+                        actual = block_info.number,
+                        "Skipping stale address deltas during rollback recovery"
+                    );
+                }
+                message => return Ok(message),
+            }
+        }
+    }
+
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let address_delta_reader = AddressDeltasReader::new(&context, &config).await?;
         let params = StakeDeltaFilterParams::init(config.clone())?;
@@ -434,6 +469,8 @@ impl StakeDeltaFilter {
         context: Arc<Context<Message>>,
         is_snapshot_mode: bool,
     ) -> Result<()> {
+        let mut pending_address_deltas = None;
+
         if !is_snapshot_mode {
             match address_deltas_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal(_) => {}
@@ -465,13 +502,25 @@ impl StakeDeltaFilter {
                     }
                     RollbackWrapper::Rollback(message) => {
                         publisher.publish_rollback(message).await?;
-                        None
+                        drain_rollback_or_buffer(
+                            &mut pending_address_deltas,
+                            address_deltas_reader.read_with_rollbacks(),
+                        )
+                        .await?;
+                        continue;
                     }
                 };
 
+            let current_block = block_info.clone().expect("certs block missing");
+
             match ctx.consume_sync(
                 "address deltas",
-                address_deltas_reader.read_with_rollbacks().await,
+                Self::read_current_address_deltas(
+                    &mut pending_address_deltas,
+                    &mut address_deltas_reader,
+                    &current_block,
+                )
+                .await,
             )? {
                 RollbackWrapper::Normal((block_info, deltas)) => {
                     let msg = state.handle_deltas(&block_info, &deltas);

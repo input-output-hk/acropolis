@@ -2,7 +2,10 @@
 //! Unpacks block bodies to get transaction fees
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{
+        drain_rollback_or_buffer, read_or_pending_with_rollbacks, RollbackWrapper,
+        ValidationContext,
+    },
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -188,6 +191,8 @@ impl EpochsState {
             }
         }
 
+        let mut pending_txs = None;
+
         loop {
             let mut ctx = ValidationContext::new(&context, &validation_topic, "epochs_state");
 
@@ -264,11 +269,18 @@ impl EpochsState {
                         "publishing rollback message",
                         epoch_activity_publisher.publish_rollback(raw_message).await,
                     );
+                    drain_rollback_or_buffer(&mut pending_txs, txs_reader.read_with_rollbacks())
+                        .await?;
+                    continue;
                 }
             }
 
             // Handle block txs second so new epoch's state don't get counted in the last one
-            match ctx.consume_sync("block_txs", txs_reader.read_with_rollbacks().await)? {
+            match ctx.consume_sync(
+                "block_txs",
+                read_or_pending_with_rollbacks(&mut pending_txs, txs_reader.read_with_rollbacks())
+                    .await,
+            )? {
                 RollbackWrapper::Normal((blk_info, msg)) => {
                     let span = info_span!("epochs_state.handle_block_txs", block = blk_info.number);
                     span.in_scope(|| state.handle_block_txs(&blk_info, &msg));

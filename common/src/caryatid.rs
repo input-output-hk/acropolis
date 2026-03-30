@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 use crate::messages::{CardanoMessage, Message, StateTransitionMessage};
 use crate::types::BlockInfo;
@@ -53,6 +53,39 @@ impl RollbackAwarePublisher<Message> {
 pub enum RollbackWrapper<T> {
     Rollback(Arc<Message>),
     Normal((Arc<BlockInfo>, Arc<T>)),
+}
+
+/// Consume a buffered rollback-aware message if present, otherwise read a fresh one.
+pub async fn read_or_pending_with_rollbacks<T, Fut>(
+    pending: &mut Option<RollbackWrapper<T>>,
+    read: Fut,
+) -> Result<RollbackWrapper<T>>
+where
+    Fut: Future<Output = Result<RollbackWrapper<T>>>,
+{
+    if let Some(message) = pending.take() {
+        Ok(message)
+    } else {
+        read.await
+    }
+}
+
+/// On a rollback iteration, consume a downstream rollback wrapper if present; otherwise
+/// buffer the first post-rollback normal message so the next synced iteration can use it.
+pub async fn drain_rollback_or_buffer<T, Fut>(
+    pending: &mut Option<RollbackWrapper<T>>,
+    read: Fut,
+) -> Result<()>
+where
+    Fut: Future<Output = Result<RollbackWrapper<T>>>,
+{
+    match read_or_pending_with_rollbacks(pending, read).await? {
+        RollbackWrapper::Rollback(_) => Ok(()),
+        message @ RollbackWrapper::Normal(_) => {
+            *pending = Some(message);
+            Ok(())
+        }
+    }
 }
 
 /// Declares locally tailored cardano reader struct, providing a lightweight wrapper around

@@ -29,6 +29,10 @@ download-max-age = "never"
 pause = "none"
 # Stop constraint likewise
 stop = "none"
+# Block to induce a rollback at
+rollback-at-block = 43176
+# Number of blocks to rollback (max is k)
+blocks-to-rollback = 10
 
 [module.snapshot-bootstrapper]
 epoch = 999
@@ -61,7 +65,7 @@ validators = [
 #           "cardano.validation.utxo",
 #           "cardano.validation.spo"
 ]
-# By default, the consesus module will skip validation for blocks 
+# By default, the consesus module will skip validation for blocks
 # from the Mithril snapshot but this can be set to true to force validation
 force-validation = false
 
@@ -211,6 +215,10 @@ port = 4340
 enabled = true
 address = "0.0.0.0"
 port = 4341
+
+[monitor]
+output = "monitor.json" # Write to a file named monitor.json
+frequency_secs = 5.0
 
 # Enable for message spying
 #[module.spy]

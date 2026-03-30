@@ -203,7 +203,7 @@ impl BlockVrfValidator {
                 RollbackWrapper::Rollback(_) => None,
             };
 
-            if block_msg.as_ref().map(|(blk, _)| blk.new_epoch && blk.epoch > 0).unwrap_or(true) {
+            if block_msg.as_ref().is_some_and(|(blk, _)| blk.new_epoch && blk.epoch > 0) {
                 // read epoch boundary messages
                 match ctx.consume_sync("params", params_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((_, params)) => {

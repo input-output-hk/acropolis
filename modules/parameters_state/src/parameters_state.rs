@@ -5,6 +5,7 @@ use acropolis_common::configuration::StartupMode;
 use acropolis_common::messages::{SnapshotMessage, SnapshotStateMessage, StateTransitionMessage};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
+    caryatid::RollbackAwarePublisher,
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
     queries::parameters::{
         ParametersStateQuery, ParametersStateQueryResponse, DEFAULT_PARAMETERS_QUERY_TOPIC,
@@ -78,27 +79,17 @@ impl ParametersStateConfig {
 }
 
 impl ParametersState {
-    fn publish_update(
-        config: &Arc<ParametersStateConfig>,
+    async fn publish_update(
+        publisher: &mut RollbackAwarePublisher<Message>,
         block: &BlockInfo,
         message: ProtocolParamsMessage,
     ) -> Result<()> {
-        let config = config.clone();
-
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::ProtocolParams(message),
         )));
 
-        tokio::spawn(async move {
-            config
-                .context
-                .publish(&config.protocol_parameters_topic, packed_message)
-                .await
-                .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}"));
-        });
-
-        Ok(())
+        publisher.publish(packed_message).await
     }
 
     async fn run(
@@ -107,6 +98,10 @@ impl ParametersState {
         mut enact_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         // Process the snapshot messages first to bootstrap state if needed
+        let mut publisher = RollbackAwarePublisher::new(
+            config.context.clone(),
+            config.protocol_parameters_topic.clone(),
+        );
 
         loop {
             let (_, message) = enact_s.read().await?;
@@ -133,7 +128,7 @@ impl ParametersState {
                             let new_params = state.handle_enact_state(&block.era, gov).await?;
 
                             // Publish protocol params message
-                            Self::publish_update(&config, block, new_params.clone())?;
+                            Self::publish_update(&mut publisher, block, new_params.clone()).await?;
 
                             // Commit state on params change
                             if current_params != new_params.params {
@@ -156,8 +151,7 @@ impl ParametersState {
                     _,
                     CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
                 )) => {
-                    // forward the rollback downstream
-                    config.context.publish(&config.protocol_parameters_topic, message).await?;
+                    publisher.publish(message).await?;
                 }
                 msg => error!("Unexpected message {msg:?} for enact state topic"),
             }

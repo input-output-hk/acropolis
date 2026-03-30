@@ -109,9 +109,9 @@ impl AddressState {
                 RollbackWrapper::Rollback(_) => None,
             };
 
-            // Read params message on epoch bounday or rollback to update rollback window
-            // length if needed and set epoch start block for volatile pruning
-            if deltas_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            // Read params message on epoch boundary to update rollback window length if
+            // needed and set epoch start block for volatile pruning.
+            if deltas_msg.as_ref().is_some_and(|(b, _)| b.new_epoch && b.epoch > 0) {
                 match params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((block_info, params)) => {
                         let mut state = state_mutex.lock().await;

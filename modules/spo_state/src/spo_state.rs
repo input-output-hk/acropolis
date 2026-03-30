@@ -1,7 +1,9 @@
 //! Acropolis SPO state module for Caryatid
 //! Accepts certificate events and derives the SPO state in memory
 
-use acropolis_common::caryatid::{RollbackWrapper, ValidationContext};
+use acropolis_common::caryatid::{
+    drain_rollback_or_buffer, read_or_pending_with_rollbacks, RollbackWrapper, ValidationContext,
+};
 use acropolis_common::configuration::StartupMode;
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::{
@@ -239,6 +241,11 @@ impl SPOState {
             }
         }
 
+        let mut pending_blocks = None;
+        let mut pending_withdrawals = None;
+        let mut pending_stake_deltas = None;
+        let mut pending_governance = None;
+
         // Main loop of synchronised messages
         loop {
             // Get a mutable state
@@ -259,12 +266,45 @@ impl SPOState {
                 RollbackWrapper::Rollback(message) => {
                     spo_state_publisher.publish_rollback(message.clone()).await?;
                     pool_registration_updates_publisher.publish_rollback(message.clone()).await?;
-                    None
+                    drain_rollback_or_buffer(
+                        &mut pending_blocks,
+                        block_reader.read_with_rollbacks(),
+                    )
+                    .await?;
+                    if let Some(reader) = withdrawals_reader.as_mut() {
+                        drain_rollback_or_buffer(
+                            &mut pending_withdrawals,
+                            reader.read_with_rollbacks(),
+                        )
+                        .await?;
+                    }
+                    if let Some(reader) = stake_deltas_reader.as_mut() {
+                        drain_rollback_or_buffer(
+                            &mut pending_stake_deltas,
+                            reader.read_with_rollbacks(),
+                        )
+                        .await?;
+                    }
+                    if let Some(reader) = gov_reader.as_mut() {
+                        drain_rollback_or_buffer(
+                            &mut pending_governance,
+                            reader.read_with_rollbacks(),
+                        )
+                        .await?;
+                    }
+                    continue;
                 }
             };
 
             // handle blocks (handle_mint) before handle_tx_certs in case of epoch boundary
-            match ctx.consume_sync("blocks", block_reader.read_with_rollbacks().await)? {
+            match ctx.consume_sync(
+                "blocks",
+                read_or_pending_with_rollbacks(
+                    &mut pending_blocks,
+                    block_reader.read_with_rollbacks(),
+                )
+                .await,
+            )? {
                 RollbackWrapper::Normal((block_info, block_msg)) => {
                     let span =
                         info_span!("spo_state.handle_block_header", block = block_info.number);
@@ -336,8 +376,7 @@ impl SPOState {
                 .await;
             }
 
-            // read from epoch-boundary messages only when it's a new epoch or rollback
-            if certs_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if certs_msg.as_ref().is_some_and(|(b, _)| b.new_epoch && b.epoch > 0) {
                 if let Some(reader) = spdd_reader.as_mut() {
                     // Handle SPDD
                     match ctx.consume_sync("spdd", reader.read_with_rollbacks().await)? {
@@ -437,7 +476,14 @@ impl SPOState {
 
             // Handle withdrawals
             if let Some(reader) = withdrawals_reader.as_mut() {
-                match ctx.consume_sync("withdrawals", reader.read_with_rollbacks().await)? {
+                match ctx.consume_sync(
+                    "withdrawals",
+                    read_or_pending_with_rollbacks(
+                        &mut pending_withdrawals,
+                        reader.read_with_rollbacks(),
+                    )
+                    .await,
+                )? {
                     RollbackWrapper::Normal((block_info, withdrawals_msg)) => {
                         let span =
                             info_span!("spo_state.handle_withdrawals", block = block_info.number);
@@ -453,7 +499,14 @@ impl SPOState {
 
             // Handle stake deltas
             if let Some(reader) = stake_deltas_reader.as_mut() {
-                match ctx.consume_sync("stake deltas", reader.read_with_rollbacks().await)? {
+                match ctx.consume_sync(
+                    "stake deltas",
+                    read_or_pending_with_rollbacks(
+                        &mut pending_stake_deltas,
+                        reader.read_with_rollbacks(),
+                    )
+                    .await,
+                )? {
                     RollbackWrapper::Normal((block_info, deltas_msg)) => {
                         let span =
                             info_span!("spo_state.handle_stake_deltas", block = block_info.number);
@@ -469,7 +522,14 @@ impl SPOState {
 
             // Handle governance
             if let Some(reader) = gov_reader.as_mut() {
-                match ctx.consume_sync("gov", reader.read_with_rollbacks().await)? {
+                match ctx.consume_sync(
+                    "gov",
+                    read_or_pending_with_rollbacks(
+                        &mut pending_governance,
+                        reader.read_with_rollbacks(),
+                    )
+                    .await,
+                )? {
                     RollbackWrapper::Normal((block_info, governance_msg)) => {
                         let span =
                             info_span!("spo_state.handle_governance", block = block_info.number);

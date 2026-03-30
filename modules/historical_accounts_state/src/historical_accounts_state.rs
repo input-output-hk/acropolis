@@ -146,8 +146,7 @@ impl HistoricalAccountsState {
                 RollbackWrapper::Rollback(_) => None,
             };
 
-            // Read from epoch-boundary messages only when it's a new epoch
-            if certs_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if certs_msg.as_ref().is_some_and(|(b, _)| b.new_epoch && b.epoch > 0) {
                 match params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((block_info, params)) => {
                         let mut state = state_mutex.lock().await;

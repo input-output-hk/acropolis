@@ -2,7 +2,10 @@
 //! Manages stake and reward accounts state
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{
+        drain_rollback_or_buffer, read_or_pending_with_rollbacks, RollbackWrapper,
+        ValidationContext,
+    },
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -268,6 +271,9 @@ impl AccountsState {
         // Track if this is the first epoch after snapshot bootstrap
         // We skip rewards calculation on the first epoch since pot deltas were already applied
         let mut skip_first_epoch_rewards = is_snapshot_mode;
+        let mut pending_withdrawals = None;
+        let mut pending_stake_deltas = None;
+        let mut pending_governance_procedures = None;
 
         // Main loop of synchronised messages
         loop {
@@ -299,12 +305,26 @@ impl AccountsState {
                     spo_rewards_publisher.publish_rollback(message.clone()).await?;
                     stake_reward_deltas_publisher.publish_rollback(message.clone()).await?;
                     stake_registration_updates_publisher.publish_rollback(message.clone()).await?;
-                    None
+                    drain_rollback_or_buffer(
+                        &mut pending_withdrawals,
+                        withdrawals_reader.read_with_rollbacks(),
+                    )
+                    .await?;
+                    drain_rollback_or_buffer(
+                        &mut pending_stake_deltas,
+                        stake_deltas_reader.read_with_rollbacks(),
+                    )
+                    .await?;
+                    drain_rollback_or_buffer(
+                        &mut pending_governance_procedures,
+                        governance_procedures_reader.read_with_rollbacks(),
+                    )
+                    .await?;
+                    continue;
                 }
             };
 
-            // Read from epoch-boundary messages only when it's a new epoch or rollback
-            if certs_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if certs_msg.as_ref().is_some_and(|(b, _)| b.new_epoch && b.epoch > 0) {
                 let mut stake_reward_deltas = if let Some((block_info, _)) = certs_msg.as_ref() {
                     // Applies rewards from previous epoch
                     match state
@@ -508,7 +528,11 @@ impl AccountsState {
             // Handle withdrawals
             match ctx.consume_sync(
                 "withdrawals",
-                withdrawals_reader.read_with_rollbacks().await,
+                read_or_pending_with_rollbacks(
+                    &mut pending_withdrawals,
+                    withdrawals_reader.read_with_rollbacks(),
+                )
+                .await,
             )? {
                 RollbackWrapper::Normal((block_info, withdrawals_msg)) => {
                     let span = info_span!(
@@ -527,7 +551,11 @@ impl AccountsState {
             // Handle stake address deltas
             match ctx.consume_sync(
                 "stake deltas",
-                stake_deltas_reader.read_with_rollbacks().await,
+                read_or_pending_with_rollbacks(
+                    &mut pending_stake_deltas,
+                    stake_deltas_reader.read_with_rollbacks(),
+                )
+                .await,
             )? {
                 RollbackWrapper::Normal((block_info, deltas_msg)) => {
                     let span = info_span!(
@@ -545,7 +573,11 @@ impl AccountsState {
 
             match ctx.consume_sync(
                 "gov procedures",
-                governance_procedures_reader.read_with_rollbacks().await,
+                read_or_pending_with_rollbacks(
+                    &mut pending_governance_procedures,
+                    governance_procedures_reader.read_with_rollbacks(),
+                )
+                .await,
             )? {
                 RollbackWrapper::Normal((block_info, procedures)) => {
                     let span = info_span!(

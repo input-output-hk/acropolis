@@ -109,8 +109,7 @@ impl HistoricalEpochsState {
                 RollbackWrapper::Rollback(_) => None,
             };
 
-            // Read from epoch-boundary messages only when it's a new epoch or rollback
-            if blocks_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if blocks_msg.as_ref().is_some_and(|(b, _)| b.new_epoch && b.epoch > 0) {
                 match params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((_, params)) => {
                         let mut state = state_mutex.lock().await;
