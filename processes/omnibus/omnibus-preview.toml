@@ -155,7 +155,10 @@ write-full-cache = "false"
 [module.accounts-state]
 # Optional subscription for when governance is active
 drep-state-topic = "cardano.drep.state"
+# Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.preview.csv"
+verify-rewards-files = "../../modules/accounts_state/test-data/rewards.preview.{}.csv"
+verify-spdd-files = "../../modules/accounts_state/test-data/spdd.preview.{}.csv"
 
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0

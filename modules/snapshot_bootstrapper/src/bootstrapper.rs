@@ -125,12 +125,13 @@ impl SnapshotBootstrapper {
             bootstrap_ctx.snapshot_path().display()
         );
         let start = Instant::now();
-        let parser = StreamingSnapshotParser::new(
-            bootstrap_ctx.snapshot_path().to_string_lossy().into_owned(),
-        );
+        let snapshot_path = bootstrap_ctx.snapshot_path();
+        let utxo_sidecar_path = bootstrap_ctx.utxo_sidecar_path();
+        let parser = StreamingSnapshotParser::new(snapshot_path.to_string_lossy().into_owned())
+            .with_utxo_sidecar_path(utxo_sidecar_path.to_string_lossy().into_owned());
         parser
             .parse(&mut publisher, cfg.startup.network_name.into())
-            .map_err(|e| BootstrapError::Parse(e.to_string()))?;
+            .map_err(|e| BootstrapError::Parse(format!("{e:#}")))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
         publisher
