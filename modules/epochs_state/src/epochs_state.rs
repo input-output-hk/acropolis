@@ -17,7 +17,6 @@ use acropolis_common::{
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -196,13 +195,9 @@ impl EpochsState {
 
             let block_msg =
                 match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((blk_info, blk_msg)) => {
-                        if blk_info.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(blk_info.number);
-                        }
-                        Some((blk_info, blk_msg))
-                    }
-                    RollbackWrapper::Rollback(message) => {
+                    RollbackWrapper::Normal((blk_info, blk_msg)) => Some((blk_info, blk_msg)),
+                    RollbackWrapper::Rollback((block_info, message)) => {
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
                         ctx.handle(
                             "publish_rollback",
                             epoch_activity_publisher.publish_rollback(message).await,

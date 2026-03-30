@@ -347,7 +347,7 @@ impl GovernanceState {
                 .consume_sync("gov_reader", readers.gov_reader.read_with_rollbacks().await)?
             {
                 RollbackWrapper::Normal(gov_msg) => Some(gov_msg),
-                RollbackWrapper::Rollback(message) => {
+                RollbackWrapper::Rollback((_, message)) => {
                     let mut state = state.lock().await;
                     state.publish_rollback(message).await?;
                     None

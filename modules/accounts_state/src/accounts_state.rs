@@ -20,7 +20,7 @@ use acropolis_common::{
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus, Era,
+    Era,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -283,22 +283,22 @@ impl AccountsState {
                 .consume_sync("certs_reader", certs_reader.read_with_rollbacks().await)?
             {
                 RollbackWrapper::Normal((block_info, certs_msg)) => {
-                    // Handle rollbacks on this topic only
-                    if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
-                    }
-
                     // Notify the state of the block (used to schedule reward calculations)
                     state.notify_block(&block_info);
 
                     Some((block_info, certs_msg))
                 }
-                RollbackWrapper::Rollback(message) => {
+                RollbackWrapper::Rollback((block_info, message)) => {
+                    // Handle rollbacks on this topic only
+                    state = history.lock().await.get_rolled_back_state(block_info.number);
+
+                    // Publish rollbacks downstream
                     drep_publisher.publish_rollback(message.clone()).await?;
                     spo_publisher.publish_rollback(message.clone()).await?;
                     spo_rewards_publisher.publish_rollback(message.clone()).await?;
                     stake_reward_deltas_publisher.publish_rollback(message.clone()).await?;
                     stake_registration_updates_publisher.publish_rollback(message.clone()).await?;
+
                     None
                 }
             };

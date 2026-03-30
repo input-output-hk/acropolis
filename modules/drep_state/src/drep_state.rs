@@ -18,7 +18,6 @@ use acropolis_common::{
         },
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -192,14 +191,11 @@ impl DRepState {
                 subs.certs_reader.read_with_rollbacks().await,
             )? {
                 RollbackWrapper::Normal(msg @ (blk_inf, _)) => {
-                    if blk_inf.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(blk_inf.number);
-                    }
                     let new_epoch =
                         (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch);
                     (Some(msg.clone()), new_epoch)
                 }
-                RollbackWrapper::Rollback(msg) => {
+                RollbackWrapper::Rollback((_, msg)) => {
                     ctx.handle(
                         "publish_rollback",
                         drep_state_publisher.publish_rollback(msg.clone()).await,
