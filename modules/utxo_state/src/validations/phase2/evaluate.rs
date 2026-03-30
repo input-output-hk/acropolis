@@ -384,6 +384,13 @@ mod tests {
     )]
     #[test_case(validation_fixture!(
         "conway",
+        "c926a7d3523442d434cb58b6813d12189a8a68b2860899948459878f46cd860b"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 3 - with Plutus V2 Script"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
         "332aac636f8476b1a91c0071a445103d8f55309c23bfddaf242732630efcf0ec",
         "always_fail"
     ) =>
@@ -408,7 +415,13 @@ mod tests {
 
         let tx_deltas = mapped_tx.convert_to_utxo_deltas(true);
 
-        let scripts_table = build_scripts_table(&tx_deltas, &ctx.utxos, |_| None);
+        let lookup_ref_script = |script_hash: &ScriptHash| {
+            ctx.reference_scripts
+                .iter()
+                .find(|(hash, _)| **hash == *script_hash)
+                .map(|(_, reference_script)| reference_script.clone())
+        };
+        let scripts_table = build_scripts_table(&tx_deltas, &ctx.utxos, lookup_ref_script);
 
         let genesis_values = GenesisValues::mainnet();
         let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
