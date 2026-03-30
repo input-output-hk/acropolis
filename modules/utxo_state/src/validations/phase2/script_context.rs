@@ -307,11 +307,8 @@ fn encode_tx_info<'a>(
 
     let datums_pd = encode_datums(&tx_info.datums, arena, version)?;
 
-    let tx_id = constr(
-        arena,
-        0,
-        vec![tx_info.tx_id.to_plutus_data(arena, version)?],
-    );
+    let tx_id = tx_info.tx_id.to_plutus_data(arena, version)?;
+    let tx_id_with_wrapper = constr(arena, 0, vec![tx_id]);
 
     match version {
         PlutusVersion::V1 => Ok(constr(
@@ -327,7 +324,7 @@ fn encode_tx_info<'a>(
                 valid_range,
                 sigs,
                 datums_pd,
-                tx_id,
+                tx_id_with_wrapper,
             ],
         )),
         PlutusVersion::V2 => {
@@ -355,7 +352,7 @@ fn encode_tx_info<'a>(
                     sigs,
                     redeemers_pd,
                     datums_pd,
-                    tx_id,
+                    tx_id_with_wrapper,
                 ],
             ))
         }
