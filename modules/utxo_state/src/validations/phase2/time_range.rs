@@ -1,11 +1,9 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use acropolis_common::genesis_values::GenesisValues;
-use acropolis_common::Slot;
+use acropolis_common::{genesis_values::GenesisValues, validation::ScriptContextError, Slot};
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::to_plutus_data::*;
-use acropolis_common::validation::ScriptContextError;
 
 /// POSIX time interval for transaction validity.
 ///
@@ -93,7 +91,6 @@ impl ToPlutusData for TimeRange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::genesis_values::GenesisValues;
 
     #[test]
     fn time_range_shelley_slot() {

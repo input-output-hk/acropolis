@@ -1,8 +1,10 @@
-use acropolis_common::{Address, Datum, DatumHash, UTXOValue, UTxOIdentifier, Value};
+use acropolis_common::{
+    validation::ScriptContextError, Address, Datum, DatumHash, ScriptRef, UTXOValue,
+    UTxOIdentifier, Value,
+};
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::to_plutus_data::*;
-use acropolis_common::validation::ScriptContextError;
 
 pub struct ResolvedInput {
     pub utxo_id: UTxOIdentifier,
@@ -90,7 +92,7 @@ pub fn encode_datum_option<'a>(
 // ============================================================================
 
 pub fn encode_script_ref<'a>(
-    script_ref: &Option<acropolis_common::ScriptRef>,
+    script_ref: &Option<ScriptRef>,
     arena: &'a Arena,
     version: PlutusVersion,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
@@ -114,7 +116,7 @@ pub fn encode_tx_out<'a>(
     address: &Address,
     value: &Value,
     datum: &Option<Datum>,
-    script_ref: &Option<acropolis_common::ScriptRef>,
+    script_ref: &Option<ScriptRef>,
     arena: &'a Arena,
     version: PlutusVersion,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
@@ -179,7 +181,9 @@ pub fn encode_datums<'a>(
             Ok(list(arena, tuples))
         }
         PlutusVersion::V2 | PlutusVersion::V3 => {
-            let pairs: Vec<_> = datums
+            let mut sorted_datums: Vec<_> = datums.iter().collect();
+            sorted_datums.sort_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
+            let pairs: Vec<_> = sorted_datums
                 .iter()
                 .map(|(hash, cbor_bytes)| {
                     let k = hash.to_plutus_data(arena, version)?;

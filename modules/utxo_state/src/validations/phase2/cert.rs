@@ -1,8 +1,9 @@
-use acropolis_common::{Deregistration, Registration, TxCertificate};
+use acropolis_common::{
+    validation::ScriptContextError, Deregistration, Registration, TxCertificate,
+};
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::to_plutus_data::*;
-use acropolis_common::validation::ScriptContextError;
 
 impl ToPlutusData for TxCertificate {
     fn to_plutus_data<'a>(

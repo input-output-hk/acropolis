@@ -4,7 +4,8 @@ use std::mem::ManuallyDrop;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use acropolis_common::{
-    CostModels, ReferenceScript, ScriptHash, ScriptLang, TxUTxODeltas, UTXOValue, UTxOIdentifier,
+    validation::Phase2ValidationError, CostModels, ReferenceScript, ScriptHash, ScriptLang,
+    TxUTxODeltas, UTXOValue, UTxOIdentifier,
 };
 use rayon::prelude::*;
 use rayon::ThreadPool;
@@ -19,7 +20,6 @@ use uplc_turbo::{
 };
 
 use super::script_context::ScriptContext;
-use acropolis_common::validation::Phase2ValidationError as PhaseTwoError;
 
 // =============================================================================
 // Evaluator Thread Pool
@@ -227,13 +227,13 @@ pub fn evaluate_scripts(
     scripts_table: &HashMap<ScriptHash, ReferenceScript>,
     cost_models: &CostModels,
     is_valid: bool,
-) -> Result<(), PhaseTwoError> {
+) -> Result<(), Phase2ValidationError> {
     if script_contexts.is_empty() {
         return Ok(());
     }
 
     // Run all script evaluations in parallel on the evaluator thread pool
-    let script_result: Result<(), PhaseTwoError> = evaluator_pool().install(|| {
+    let script_result: Result<(), Phase2ValidationError> = evaluator_pool().install(|| {
         script_contexts.par_iter().try_for_each(|sc| {
             let arena = arena_pool().acquire();
             evaluate_single_script(&arena, sc, scripts_table, cost_models)
@@ -245,7 +245,7 @@ pub fn evaluate_scripts(
         script_result
     } else {
         match script_result {
-            Ok(()) => Err(PhaseTwoError::ValidityStateError),
+            Ok(()) => Err(Phase2ValidationError::ValidityStateError),
             Err(_) => Ok(()),
         }
     }
@@ -257,7 +257,7 @@ fn evaluate_single_script(
     sc: &ScriptContext<'_>,
     scripts_table: &HashMap<ScriptHash, ReferenceScript>,
     cost_models: &CostModels,
-) -> Result<(), PhaseTwoError> {
+) -> Result<(), Phase2ValidationError> {
     let plutus_version = match &sc.script_lang {
         ScriptLang::PlutusV1 => PlutusVersion::V1,
         ScriptLang::PlutusV2 => PlutusVersion::V2,
@@ -267,13 +267,14 @@ fn evaluate_single_script(
     let common_version = to_common_version(plutus_version);
 
     // 1. Build script arguments
-    let args =
-        sc.to_script_args(arena, plutus_version).map_err(PhaseTwoError::ScriptContextError)?;
+    let args = sc
+        .to_script_args(arena, plutus_version)
+        .map_err(Phase2ValidationError::ScriptContextError)?;
 
     // 2. Look up script bytes
     let ref_script = scripts_table
         .get(&sc.script_hash)
-        .ok_or(PhaseTwoError::MissingScriptForHash(sc.script_hash))?;
+        .ok_or(Phase2ValidationError::MissingScriptForHash(sc.script_hash))?;
 
     let cbor_bytes = match ref_script {
         ReferenceScript::PlutusV1(bytes)
@@ -284,12 +285,12 @@ fn evaluate_single_script(
 
     // Script bytes are CBOR-wrapped (a CBOR byte string containing FLAT data).
     let script_bytes: serde_cbor::Value = serde_cbor::from_slice(cbor_bytes).map_err(|e| {
-        PhaseTwoError::UplcMachineError(format!("failed to CBOR-unwrap script bytes: {e}"))
+        Phase2ValidationError::UplcMachineError(format!("failed to CBOR-unwrap script bytes: {e}"))
     })?;
     let script_bytes = match script_bytes {
         serde_cbor::Value::Bytes(b) => b,
         _ => {
-            return Err(PhaseTwoError::UplcMachineError(
+            return Err(Phase2ValidationError::UplcMachineError(
                 "script CBOR is not a byte string".into(),
             ));
         }
@@ -297,20 +298,23 @@ fn evaluate_single_script(
 
     // 3. Get cost model for this version
     let cost_model = match plutus_version {
-        PlutusVersion::V1 => {
-            cost_models.plutus_v1.as_ref().ok_or(PhaseTwoError::MissingCostModel(common_version))?
-        }
-        PlutusVersion::V2 => {
-            cost_models.plutus_v2.as_ref().ok_or(PhaseTwoError::MissingCostModel(common_version))?
-        }
-        PlutusVersion::V3 => {
-            cost_models.plutus_v3.as_ref().ok_or(PhaseTwoError::MissingCostModel(common_version))?
-        }
+        PlutusVersion::V1 => cost_models
+            .plutus_v1
+            .as_ref()
+            .ok_or(Phase2ValidationError::MissingCostModel(common_version))?,
+        PlutusVersion::V2 => cost_models
+            .plutus_v2
+            .as_ref()
+            .ok_or(Phase2ValidationError::MissingCostModel(common_version))?,
+        PlutusVersion::V3 => cost_models
+            .plutus_v3
+            .as_ref()
+            .ok_or(Phase2ValidationError::MissingCostModel(common_version))?,
     };
 
     // 4. Flat-decode the script
     let mut program = uplc_turbo::flat::decode::<DeBruijn>(arena, &script_bytes)
-        .map_err(|e| PhaseTwoError::FlatDecodingError(e.to_string()))?;
+        .map_err(|e| Phase2ValidationError::FlatDecodingError(e.to_string()))?;
 
     // 5. Apply arguments to the program
     for arg in &args {
@@ -329,22 +333,22 @@ fn evaluate_single_script(
     match plutus_version {
         PlutusVersion::V1 | PlutusVersion::V2 => match result.term {
             Ok(term) => match term {
-                Term::Error => Err(PhaseTwoError::UplcMachineError(
+                Term::Error => Err(Phase2ValidationError::UplcMachineError(
                     "Error term evaluated".into(),
                 )),
                 _ => Ok(()),
             },
-            Err(e) => Err(PhaseTwoError::UplcMachineError(e.to_string())),
+            Err(e) => Err(Phase2ValidationError::UplcMachineError(e.to_string())),
         },
         // Per CIP-117: V3 scripts must evaluate to Constant(Unit)
         PlutusVersion::V3 => match result.term {
             Ok(Term::Constant(Constant::Unit)) => Ok(()),
-            Ok(_) => Err(PhaseTwoError::UplcMachineError(
+            Ok(_) => Err(Phase2ValidationError::UplcMachineError(
                 "evaluated to a non-unit term".into(),
             )),
             Err(e) => {
                 println!("error: {:?}", e);
-                Err(PhaseTwoError::UplcMachineError(e.to_string()))
+                Err(Phase2ValidationError::UplcMachineError(e.to_string()))
             }
         },
     }
@@ -394,13 +398,13 @@ mod tests {
         "332aac636f8476b1a91c0071a445103d8f55309c23bfddaf242732630efcf0ec",
         "always_fail"
     ) =>
-        matches Err(PhaseTwoError::UplcMachineError(_));
+        matches Err(Phase2ValidationError::UplcMachineError(_));
         "conway - invalid transaction - with always failed Plutus V3 Script"
     )]
     #[allow(clippy::result_large_err)]
     fn phase2_evalute_test(
         (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
-    ) -> Result<(), PhaseTwoError> {
+    ) -> Result<(), Phase2ValidationError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let raw_tx = tx.encode();
         let mapped_tx = acropolis_codec::map_transaction(
@@ -476,7 +480,7 @@ mod tests {
         );
 
         assert!(
-            matches!(result, Err(PhaseTwoError::MissingScriptForHash(_))),
+            matches!(result, Err(Phase2ValidationError::MissingScriptForHash(_))),
             "expected MissingScriptForHash, got: {result:?}"
         );
     }

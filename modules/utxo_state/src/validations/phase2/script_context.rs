@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-
-use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::{
-    DatumHash, GovActionId, KeyHash, NativeAssetsDelta, ProposalProcedure, Redeemer,
-    RedeemerPointer, RedeemerTag, ScriptHash, ScriptLang, ScriptPurpose, TxCertificateWithPos,
-    TxHash, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, Voter, VotingProcedures, Withdrawal,
+    genesis_values::GenesisValues, validation::ScriptContextError, Address, Datum, DatumHash,
+    GovActionId, KeyHash, NativeAssetDelta, NativeAssetsDelta, PolicyId, ProposalProcedure,
+    Redeemer, RedeemerPointer, RedeemerTag, ScriptHash, ScriptLang, ScriptPurpose, ScriptRef,
+    TxCertificateWithPos, TxHash, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, Voter,
+    VotingProcedures, Withdrawal,
 };
+use std::collections::HashMap;
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::governance::*;
@@ -13,7 +13,6 @@ use super::input::*;
 use super::time_range::*;
 use super::to_plutus_data::*;
 use super::value::encode_mint_value;
-use acropolis_common::validation::ScriptContextError;
 
 /// Complete transaction information record needed for Plutus script evaluation.
 /// Constructed from `TxUTxODeltas` with resolved UTXO inputs.
@@ -21,12 +20,7 @@ use acropolis_common::validation::ScriptContextError;
 pub struct TxInfo {
     pub inputs: Vec<ResolvedInput>,
     pub reference_inputs: Vec<ResolvedInput>,
-    pub outputs: Vec<(
-        acropolis_common::Address,
-        Value,
-        Option<acropolis_common::Datum>,
-        Option<acropolis_common::ScriptRef>,
-    )>,
+    pub outputs: Vec<(Address, Value, Option<Datum>, Option<ScriptRef>)>,
     pub fee: u64,
     pub mint: NativeAssetsDelta,
     pub certificates: Vec<TxCertificateWithPos>,
@@ -64,8 +58,10 @@ impl TxInfo {
             })
             .collect::<Result<Vec<_>, ScriptContextError>>()?;
 
-        let reference_inputs = tx_deltas
-            .reference_inputs
+        let mut sorted_ref_inputs = tx_deltas.reference_inputs.clone();
+        sorted_ref_inputs.sort();
+
+        let reference_inputs = sorted_ref_inputs
             .iter()
             .map(|utxo_id| {
                 let utxo_value =
@@ -184,12 +180,12 @@ pub fn build_script_contexts<'a>(
                 let datum = if redeemer.tag == RedeemerTag::Spend {
                     tx_info.inputs.get(redeemer.index as usize).and_then(|ri| {
                         match &ri.utxo_value.datum {
-                            Some(acropolis_common::Datum::Hash(hash)) => tx_info
+                            Some(Datum::Hash(hash)) => tx_info
                                 .datums
                                 .iter()
                                 .find(|(h, _)| h == hash)
                                 .map(|(_, b)| b.clone()),
-                            Some(acropolis_common::Datum::Inline(b)) => Some(b.clone()),
+                            Some(Datum::Inline(b)) => Some(b.clone()),
                             None => None,
                         }
                     })
@@ -597,10 +593,7 @@ fn build_script_purpose(
     tag: &RedeemerTag,
     index: u32,
     sorted_inputs: &[UTxOIdentifier],
-    mint: &[(
-        acropolis_common::PolicyId,
-        Vec<acropolis_common::NativeAssetDelta>,
-    )],
+    mint: &[(PolicyId, Vec<NativeAssetDelta>)],
     withdrawals: &[Withdrawal],
     certificates: &[TxCertificateWithPos],
     voting_procedures: Option<&VotingProcedures>,
@@ -679,11 +672,7 @@ mod tests {
     use acropolis_common::{NetworkId, TxIdentifier};
     use pallas::ledger::traverse::MultiEraTx;
 
-    fn build_test_deltas(
-        _ctx: &TestContext,
-        raw_tx: &[u8],
-        era: &str,
-    ) -> acropolis_common::TxUTxODeltas {
+    fn build_test_deltas(_ctx: &TestContext, raw_tx: &[u8], era: &str) -> TxUTxODeltas {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), raw_tx).unwrap();
         let raw_tx = tx.encode();
         let tx_identifier = TxIdentifier::new(4533644, 1);
@@ -704,7 +693,7 @@ mod tests {
             "a95d16e891e51f98a3b1d3fe862ed355ebc8abffb7a7269d86f775553d9e653f"
         );
         let tx_deltas = build_test_deltas(&ctx, &raw_tx, era);
-        let genesis_values = acropolis_common::genesis_values::GenesisValues::mainnet();
+        let genesis_values = GenesisValues::mainnet();
 
         let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
 
@@ -725,7 +714,7 @@ mod tests {
             "a95d16e891e51f98a3b1d3fe862ed355ebc8abffb7a7269d86f775553d9e653f"
         );
         let tx_deltas = build_test_deltas(&ctx, &raw_tx, era);
-        let genesis_values = acropolis_common::genesis_values::GenesisValues::mainnet();
+        let genesis_values = GenesisValues::mainnet();
 
         let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
         let scripts_needed = crate::utils::get_scripts_needed(&tx_deltas, &ctx.utxos);
@@ -734,7 +723,7 @@ mod tests {
 
         assert_eq!(contexts.len(), 1, "should have 1 script context");
         let sc = &contexts[0];
-        assert_eq!(sc.redeemer.tag, acropolis_common::RedeemerTag::Spend);
+        assert_eq!(sc.redeemer.tag, RedeemerTag::Spend);
         assert!(sc.datum.is_some(), "spending script should have datum");
     }
 
@@ -745,7 +734,7 @@ mod tests {
             "a95d16e891e51f98a3b1d3fe862ed355ebc8abffb7a7269d86f775553d9e653f"
         );
         let tx_deltas = build_test_deltas(&ctx, &raw_tx, era);
-        let genesis_values = acropolis_common::genesis_values::GenesisValues::mainnet();
+        let genesis_values = GenesisValues::mainnet();
 
         let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
         let scripts_needed = crate::utils::get_scripts_needed(&tx_deltas, &ctx.utxos);

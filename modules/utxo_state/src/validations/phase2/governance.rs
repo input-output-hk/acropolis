@@ -1,11 +1,10 @@
 use acropolis_common::{
-    Credential, DRepChoice, GovActionId, GovernanceAction, ProposalProcedure, StakeAddress, Vote,
-    Voter, VotingProcedures, Withdrawal,
+    validation::ScriptContextError, Credential, DRepChoice, GovActionId, GovernanceAction,
+    ProposalProcedure, StakeAddress, Vote, Voter, VotingProcedures, Withdrawal,
 };
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::to_plutus_data::*;
-use acropolis_common::validation::ScriptContextError;
 
 // ============================================================================
 // Withdrawals

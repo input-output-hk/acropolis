@@ -1,11 +1,10 @@
 use acropolis_common::{
-    Address, Credential, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-    StakeAddress,
+    validation::ScriptContextError, Address, Credential, ShelleyAddress,
+    ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, StakeAddress,
 };
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::to_plutus_data::*;
-use acropolis_common::validation::ScriptContextError;
 
 impl ToPlutusData for ShelleyAddressPaymentPart {
     fn to_plutus_data<'a>(

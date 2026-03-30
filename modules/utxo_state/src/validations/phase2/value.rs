@@ -1,8 +1,7 @@
-use acropolis_common::{NativeAssetsDelta, Value};
+use acropolis_common::{validation::ScriptContextError, NativeAssetsDelta, Value};
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::to_plutus_data::*;
-use acropolis_common::validation::ScriptContextError;
 
 impl ToPlutusData for Value {
     fn to_plutus_data<'a>(
@@ -24,9 +23,14 @@ impl ToPlutusData for Value {
             entries.push((bytes(arena, &[]), inner));
         }
 
-        for (policy_id, assets) in &self.assets {
+        let mut sorted_assets: Vec<_> = self.assets.iter().collect();
+        sorted_assets.sort_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
+
+        for (policy_id, assets) in sorted_assets {
             let policy = policy_id.to_plutus_data(arena, version)?;
-            let asset_pairs: Vec<_> = assets
+            let mut sorted_assets: Vec<_> = assets.iter().collect();
+            sorted_assets.sort_by(|a, b| a.name.as_slice().cmp(b.name.as_slice()));
+            let asset_pairs: Vec<_> = sorted_assets
                 .iter()
                 .map(|asset| {
                     let name = bytes(arena, asset.name.as_slice());
@@ -60,9 +64,14 @@ pub fn encode_mint_value<'a>(
         entries.push((bytes(arena, &[]), inner));
     }
 
-    for (policy_id, assets) in mint {
+    let mut sorted_mint: Vec<_> = mint.iter().collect();
+    sorted_mint.sort_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
+
+    for (policy_id, assets) in sorted_mint {
         let policy = policy_id.to_plutus_data(arena, version)?;
-        let asset_pairs: Vec<_> = assets
+        let mut sorted_assets: Vec<_> = assets.iter().collect();
+        sorted_assets.sort_by(|a, b| a.name.as_slice().cmp(b.name.as_slice()));
+        let asset_pairs: Vec<_> = sorted_assets
             .iter()
             .map(|asset| {
                 let name = bytes(arena, asset.name.as_slice());
