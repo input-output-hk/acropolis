@@ -51,7 +51,7 @@ impl RollbackAwarePublisher<Message> {
 
 #[derive(Debug)]
 pub enum RollbackWrapper<T> {
-    Rollback(Arc<Message>),
+    Rollback((Arc<BlockInfo>, Arc<Message>)),
     Normal((Arc<BlockInfo>, Arc<T>)),
 }
 
@@ -138,9 +138,9 @@ macro_rules! declare_cardano_reader {
                         RollbackWrapper::Normal((Arc::new(blk.clone()), Arc::new(body.clone()))),
                     ),
                     Message::Cardano((
-                        _blk,
+                        blk,
                         CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                    )) => Ok(RollbackWrapper::Rollback(res.clone())),
+                    )) => Ok(RollbackWrapper::Rollback((Arc::new(blk.clone()),res.clone()))),
                     msg => bail!("Unexpected message {msg:?} for {}", $param),
                 }
             }
@@ -228,8 +228,12 @@ impl ValidationContext {
                     self.current_block = Some(blk.clone());
                 }
             }
-            Ok(RollbackWrapper::Rollback(_)) => {
-                self.current_block = None;
+            Ok(RollbackWrapper::Rollback((blk, _msg))) => {
+                if self.current_block.is_some() {
+                    self.check_sync(handler, blk);
+                } else {
+                    self.current_block = Some(blk.clone());
+                }
             }
             Err(e) => {
                 self.current_block = None;
