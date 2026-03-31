@@ -273,3 +273,119 @@ impl ValidationContext {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use caryatid_sdk::{async_trait, MessageBus, Subscription};
+    use config::Config;
+    use std::time::Duration;
+
+    struct DummyBus;
+
+    #[async_trait]
+    impl MessageBus<Message> for DummyBus {
+        async fn publish(&self, _topic: &str, _message: Arc<Message>) -> Result<()> {
+            Ok(())
+        }
+
+        fn request_timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        async fn request(&self, _topic: &str, _message: Arc<Message>) -> Result<Arc<Message>> {
+            Err(anyhow!("unsupported request in tests"))
+        }
+
+        async fn subscribe(&self, _topic: &str) -> Result<Box<dyn Subscription<Message>>> {
+            Err(anyhow!("unsupported subscribe in tests"))
+        }
+
+        async fn shutdown(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn create_validation_context() -> ValidationContext {
+        let (_, startup_watch) = tokio::sync::watch::channel(true);
+        ValidationContext::new(
+            &Arc::new(Context {
+                config: Arc::new(Config::default()),
+                message_bus: Arc::new(DummyBus),
+                startup_watch,
+            }),
+            "test.validation",
+            "test_module",
+        )
+    }
+
+    fn test_block(number: u64) -> BlockInfo {
+        BlockInfo {
+            status: crate::BlockStatus::Volatile,
+            intent: crate::BlockIntent::ValidateAndApply,
+            slot: number,
+            number,
+            hash: crate::BlockHash::default(),
+            epoch: 0,
+            epoch_slot: 0,
+            new_epoch: false,
+            is_new_era: false,
+            tip_slot: None,
+            timestamp: 0,
+            era: crate::Era::default(),
+        }
+    }
+
+    fn rollback_message(block: &BlockInfo) -> Arc<Message> {
+        Arc::new(Message::Cardano((
+            block.clone(),
+            CardanoMessage::StateTransition(StateTransitionMessage::Rollback(crate::Point::Origin)),
+        )))
+    }
+
+    #[test]
+    fn consume_sync_sets_current_block_from_first_rollback() {
+        let mut ctx = create_validation_context();
+        let block = Arc::new(test_block(10));
+        let rollback = rollback_message(block.as_ref());
+
+        let consumed = ctx
+            .consume_sync(
+                "rollback",
+                Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((block.clone(), rollback))),
+            )
+            .expect("rollback should be consumed");
+
+        assert!(matches!(consumed, RollbackWrapper::Rollback(_)));
+        let current = ctx.get_current_block_opt().expect("current block should be set");
+        assert_eq!(current.number, block.number);
+    }
+
+    #[test]
+    fn consume_sync_records_validation_error_for_mismatched_rollback_block() {
+        let mut ctx = create_validation_context();
+        let first = Arc::new(test_block(10));
+        let second = Arc::new(test_block(11));
+
+        ctx.consume_sync(
+            "normal",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((first.clone(), Arc::new(1)))),
+        )
+        .expect("normal sync should succeed");
+
+        ctx.consume_sync(
+            "rollback",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
+                second.clone(),
+                rollback_message(second.as_ref()),
+            ))),
+        )
+        .expect("rollback sync should succeed");
+
+        assert_eq!(
+            ctx.get_current_block_opt().expect("current block should remain set").number,
+            first.number
+        );
+        assert!(ctx.get_validation().as_result().is_err());
+    }
+}
