@@ -131,16 +131,13 @@ impl<T> PrimaryRead<T> {
         !self.is_rollback() && self.block_info().intent.do_validation()
     }
 
-    pub fn needs_rollback_sync(&self) -> bool {
-        self.is_rollback() || self.needs_epoch_boundary_sync()
-    }
-
-    pub fn needs_epoch_boundary_sync(&self) -> bool {
-        matches!(self, Self::Normal { block_info, .. } if Self::is_epoch_boundary(block_info))
-    }
-
     pub fn epoch(&self) -> Option<u64> {
-        self.needs_epoch_boundary_sync().then_some(self.block_info().epoch)
+        match self {
+            Self::Normal { block_info, .. } if Self::is_epoch_boundary(block_info) => {
+                Some(block_info.epoch)
+            }
+            Self::Normal { .. } | Self::Rollback { .. } => None,
+        }
     }
 
     fn is_epoch_boundary(block_info: &BlockInfo) -> bool {

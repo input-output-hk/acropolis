@@ -206,7 +206,9 @@ impl DRepState {
             }
 
             // Keep the params reader synchronized on new epochs and explicit rollbacks.
-            if primary.needs_rollback_sync() {
+            let epoch = primary.epoch();
+            let sync_side_readers = primary.is_rollback() || epoch.is_some();
+            if sync_side_readers {
                 match ctx.consume_sync(
                     "params_reader",
                     subs.params_reader.read_with_rollbacks().await,
@@ -222,7 +224,7 @@ impl DRepState {
             }
 
             // Read from epoch-boundary messages only when it's a new epoch
-            if let Some(new_epoch) = primary.epoch() {
+            if let Some(new_epoch) = epoch {
                 state.update_num_dormant_epochs(new_epoch);
 
                 // Update expirations on epoch transition using the current protocol params.

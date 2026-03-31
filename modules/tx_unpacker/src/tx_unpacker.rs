@@ -315,7 +315,8 @@ impl TxUnpacker {
                 _ => error!("Unexpected message type: {raw_message:?}"),
             }
 
-            if primary.needs_rollback_sync() {
+            let sync_protocol_params = primary.is_rollback() || primary.epoch().is_some();
+            if sync_protocol_params {
                 if let Some(ref mut sub) = protocol_params_sub {
                     let protocol_parameters_msg =
                         Self::read_synced_protocol_params(sub, primary.block_info()).await?;
@@ -345,10 +346,11 @@ impl TxUnpacker {
                 }
             }
 
-            if primary.do_validation() {
-                if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
-                    if let Some(ref genesis) = genesis {
-                        if let Some(message) = primary.message() {
+            if let Some(message) = primary.message() {
+                if primary.do_validation() {
+                    if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref()
+                    {
+                        if let Some(ref genesis) = genesis {
                             if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
                                 message.as_ref()
                             {
