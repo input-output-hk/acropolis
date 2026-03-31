@@ -1,7 +1,7 @@
 //! Acropolis historical accounts state module for Caryatid
 //! Manages optional state data needed for Blockfrost alignment
 
-use acropolis_common::caryatid::RollbackWrapper;
+use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper};
 use acropolis_common::configuration::StartupMode;
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::{
@@ -99,22 +99,26 @@ impl HistoricalAccountsState {
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            match params_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {
-                    debug!("Consumed initial genesis params from params_subscription");
-                }
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial params");
-                }
-            };
-            match stake_deltas_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {
-                    debug!("Consumed initial stake deltas from stake_address_deltas_subscription");
-                }
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial stake deltas");
-                }
-            };
+            loop {
+                match params_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal(_) => {
+                        debug!("Consumed initial genesis params from params_subscription");
+                        break;
+                    }
+                    RollbackWrapper::Rollback(_) => {}
+                };
+            }
+            loop {
+                match stake_deltas_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal(_) => {
+                        debug!(
+                            "Consumed initial stake deltas from stake_address_deltas_subscription"
+                        );
+                        break;
+                    }
+                    RollbackWrapper::Rollback(_) => {}
+                };
+            }
         }
 
         // Background task to persist epochs sequentially
@@ -134,20 +138,16 @@ impl HistoricalAccountsState {
         // Main loop of synchronised messages
         loop {
             // Use certs_message as the synchroniser
-            let certs_msg = match certs_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, certs_msg)) => {
-                    let mut state = state_mutex.lock().await;
-                    if block_info.status == BlockStatus::RolledBack {
-                        state.volatile.rollback_before(block_info.number);
-                        state.volatile.next_block();
-                    }
-                    Some((block_info, certs_msg))
-                }
-                RollbackWrapper::Rollback(_) => None,
-            };
+            let primary = PrimaryRead::from_read(certs_reader.read_with_rollbacks().await?);
+
+            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+                let mut state = state_mutex.lock().await;
+                state.volatile.rollback_before(primary.block_info().number);
+                state.volatile.next_block();
+            }
 
             // Read from epoch-boundary messages only when it's a new epoch
-            if certs_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if primary.should_read_epoch_messages() {
                 match params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((block_info, params)) => {
                         let mut state = state_mutex.lock().await;
@@ -169,7 +169,8 @@ impl HistoricalAccountsState {
             }
 
             // Now handle the certs_message properly
-            if let Some((block_info, tx_certs_msg)) = &certs_msg {
+            if let Some(tx_certs_msg) = primary.message() {
+                let block_info = primary.block_info().clone();
                 let mut state = state_mutex.lock().await;
                 state.handle_tx_certificates(tx_certs_msg, block_info.epoch as u32);
             }
@@ -193,7 +194,8 @@ impl HistoricalAccountsState {
             }
 
             // Prune volatile and persist if needed
-            if let Some((current_block, _)) = certs_msg {
+            if primary.message().is_some() {
+                let current_block = primary.block_info().clone();
                 let should_prune = {
                     let state = state_mutex.lock().await;
                     state.ready_to_prune(&current_block)

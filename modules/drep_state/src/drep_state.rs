@@ -200,8 +200,8 @@ impl DRepState {
                     .cloned()
                     .expect("rollback primary read should include rollback message");
                 ctx.handle(
-                    "publish_rollback",
-                    drep_state_publisher.publish_rollback(rollback_message).await,
+                    "publish_message",
+                    drep_state_publisher.publish_message(rollback_message).await,
                 );
             }
 

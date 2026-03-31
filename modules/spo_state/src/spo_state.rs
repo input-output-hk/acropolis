@@ -1,7 +1,7 @@
 //! Acropolis SPO state module for Caryatid
 //! Accepts certificate events and derives the SPO state in memory
 
-use acropolis_common::caryatid::{RollbackWrapper, ValidationContext};
+use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper, ValidationContext};
 use acropolis_common::configuration::StartupMode;
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::{
@@ -219,10 +219,10 @@ impl SPOState {
             Self::wait_for_bootstrap(history.clone(), subscription).await?;
         } else {
             // Consume initial protocol parameters (only needed for genesis bootstrap)
-            match params_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {}
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial params");
+            loop {
+                match params_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal(_) => break,
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
         }
@@ -231,10 +231,10 @@ impl SPOState {
         // don't contain any stake, plus an extra parameter state (!unexplained)
         // !TODO this seems overly specific to our startup process
         if let Some(sub) = stake_deltas_reader.as_mut() {
-            match sub.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {}
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial stake deltas");
+            loop {
+                match sub.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal(_) => break,
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
         }
@@ -246,21 +246,22 @@ impl SPOState {
             let mut ctx = ValidationContext::new(&context, &validation_publish_topic, "spo_state");
 
             // Use certs_message as the synchroniser
-            let certs_msg = match ctx
-                .consume_sync("certs_reader", certs_reader.read_with_rollbacks().await)?
-            {
-                RollbackWrapper::Normal((block_info, certs_msg)) => Some((block_info, certs_msg)),
-                RollbackWrapper::Rollback((block_info, message)) => {
-                    // Handle rollbacks on this topic only
-                    state = history.lock().await.get_rolled_back_state(block_info.number);
+            let primary = PrimaryRead::from_sync(
+                &mut ctx,
+                "certs_reader",
+                certs_reader.read_with_rollbacks().await,
+            )?;
 
-                    // Publish rollbacks downstream
-                    spo_state_publisher.publish_rollback(message.clone()).await?;
-                    pool_registration_updates_publisher.publish_rollback(message.clone()).await?;
+            if primary.is_rollback() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
 
-                    None
-                }
-            };
+                let rollback_message = primary
+                    .rollback_message()
+                    .cloned()
+                    .expect("rollback primary read should include rollback message");
+                spo_state_publisher.publish(rollback_message.clone()).await?;
+                pool_registration_updates_publisher.publish(rollback_message).await?;
+            }
 
             // handle blocks (handle_mint) before handle_tx_certs in case of epoch boundary
             match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
@@ -302,7 +303,8 @@ impl SPOState {
             }
 
             // handle tx certificates
-            if let Some((block_info, tx_certs_msg)) = certs_msg.as_ref() {
+            if let Some(tx_certs_msg) = primary.message() {
+                let block_info = primary.block_info();
                 let span = info_span!("spo_state.handle_certs", block = block_info.number);
                 async {
                     let (message_opt, pool_registration_updates_message, outcomes) =
@@ -339,7 +341,7 @@ impl SPOState {
             }
 
             // read from epoch-boundary messages only when it's a new epoch or rollback
-            if certs_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if primary.should_read_epoch_messages() {
                 if let Some(reader) = spdd_reader.as_mut() {
                     // Handle SPDD
                     match ctx.consume_sync("spdd", reader.read_with_rollbacks().await)? {
@@ -502,10 +504,11 @@ impl SPOState {
             }
 
             // Commit the new state, publish validation outcome
-            if let Some((block_info, _)) = certs_msg {
+            if primary.message().is_some() {
+                let block_info = primary.block_info();
                 history.lock().await.commit(block_info.number, state);
 
-                if block_info.intent.do_validation() {
+                if primary.do_validation() {
                     ctx.publish().await;
                 }
             }

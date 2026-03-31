@@ -3,7 +3,7 @@
 
 use crate::immutable_historical_epochs_state::ImmutableHistoricalEpochsState;
 use crate::state::{HistoricalEpochsStateConfig, State};
-use acropolis_common::caryatid::RollbackWrapper;
+use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper};
 use acropolis_common::configuration::StartupMode;
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::{
@@ -73,12 +73,13 @@ impl HistoricalEpochsState {
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            match params_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {
-                    debug!("Consumed initial genesis params from params_subscription");
-                }
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial params");
+            loop {
+                match params_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal(_) => {
+                        debug!("Consumed initial genesis params from params_subscription");
+                        break;
+                    }
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
         }
@@ -98,19 +99,15 @@ impl HistoricalEpochsState {
         // Main loop of synchronised messages
         loop {
             // Use blocks_message as the synchroniser
-            let blocks_msg = match blocks_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, blocks_msg)) => {
-                    let mut state = state_mutex.lock().await;
-                    if block_info.status == BlockStatus::RolledBack {
-                        state.volatile.rollback_before(block_info.number);
-                    }
-                    Some((block_info, blocks_msg))
-                }
-                RollbackWrapper::Rollback(_) => None,
-            };
+            let primary = PrimaryRead::from_read(blocks_reader.read_with_rollbacks().await?);
+
+            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+                let mut state = state_mutex.lock().await;
+                state.volatile.rollback_before(primary.block_info().number);
+            }
 
             // Read from epoch-boundary messages only when it's a new epoch or rollback
-            if blocks_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if primary.should_read_epoch_messages() {
                 match params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((_, params)) => {
                         let mut state = state_mutex.lock().await;
@@ -131,7 +128,8 @@ impl HistoricalEpochsState {
             }
 
             // Prune volatile and persist if needed
-            if let Some((current_block, _)) = blocks_msg {
+            if primary.message().is_some() {
+                let current_block = primary.block_info().clone();
                 let should_prune = {
                     let state = state_mutex.lock().await;
                     state.ready_to_prune(&current_block)

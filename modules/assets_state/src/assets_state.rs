@@ -8,7 +8,7 @@ use crate::{
     state::{AssetsStorageConfig, State, StoreTransactions},
 };
 use acropolis_common::{
-    caryatid::RollbackWrapper,
+    caryatid::{PrimaryRead, RollbackWrapper},
     declare_cardano_reader,
     messages::{
         AddressDeltasMessage, AssetDeltasMessage, CardanoMessage, Message, StateQuery,
@@ -81,22 +81,24 @@ impl AssetsState {
         registry: Arc<Mutex<AssetRegistry>>,
     ) -> Result<()> {
         if let Some(reader) = utxo_deltas_reader.as_mut() {
-            match reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {
-                    debug!("Consumed initial message from utxo_deltas_subscription");
-                }
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial UTxO deltas");
+            loop {
+                match reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal(_) => {
+                        debug!("Consumed initial message from utxo_deltas_subscription");
+                        break;
+                    }
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
         }
         if let Some(reader) = address_deltas_reader.as_mut() {
-            match reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {
-                    debug!("Consumed initial message from address_deltas_subscription");
-                }
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial address deltas");
+            loop {
+                match reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal(_) => {
+                        debug!("Consumed initial message from address_deltas_subscription");
+                        break;
+                    }
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
         }
@@ -109,51 +111,49 @@ impl AssetsState {
             };
 
             // Asset deltas are the synchroniser
-            let block_info = match asset_deltas_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, deltas_msg)) => {
-                    if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
-                    }
+            let primary = PrimaryRead::from_read(asset_deltas_reader.read_with_rollbacks().await?);
 
-                    // Always handle the mint deltas (This is how assets get initialized)
-                    {
-                        let mut reg = registry.lock().await;
-                        state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut reg) {
-                            Ok((new_state, updated_asset_ids)) => {
-                                if let Some(ref address_state) = address_state {
-                                    let mut address_state = address_state.lock().await;
-                                    address_state.new_block(
-                                        block_info.number,
-                                        &updated_asset_ids,
-                                        &reg,
-                                    );
-                                }
-                                new_state
-                            }
-                            Err(e) => {
-                                error!("Asset deltas handling error: {e:#}");
-                                state
-                            }
-                        };
-                    }
+            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
 
-                    // Process CIP25 metadata updates
-                    if storage_config.store_info {
-                        let mut reg = registry.lock().await;
-                        state = match state
-                            .handle_cip25_metadata(&mut reg, &deltas_msg.cip25_metadata_updates)
-                        {
-                            Ok(new_state) => new_state,
-                            Err(e) => {
-                                error!("CIP-25 metadata handling error: {e:#}");
-                                state
+            if let Some(deltas_msg) = primary.message() {
+                // Always handle the mint deltas (This is how assets get initialized)
+                {
+                    let mut reg = registry.lock().await;
+                    state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut reg) {
+                        Ok((new_state, updated_asset_ids)) => {
+                            if let Some(ref address_state) = address_state {
+                                let mut address_state = address_state.lock().await;
+                                address_state.new_block(
+                                    primary.block_info().number,
+                                    &updated_asset_ids,
+                                    &reg,
+                                );
                             }
-                        };
-                    }
-                    Some(block_info)
+                            new_state
+                        }
+                        Err(e) => {
+                            error!("Asset deltas handling error: {e:#}");
+                            state
+                        }
+                    };
                 }
-                RollbackWrapper::Rollback(_) => None,
-            };
+
+                // Process CIP25 metadata updates
+                if storage_config.store_info {
+                    let mut reg = registry.lock().await;
+                    state = match state
+                        .handle_cip25_metadata(&mut reg, &deltas_msg.cip25_metadata_updates)
+                    {
+                        Ok(new_state) => new_state,
+                        Err(e) => {
+                            error!("CIP-25 metadata handling error: {e:#}");
+                            state
+                        }
+                    };
+                }
+            }
 
             // Handle UTxO deltas if subscription is registered (store-info or store-transactions enabled)
             if let Some(reader) = utxo_deltas_reader.as_mut() {
@@ -205,7 +205,8 @@ impl AssetsState {
             }
 
             // Commit state
-            if let Some(block_info) = block_info {
+            if primary.message().is_some() {
+                let block_info = primary.block_info();
                 let mut h = history.lock().await;
                 h.commit(block_info.number, state);
             }

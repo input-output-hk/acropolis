@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -341,18 +341,19 @@ impl GovernanceState {
                 "governance_state",
             );
 
-            let gov_msg = match vld
-                .consume_sync("gov_reader", readers.gov_reader.read_with_rollbacks().await)?
-            {
-                RollbackWrapper::Normal(gov_msg) => Some(gov_msg),
-                RollbackWrapper::Rollback((_, message)) => {
-                    context.publish(&config.enact_publish_topic, message).await?;
-                    None
-                }
-            };
+            let primary = PrimaryRead::from_sync(
+                &mut vld,
+                "gov_reader",
+                readers.gov_reader.read_with_rollbacks().await,
+            )?;
+
+            if let Some(message) = primary.rollback_message() {
+                context.publish(&config.enact_publish_topic, message.clone()).await?;
+            }
 
             async {
-                if let Some((blk_g, gov_procs)) = gov_msg.as_ref() {
+                if let Some(gov_procs) = primary.message() {
+                    let blk_g = primary.block_info();
                     if blk_g.new_epoch {
                         // New governance from new epoch means that we must prepare all governance
                         // outcome for the previous epoch.
@@ -414,10 +415,8 @@ impl GovernanceState {
             }
             .await?;
 
-            if let Some((blk_info, _)) = gov_msg {
-                if blk_info.intent.do_validation() {
-                    vld.publish().await;
-                }
+            if primary.do_validation() {
+                vld.publish().await;
             }
         }
     }

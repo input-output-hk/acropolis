@@ -69,7 +69,7 @@ impl BlockTotalsObserver for BlockTotalsPublisher {
             publisher
                 .lock()
                 .await
-                .publish_rollback(message)
+                .publish(message)
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish rollback: {e}"));
         }

@@ -7,7 +7,7 @@ use crate::stores::{fjall::FjallStore, Store};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::BlockStatus;
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     declare_cardano_reader,
     messages::{
         CardanoMessage, Message, ProtocolParamsMessage, RawBlockMessage, StateQuery,
@@ -140,51 +140,55 @@ impl ChainStore {
         let run_ctx = context.clone();
 
         context.run::<Result<(), anyhow::Error>, _>(async move {
-            match blocks_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, block)) => {
-                    if let Err(err) =
-                        State::handle_first_block(&store, block_info.as_ref(), block.as_ref())
-                    {
-                        panic!("Corrupted DB: {err}")
-                    };
-                }
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading blocks");
+            loop {
+                match blocks_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((block_info, block)) => {
+                        if let Err(err) =
+                            State::handle_first_block(&store, block_info.as_ref(), block.as_ref())
+                        {
+                            panic!("Corrupted DB: {err}")
+                        };
+                        break;
+                    }
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 
-            match params_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((_, params)) => params,
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial params");
+            loop {
+                match params_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((_, _params)) => break,
+                    RollbackWrapper::Rollback(_) => {}
                 }
-            };
+            }
 
             loop {
                 let mut ctx = ValidationContext::new(&run_ctx, &validation_topic, "chain_store");
 
                 let mut state = history.lock().await.get_or_init_with(State::new);
-                let block_msg = match ctx
-                    .consume_sync("blocks_reader", blocks_reader.read_with_rollbacks().await)?
-                {
-                    RollbackWrapper::Normal((block_info, block)) => {
-                        if block_info.status == BlockStatus::RolledBack {
-                            let mut history = history.lock().await;
-                            state = history.get_rolled_back_state(block_info.number);
-                            store.rollback(&block_info)?;
-                        }
+                let primary = PrimaryRead::from_sync(
+                    &mut ctx,
+                    "blocks_reader",
+                    blocks_reader.read_with_rollbacks().await,
+                )?;
 
-                        ctx.handle(
-                            "handle_new_block",
-                            State::handle_new_block(&store, block_info.as_ref(), block.as_ref()),
-                        );
+                if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+                    let mut history = history.lock().await;
+                    state = history.get_rolled_back_state(primary.block_info().number);
+                    store.rollback(primary.block_info())?;
+                }
 
-                        Some((block_info, block))
-                    }
-                    RollbackWrapper::Rollback(_) => None,
-                };
+                if let Some(block) = primary.message() {
+                    ctx.handle(
+                        "handle_new_block",
+                        State::handle_new_block(
+                            &store,
+                            primary.block_info().as_ref(),
+                            block.as_ref(),
+                        ),
+                    );
+                }
 
-                if block_msg.as_ref().map(|(b, _)| b.new_epoch).unwrap_or(true) {
+                if primary.should_read_epoch_messages() {
                     match ctx
                         .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                     {
@@ -195,7 +199,8 @@ impl ChainStore {
                     }
                 }
 
-                if let Some((block_info, _)) = block_msg {
+                if primary.message().is_some() {
+                    let block_info = primary.block_info();
                     let mut history = history.lock().await;
                     history.commit(block_info.number, state);
                 }

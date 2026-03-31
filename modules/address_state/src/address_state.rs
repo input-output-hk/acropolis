@@ -9,7 +9,7 @@ use crate::{
     state::{AddressStorageConfig, State},
 };
 use acropolis_common::{
-    caryatid::RollbackWrapper,
+    caryatid::{PrimaryRead, RollbackWrapper},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{AddressDeltasMessage, ProtocolParamsMessage, StateTransitionMessage},
@@ -69,14 +69,15 @@ impl AddressState {
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            match params_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {
-                    debug!("Consumed initial genesis params from params_subscription");
-                }
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial params");
-                }
-            };
+            loop {
+                match params_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal(_) => {
+                        debug!("Consumed initial genesis params from params_subscription");
+                        break;
+                    }
+                    RollbackWrapper::Rollback(_) => {}
+                };
+            }
         }
 
         // Background task to persist epochs sequentialy
@@ -96,22 +97,18 @@ impl AddressState {
         // Main loop of synchronised messages
         loop {
             // Address deltas are the synchroniser
-            let deltas_msg = match address_deltas_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, deltas_msg)) => {
-                    if block_info.status == BlockStatus::RolledBack {
-                        let mut state = state_mutex.lock().await;
-                        state.volatile.rollback_before(block_info.number);
-                        state.volatile.next_block();
-                    }
+            let primary =
+                PrimaryRead::from_read(address_deltas_reader.read_with_rollbacks().await?);
 
-                    Some((block_info, deltas_msg))
-                }
-                RollbackWrapper::Rollback(_) => None,
-            };
+            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+                let mut state = state_mutex.lock().await;
+                state.volatile.rollback_before(primary.block_info().number);
+                state.volatile.next_block();
+            }
 
             // Read params message on epoch bounday or rollback to update rollback window
             // length if needed and set epoch start block for volatile pruning
-            if deltas_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if primary.should_read_epoch_messages() {
                 match params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((block_info, params)) => {
                         let mut state = state_mutex.lock().await;
@@ -125,7 +122,8 @@ impl AddressState {
             }
 
             // Process address deltas into volatile and persist to disk if a full epoch is out of rollback window
-            if let Some((block_info, address_deltas_msg)) = deltas_msg {
+            if let Some(address_deltas_msg) = primary.message() {
+                let block_info = primary.block_info().clone();
                 let (should_prune, store, config, epoch);
                 {
                     let mut state = state_mutex.lock().await;

@@ -7,61 +7,22 @@ use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{Context, MessageBounds};
 use tracing::error;
 
-/// A utility to publish messages, which will only publish rollback messages if some work has been rolled back
+/// A utility to publish messages on a configured topic.
 pub struct RollbackAwarePublisher<M: MessageBounds> {
     /// Module context
     context: Arc<Context<M>>,
 
     /// Topic to publish on
     topic: String,
-
-    // At which slot did we publish our last non-rollback message
-    last_activity_at: Option<u64>,
 }
 
 impl RollbackAwarePublisher<Message> {
     pub fn new(context: Arc<Context<Message>>, topic: String) -> Self {
-        Self {
-            context,
-            topic,
-            last_activity_at: None,
-        }
+        Self { context, topic }
     }
 
     pub async fn publish(&mut self, message: Arc<Message>) -> Result<()> {
-        match message.as_ref() {
-            Message::Cardano((
-                block,
-                CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-            )) => {
-                if self.last_activity_at.is_some_and(|slot| slot >= block.slot) {
-                    self.last_activity_at = None;
-                    self.context.publish(&self.topic, message).await?;
-                }
-                Ok(())
-            }
-            Message::Cardano((block, _)) => {
-                self.last_activity_at = Some(block.slot);
-                self.context.publish(&self.topic, message).await
-            }
-            _ => self.context.publish(&self.topic, message).await,
-        }
-    }
-
-    /// Publish a rollback message without suppressing it based on prior activity.
-    /// This keeps synchronized downstream readers from desynchronizing when the
-    /// rollback point is ahead of the last message published on the topic.
-    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> Result<()> {
-        match message.as_ref() {
-            Message::Cardano((
-                _,
-                CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-            )) => {
-                self.last_activity_at = None;
-                self.context.publish(&self.topic, message).await
-            }
-            _ => self.publish(message).await,
-        }
+        self.context.publish(&self.topic, message).await
     }
 }
 
@@ -84,21 +45,25 @@ pub enum PrimaryRead<T> {
 }
 
 impl<T> PrimaryRead<T> {
+    pub fn from_read(input: RollbackWrapper<T>) -> Self {
+        match input {
+            RollbackWrapper::Normal((block_info, message)) => Self::Normal {
+                block_info,
+                message,
+            },
+            RollbackWrapper::Rollback((block_info, rollback_message)) => Self::Rollback {
+                block_info,
+                rollback_message,
+            },
+        }
+    }
+
     pub fn from_sync(
         ctx: &mut ValidationContext,
         handler: &str,
         input: Result<RollbackWrapper<T>>,
     ) -> Result<Self> {
-        match ctx.consume_sync(handler, input)? {
-            RollbackWrapper::Normal((block_info, message)) => Ok(Self::Normal {
-                block_info,
-                message,
-            }),
-            RollbackWrapper::Rollback((block_info, rollback_message)) => Ok(Self::Rollback {
-                block_info,
-                rollback_message,
-            }),
-        }
+        Ok(Self::from_read(ctx.consume_sync(handler, input)?))
     }
 
     pub fn block_info(&self) -> &Arc<BlockInfo> {
@@ -129,6 +94,14 @@ impl<T> PrimaryRead<T> {
 
     pub fn do_validation(&self) -> bool {
         !self.is_rollback() && self.block_info().intent.do_validation()
+    }
+
+    pub fn should_read_epoch_messages(&self) -> bool {
+        self.is_rollback() || self.should_read_epoch_transition_messages()
+    }
+
+    pub fn should_read_epoch_transition_messages(&self) -> bool {
+        self.epoch().is_some()
     }
 
     pub fn epoch(&self) -> Option<u64> {

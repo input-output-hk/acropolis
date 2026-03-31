@@ -2,7 +2,7 @@
 //! Manages stake and reward accounts state
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -232,34 +232,35 @@ impl AccountsState {
         // Skip genesis-specific initialization when starting from snapshot
         // (pots are already loaded from snapshot bootstrap data)
         if !is_snapshot_mode {
-            match params_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {}
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial params");
+            loop {
+                match params_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal(_) => break,
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
-            match governance_outcomes_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {}
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial gov outcomes");
+            loop {
+                match governance_outcomes_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal(_) => break,
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 
             // Initialisation messages
             {
-                match pot_deltas_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal((block_info, pot_deltas_msg)) => {
-                        let mut state = history.lock().await.get_current_state();
+                loop {
+                    match pot_deltas_reader.read_with_rollbacks().await? {
+                        RollbackWrapper::Normal((block_info, pot_deltas_msg)) => {
+                            let mut state = history.lock().await.get_current_state();
 
-                        state
-                            .handle_pot_deltas(&pot_deltas_msg)
-                            .inspect_err(|e| error!("Pots handling error: {e:#}"))
-                            .ok();
+                            state
+                                .handle_pot_deltas(&pot_deltas_msg)
+                                .inspect_err(|e| error!("Pots handling error: {e:#}"))
+                                .ok();
 
-                        history.lock().await.commit(block_info.number, state);
-                    }
-                    RollbackWrapper::Rollback(_) => {
-                        bail!("Unexpected rollback while reading initial pots");
+                            history.lock().await.commit(block_info.number, state);
+                            break;
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
             }
@@ -279,33 +280,33 @@ impl AccountsState {
 
             // Use certs_message as the synchroniser, but we have to handle it after the
             // epoch things, because they apply to the new epoch, not the last
-            let certs_msg = match ctx
-                .consume_sync("certs_reader", certs_reader.read_with_rollbacks().await)?
-            {
-                RollbackWrapper::Normal((block_info, certs_msg)) => {
-                    // Notify the state of the block (used to schedule reward calculations)
-                    state.notify_block(&block_info);
+            let primary = PrimaryRead::from_sync(
+                &mut ctx,
+                "certs_reader",
+                certs_reader.read_with_rollbacks().await,
+            )?;
 
-                    Some((block_info, certs_msg))
-                }
-                RollbackWrapper::Rollback((block_info, message)) => {
-                    // Handle rollbacks on this topic only
-                    state = history.lock().await.get_rolled_back_state(block_info.number);
+            if primary.is_rollback() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
 
-                    // Publish rollbacks downstream
-                    drep_publisher.publish_rollback(message.clone()).await?;
-                    spo_publisher.publish_rollback(message.clone()).await?;
-                    spo_rewards_publisher.publish_rollback(message.clone()).await?;
-                    stake_reward_deltas_publisher.publish_rollback(message.clone()).await?;
-                    stake_registration_updates_publisher.publish_rollback(message.clone()).await?;
-
-                    None
-                }
-            };
+                let rollback_message = primary
+                    .rollback_message()
+                    .cloned()
+                    .expect("rollback primary read should include rollback message");
+                drep_publisher.publish_message(rollback_message.clone()).await?;
+                spo_publisher.publish_message(rollback_message.clone()).await?;
+                spo_rewards_publisher.publish_message(rollback_message.clone()).await?;
+                stake_reward_deltas_publisher.publish_message(rollback_message.clone()).await?;
+                stake_registration_updates_publisher.publish_message(rollback_message).await?;
+            } else {
+                // Notify the state of the block (used to schedule reward calculations)
+                state.notify_block(primary.block_info());
+            }
 
             // Read from epoch-boundary messages only when it's a new epoch or rollback
-            if certs_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
-                let mut stake_reward_deltas = if let Some((block_info, _)) = certs_msg.as_ref() {
+            if primary.should_read_epoch_messages() {
+                let mut stake_reward_deltas = if primary.should_read_epoch_transition_messages() {
+                    let block_info = primary.block_info();
                     // Applies rewards from previous epoch
                     match state
                         .complete_previous_epoch_rewards_calculation(
@@ -338,7 +339,8 @@ impl AccountsState {
                 // b. POOLREAP: for any retiring pools, refund,
                 // remove from pool registry, clear delegations
 
-                if let Some((block_info, _)) = certs_msg.as_ref() {
+                if primary.should_read_epoch_transition_messages() {
+                    let block_info = primary.block_info();
                     // Apply pending MIRs before generating SPDD so they're included in active stake
                     state.apply_pending_mirs();
 
@@ -485,7 +487,8 @@ impl AccountsState {
             }
 
             // Now handle the certs_message properly
-            if let Some((block_info, tx_certs_msg)) = certs_msg.as_ref() {
+            if let Some(tx_certs_msg) = primary.message() {
+                let block_info = primary.block_info();
                 let span = info_span!("account_state.handle_certs", block = block_info.number);
                 async {
                     match state.handle_tx_certificates(
@@ -562,9 +565,10 @@ impl AccountsState {
             }
 
             // Commit the new state
-            if let Some((block_info, _)) = certs_msg {
+            if primary.message().is_some() {
+                let block_info = primary.block_info();
                 history.lock().await.commit(block_info.number, state);
-                if block_info.intent.do_validation() {
+                if primary.do_validation() {
                     ctx.publish().await;
                 }
             } else {
