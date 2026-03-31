@@ -136,7 +136,7 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
             publisher
                 .lock()
                 .await
-                .publish(message)
+                .publish_rollback(message)
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish rollback: {e}"));
         }
