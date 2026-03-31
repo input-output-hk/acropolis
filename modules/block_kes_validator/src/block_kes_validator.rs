@@ -2,7 +2,7 @@
 //! Validate KES signatures in the block header
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -155,19 +155,17 @@ impl BlockKesValidator {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(State::new);
 
-            let blocks_msg =
-                match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, blocks)) => Some((block_info, blocks)),
-                    RollbackWrapper::Rollback((block_info, _)) => {
-                        // handle rollback here
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
+            let primary = PrimaryRead::from_sync(
+                &mut ctx,
+                "block_reader",
+                block_reader.read_with_rollbacks().await,
+            )?;
 
-                        None
-                    }
-                };
+            if primary.is_rollback() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
 
-            // read epoch boundary messages
-            if blocks_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if primary.should_read_epoch_messages() {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {
@@ -188,8 +186,9 @@ impl BlockKesValidator {
                 }
             }
 
-            if let Some((block_info, block_msg)) = blocks_msg {
-                if block_info.intent.do_validation() {
+            if let Some(block_msg) = primary.message() {
+                let block_info = primary.block_info().clone();
+                if primary.do_validation() {
                     let span =
                         info_span!("block_kes_validator.validate", block = block_info.number);
                     async {

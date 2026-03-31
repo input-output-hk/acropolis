@@ -71,7 +71,7 @@ pub fn validate_output_network(
                 return Err(Box::new(UTxOValidationError::MalformedOutput {
                     output_index: *index,
                     reason: "Not a Shelley Address".to_string(),
-                }))
+                }));
             }
         };
         if !is_network_correct {
