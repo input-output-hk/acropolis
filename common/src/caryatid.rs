@@ -343,6 +343,13 @@ mod tests {
         )))
     }
 
+    fn assert_clean_validation(ctx: &mut ValidationContext) {
+        assert!(
+            ctx.get_validation().as_result().is_ok(),
+            "validation should remain clean"
+        );
+    }
+
     #[test]
     fn consume_sync_sets_current_block_from_first_rollback() {
         let mut ctx = create_validation_context();
@@ -387,5 +394,161 @@ mod tests {
             first.number
         );
         assert!(ctx.get_validation().as_result().is_err());
+    }
+
+    #[test]
+    fn consume_sync_normal_then_matching_rollback_keeps_validation_clean() {
+        let mut ctx = create_validation_context();
+        let block = Arc::new(test_block(42));
+
+        ctx.consume_sync(
+            "normal",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((block.clone(), Arc::new(7)))),
+        )
+        .expect("normal sync should succeed");
+
+        ctx.consume_sync(
+            "rollback",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
+                block.clone(),
+                rollback_message(block.as_ref()),
+            ))),
+        )
+        .expect("rollback sync should succeed");
+
+        assert_eq!(
+            ctx.get_current_block_opt().expect("current block should remain set").number,
+            block.number
+        );
+        assert_clean_validation(&mut ctx);
+    }
+
+    #[test]
+    fn consume_sync_rollback_then_matching_normal_keeps_validation_clean() {
+        let mut ctx = create_validation_context();
+        let block = Arc::new(test_block(24));
+
+        ctx.consume_sync(
+            "rollback",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
+                block.clone(),
+                rollback_message(block.as_ref()),
+            ))),
+        )
+        .expect("rollback sync should succeed");
+
+        ctx.consume_sync(
+            "normal",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((block.clone(), Arc::new(3)))),
+        )
+        .expect("normal sync should succeed");
+
+        assert_eq!(
+            ctx.get_current_block_opt().expect("current block should remain set").number,
+            block.number
+        );
+        assert_clean_validation(&mut ctx);
+    }
+
+    #[test]
+    fn consume_sync_error_clears_current_block() {
+        let mut ctx = create_validation_context();
+        let block = Arc::new(test_block(9));
+
+        ctx.consume_sync(
+            "normal",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((block, Arc::new(1)))),
+        )
+        .expect("normal sync should succeed");
+        assert!(ctx.get_current_block_opt().is_some());
+
+        let err = ctx
+            .consume_sync::<u8>("reader", Err(anyhow!("subscription failed")))
+            .expect_err("consume_sync should return an error");
+        assert!(
+            err.to_string().contains("Error handling sync block"),
+            "error should be wrapped by consume_sync"
+        );
+        assert!(
+            ctx.get_current_block_opt().is_none(),
+            "current block should be cleared on sync errors"
+        );
+    }
+
+    #[test]
+    fn get_block_info_errors_when_no_sync_block_seen() {
+        let ctx = create_validation_context();
+
+        let err = ctx.get_block_info().expect_err("missing block info should error");
+        assert!(
+            err.to_string().contains("Current block missing"),
+            "error message should explain missing current block"
+        );
+    }
+
+    #[test]
+    fn consume_sync_multiple_mismatches_keep_original_anchor_block() {
+        let mut ctx = create_validation_context();
+        let anchor = Arc::new(test_block(10));
+
+        ctx.consume_sync(
+            "normal",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((anchor.clone(), Arc::new(0)))),
+        )
+        .expect("initial sync should succeed");
+
+        ctx.consume_sync(
+            "mismatch-1",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
+                Arc::new(test_block(11)),
+                rollback_message(&test_block(11)),
+            ))),
+        )
+        .expect("first mismatch should still return Ok wrapper");
+
+        ctx.consume_sync(
+            "mismatch-2",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((
+                Arc::new(test_block(12)),
+                Arc::new(5),
+            ))),
+        )
+        .expect("second mismatch should still return Ok wrapper");
+
+        assert_eq!(
+            ctx.get_current_block_opt().expect("anchor block should remain set").number,
+            anchor.number
+        );
+        assert!(ctx.get_validation().as_result().is_err());
+    }
+
+    #[test]
+    fn consume_sync_matching_rollbacks_stay_in_sync() {
+        let mut ctx = create_validation_context();
+        let block = Arc::new(test_block(77));
+
+        ctx.consume_sync(
+            "rollback-1",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
+                block.clone(),
+                rollback_message(block.as_ref()),
+            ))),
+        )
+        .expect("first rollback should succeed");
+
+        ctx.consume_sync(
+            "rollback-2",
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
+                block.clone(),
+                rollback_message(block.as_ref()),
+            ))),
+        )
+        .expect("second rollback should succeed");
+
+        assert_eq!(
+            ctx.get_current_block_opt().expect("current block should remain set").number,
+            block.number
+        );
+        assert_clean_validation(&mut ctx);
     }
 }
