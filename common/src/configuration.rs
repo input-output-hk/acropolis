@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter, Result};
 pub const CONFIG_KEY_STARTUP_MODE: &str = "startup.startup-mode";
 pub const CONFIG_KEY_SYNC_MODE: &str = "startup.sync-mode";
 pub const CONFIG_KEY_BLOCK_FLOW_MODE: &str = "startup.block-flow-mode";
+pub const CONFIG_KEY_VALIDATE_ROLLBACK_HANDLING: &str = "validate-rollback-handling";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -91,5 +92,28 @@ impl Display for BlockFlowMode {
             BlockFlowMode::Direct => write!(f, "direct"),
             BlockFlowMode::Consensus => write!(f, "consensus"),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub struct ValidateRollbackHandling(Option<u64>);
+
+impl ValidateRollbackHandling {
+    pub fn from_config(config: &Config) -> Self {
+        config
+            .get_int(CONFIG_KEY_VALIDATE_ROLLBACK_HANDLING)
+            .ok()
+            .and_then(|b| u64::try_from(b).ok())
+            .map(|v| ValidateRollbackHandling(Some(v)))
+            .unwrap_or(ValidateRollbackHandling(None))
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.0.is_some()
+    }
+
+    pub fn value(&self) -> Option<u64> {
+        self.0
     }
 }

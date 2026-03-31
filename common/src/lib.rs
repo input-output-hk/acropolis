@@ -26,6 +26,7 @@ pub mod rational_number;
 pub mod resolver;
 pub mod rest_error;
 pub mod rest_helper;
+pub mod rollbacks;
 pub mod script;
 pub mod serialization;
 pub mod snapshot;
