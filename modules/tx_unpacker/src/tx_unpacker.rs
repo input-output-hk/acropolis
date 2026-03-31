@@ -108,10 +108,7 @@ impl TxUnpacker {
                     current_block = Some(block_info.clone());
 
                     // new_epoch? first_epoch?
-                    (
-                        block_info.intent.do_validation(),
-                        block_info.new_epoch,
-                    )
+                    (block_info.intent.do_validation(), block_info.new_epoch)
                 }
 
                 _ => {
