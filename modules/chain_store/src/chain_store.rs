@@ -164,7 +164,7 @@ impl ChainStore {
                 let mut ctx = ValidationContext::new(&run_ctx, &validation_topic, "chain_store");
 
                 let mut state = history.lock().await.get_or_init_with(State::new);
-                match ctx
+                let block_msg = match ctx
                     .consume_sync("blocks_reader", blocks_reader.read_with_rollbacks().await)?
                 {
                     RollbackWrapper::Normal((block_info, block)) => {
@@ -179,27 +179,26 @@ impl ChainStore {
                             State::handle_new_block(&store, block_info.as_ref(), block.as_ref()),
                         );
 
-                        if block_info.new_epoch {
-                            match ctx.consume_sync(
-                                "params_reader",
-                                params_reader.read_with_rollbacks().await,
-                            )? {
-                                RollbackWrapper::Normal((_, params)) => {
-                                    state.handle_new_params(params.as_ref());
-                                }
-                                RollbackWrapper::Rollback(_) => {}
-                            }
-                        }
-
-                        if block_info.intent.do_validation() {
-                            ctx.publish().await;
-                        }
-
-                        let mut history = history.lock().await;
-                        history.commit(block_info.number, state);
+                        Some((block_info, block))
                     }
-                    RollbackWrapper::Rollback(_) => {}
+                    RollbackWrapper::Rollback(_) => None,
                 };
+
+                if block_msg.as_ref().map(|(b, _)| b.new_epoch).unwrap_or(true) {
+                    match ctx
+                        .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
+                    {
+                        RollbackWrapper::Normal((_, params)) => {
+                            state.handle_new_params(params.as_ref());
+                        }
+                        RollbackWrapper::Rollback(_) => {}
+                    }
+                }
+
+                if let Some((block_info, _)) = block_msg {
+                    let mut history = history.lock().await;
+                    history.commit(block_info.number, state);
+                }
             }
         });
 
