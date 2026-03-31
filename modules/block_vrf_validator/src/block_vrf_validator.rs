@@ -2,7 +2,7 @@
 //! Validate the VRF calculation in the block header
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, SideReaderSync, ValidationContext},
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -192,19 +192,17 @@ impl BlockVrfValidator {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(State::new);
 
-            let (block_msg, sync_mode) =
-                match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, block_msg)) => {
-                        let sync_mode = SideReaderSync::from_block(&block_info);
-                        (Some((block_info, block_msg.header.clone())), sync_mode)
-                    }
-                    RollbackWrapper::Rollback((block_info, _)) => {
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
-                        (None, SideReaderSync::Rollback)
-                    }
-                };
+            let primary = PrimaryRead::from_sync(
+                &mut ctx,
+                "block_reader",
+                block_reader.read_with_rollbacks().await,
+            )?;
 
-            if sync_mode.sync_rollback_capable_readers() {
+            if primary.is_rollback() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
+
+            if primary.needs_rollback_sync() {
                 // Read readers that publish new-epoch snapshots or rollback markers.
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
@@ -215,7 +213,7 @@ impl BlockVrfValidator {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                if sync_mode.sync_epoch_boundary_readers() {
+                if primary.needs_epoch_boundary_sync() {
                     match ctx
                         .consume_sync("nonce_reader", nonce_reader.read_with_rollbacks().await)?
                     {
@@ -246,15 +244,16 @@ impl BlockVrfValidator {
                 }
             }
 
-            if let Some((block_info, block_header)) = block_msg.as_ref() {
-                if block_info.intent.do_validation() {
+            if let Some(block_msg) = primary.message() {
+                let block_info = primary.block_info().clone();
+                if primary.do_validation() {
                     let span =
                         info_span!("block_vrf_validator.validate", block = block_info.number);
                     async {
                         ctx.handle(
                             "validate",
                             state
-                                .validate(block_info, block_header, &genesis)
+                                .validate(&block_info, &block_msg.header, &genesis)
                                 .map_err(anyhow::Error::from),
                         );
                     }

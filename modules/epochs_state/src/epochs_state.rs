@@ -2,7 +2,7 @@
 //! Unpacks block bodies to get transaction fees
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, SideReaderSync, ValidationContext},
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -193,23 +193,26 @@ impl EpochsState {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));
 
-            let (block_msg, sync_mode) =
-                match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((blk_info, blk_msg)) => {
-                        let sync_mode = SideReaderSync::from_block(&blk_info);
-                        (Some((blk_info, blk_msg)), sync_mode)
-                    }
-                    RollbackWrapper::Rollback((block_info, message)) => {
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
-                        ctx.handle(
-                            "publish_rollback",
-                            epoch_activity_publisher.publish_rollback(message).await,
-                        );
-                        (None, SideReaderSync::Rollback)
-                    }
-                };
+            let primary = PrimaryRead::from_sync(
+                &mut ctx,
+                "block_reader",
+                block_reader.read_with_rollbacks().await,
+            )?;
 
-            if sync_mode.sync_rollback_capable_readers() {
+            if primary.is_rollback() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+
+                let rollback_message = primary
+                    .rollback_message()
+                    .cloned()
+                    .expect("rollback primary read should include rollback message");
+                ctx.handle(
+                    "publish_rollback",
+                    epoch_activity_publisher.publish_rollback(rollback_message).await,
+                );
+            }
+
+            if primary.needs_rollback_sync() {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {
@@ -219,20 +222,19 @@ impl EpochsState {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                if sync_mode.sync_epoch_boundary_readers() {
-                    let Some((blk_info, _)) = block_msg.as_ref() else {
-                        unreachable!("epoch-boundary sync requires a normal block message");
-                    };
-                    let ea = state.end_epoch(blk_info);
+                if primary.needs_epoch_boundary_sync() {
+                    let blk_info = primary.block_info().clone();
+                    let ea = state.end_epoch(&blk_info);
                     // publish epoch activity message
                     ctx.handle(
                         "epoch_activity_publisher.publish",
-                        epoch_activity_publisher.publish(blk_info, ea).await,
+                        epoch_activity_publisher.publish(&blk_info, ea).await,
                     );
                 }
             }
 
-            if let Some((blk_info, blk_msg)) = block_msg {
+            if let Some(blk_msg) = primary.message() {
+                let blk_info = primary.block_info().clone();
                 let header = ctx.handle(
                     "decode",
                     match MultiEraHeader::decode(blk_info.era as u8, None, &blk_msg.header) {
@@ -251,7 +253,7 @@ impl EpochsState {
                     }
                 });
 
-                if sync_mode.sync_epoch_boundary_readers() {
+                if primary.needs_epoch_boundary_sync() {
                     let active_nonce = state.get_active_nonce();
                     ctx.handle(
                         "publish",
