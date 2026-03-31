@@ -11,7 +11,6 @@ use acropolis_common::{
         StateTransitionMessage,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -157,28 +156,31 @@ impl BlockKesValidator {
             let mut state = history.lock().await.get_or_init_with(State::new);
 
             let blocks_msg =
-                match ctx.consume_sync("blocks", block_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, blocks)) => {
+                match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((block_info, blocks)) => Some((block_info, blocks)),
+                    RollbackWrapper::Rollback((block_info, _)) => {
                         // handle rollback here
-                        if block_info.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(block_info.number);
-                        }
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
 
-                        Some((block_info, blocks))
+                        None
                     }
-                    RollbackWrapper::Rollback(_) => None,
                 };
 
             // read epoch boundary messages
             if blocks_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
-                match ctx.consume_sync("params", params_reader.read_with_rollbacks().await)? {
+                match ctx
+                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
+                {
                     RollbackWrapper::Normal((_, params)) => {
                         state.handle_protocol_parameters(&params);
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                match ctx.consume_sync("spo", spo_state_reader.read_with_rollbacks().await)? {
+                match ctx.consume_sync(
+                    "spo_state_reader",
+                    spo_state_reader.read_with_rollbacks().await,
+                )? {
                     RollbackWrapper::Normal((_, spo_state)) => {
                         state.handle_spo_state(&spo_state);
                     }
@@ -192,7 +194,7 @@ impl BlockKesValidator {
                         info_span!("block_kes_validator.validate", block = block_info.number);
                     async {
                         let result_opt = ctx.handle(
-                            "kes",
+                            "validate",
                             state
                                 .validate(&block_info, &block_msg.header, &genesis)
                                 .map_err(anyhow::Error::from),
@@ -208,11 +210,13 @@ impl BlockKesValidator {
                     }
                     .instrument(span)
                     .await;
+
+                    // Publish validation outcomes
+                    ctx.publish().await;
                 }
 
-                // Commit the new state and publish validation outcomes
+                // Commit the new state
                 history.lock().await.commit(block_info.number, state);
-                ctx.publish().await;
             }
         }
     }
