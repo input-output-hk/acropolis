@@ -75,14 +75,14 @@ pub struct DRepUpdates {
     pub updates: Vec<DRepUpdateEvent>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct DRepUpdateEvent {
     pub tx_identifier: TxIdentifier,
     pub cert_index: u64,
     pub action: DRepActionUpdate,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub enum DRepActionUpdate {
     Registered,
     Updated,
@@ -94,7 +94,7 @@ pub struct DRepVotes {
     pub votes: Vec<VoteRecord>,
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, Debug, PartialEq)]
 pub struct VoteRecord {
     pub tx_hash: TxHash,
     pub vote_index: u32,

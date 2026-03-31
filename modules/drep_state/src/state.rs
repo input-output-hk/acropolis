@@ -17,7 +17,7 @@ use caryatid_sdk::Context;
 use std::{collections::HashMap, sync::Arc};
 use tracing::info;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct HistoricalDRepState {
     // Populated from the reg field in:
     // - DRepRegistration
@@ -50,7 +50,7 @@ impl HistoricalDRepState {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, PartialEq)]
 pub struct DRepRecordExtended {
     pub deposit: Lovelace,
     pub expired: bool,
@@ -59,7 +59,7 @@ pub struct DRepRecordExtended {
     pub last_active_epoch: u64,
 }
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default, PartialEq)]
 pub struct DRepStorageConfig {
     pub store_info: bool,
     pub store_delegators: bool,
@@ -78,7 +78,7 @@ impl DRepStorageConfig {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct State {
     pub config: DRepStorageConfig,
     pub dreps: HashMap<DRepCredential, DRepRecord>,

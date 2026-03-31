@@ -49,7 +49,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Anchor {
 }
 
 /// DRep Record - represents the current state of a DRep in the ledger
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct DRepRecord {
     /// Deposit amount in lovelace
     pub deposit: Lovelace,

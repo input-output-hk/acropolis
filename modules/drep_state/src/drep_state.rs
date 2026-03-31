@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{StartupMode, ValidateRollbackHandling},
     declare_cardano_reader,
     messages::{
         CardanoMessage, GovernanceProceduresMessage, Message, ProtocolParamsMessage,
@@ -17,6 +17,7 @@ use acropolis_common::{
             DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
         },
     },
+    rollbacks::{RollbackChecker, RollbackMemoryStore},
     state_history::{StateHistory, StateHistoryStore},
 };
 use anyhow::{bail, Result};
@@ -156,6 +157,7 @@ impl DRepState {
         context: Arc<Context<Message>>,
         storage_config: DRepStorageConfig,
         is_bootstrap_mode: bool,
+        mut rollback_handler: Option<RollbackChecker<RollbackMemoryStore<State>>>,
     ) -> Result<()> {
         // Wait for snapshot bootstrap first (if available)
         Self::wait_for_bootstrap(history.clone(), subs.snapshot, storage_config).await?;
@@ -286,6 +288,10 @@ impl DRepState {
                     ctx.publish().await;
                 }
 
+                if let Some(rollback_handler) = rollback_handler.as_mut() {
+                    rollback_handler.check(&state, block_info)?;
+                }
+
                 history.lock().await.commit(block_info.number, state);
             }
         }
@@ -310,6 +316,11 @@ impl DRepState {
         };
 
         let is_bootstrap_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
+
+        let rollback_handler =
+            ValidateRollbackHandling::from_config(config.as_ref()).value().map(|capture_block| {
+                RollbackChecker::new(capture_block, RollbackMemoryStore::<State>::default())
+            });
 
         // Subscribe for snapshot messages if bootstrapping from snapshot
         let snapshot_subscribe_topic = config
@@ -562,6 +573,7 @@ impl DRepState {
                 ctx_run,
                 storage_config,
                 is_bootstrap_mode,
+                rollback_handler,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
