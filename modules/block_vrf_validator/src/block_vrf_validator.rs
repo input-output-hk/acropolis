@@ -191,6 +191,8 @@ impl BlockVrfValidator {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(State::new);
 
+            let mut sync_epoch_boundary_readers = false;
+            let mut sync_rollback_capable_boundary_readers = false;
             let block_msg = match ctx
                 .consume_sync("block available", block_reader.read_with_rollbacks().await)?
             {
@@ -198,13 +200,18 @@ impl BlockVrfValidator {
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
+                    sync_epoch_boundary_readers = block_info.new_epoch && block_info.epoch > 0;
                     Some((block_info, block_msg.header.clone()))
                 }
-                RollbackWrapper::Rollback(_) => None,
+                RollbackWrapper::Rollback((block_info, _)) => {
+                    state = history.lock().await.get_rolled_back_state(block_info.number);
+                    sync_rollback_capable_boundary_readers = true;
+                    None
+                }
             };
 
-            if block_msg.as_ref().map(|(blk, _)| blk.new_epoch && blk.epoch > 0).unwrap_or(true) {
-                // read epoch boundary messages
+            if sync_epoch_boundary_readers || sync_rollback_capable_boundary_readers {
+                // Read readers that publish new-epoch snapshots or rollback markers.
                 match ctx.consume_sync("params", params_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((_, params)) => {
                         state.handle_protocol_parameters(&params);
@@ -212,11 +219,13 @@ impl BlockVrfValidator {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                match ctx.consume_sync("nonce", nonce_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((_, active_nonce)) => {
-                        state.handle_epoch_nonce(&active_nonce);
+                if sync_epoch_boundary_readers {
+                    match ctx.consume_sync("nonce", nonce_reader.read_with_rollbacks().await)? {
+                        RollbackWrapper::Normal((_, active_nonce)) => {
+                            state.handle_epoch_nonce(&active_nonce);
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
-                    RollbackWrapper::Rollback(_) => {}
                 }
 
                 let spo_state_msg =

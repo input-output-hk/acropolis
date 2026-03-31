@@ -49,7 +49,7 @@ impl DeltaPublisher {
     }
 
     pub async fn publish_rollback(&mut self, message: Arc<Message>) -> Result<()> {
-        self.0.publish(message).await
+        self.0.publish_rollback(message).await
     }
 }
 

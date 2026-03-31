@@ -47,6 +47,22 @@ impl RollbackAwarePublisher<Message> {
             _ => self.context.publish(&self.topic, message).await,
         }
     }
+
+    /// Publish a rollback message without suppressing it based on prior activity.
+    /// This keeps synchronized downstream readers from desynchronizing when the
+    /// rollback point is ahead of the last message published on the topic.
+    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> Result<()> {
+        match message.as_ref() {
+            Message::Cardano((
+                _,
+                CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+            )) => {
+                self.last_activity_at = None;
+                self.context.publish(&self.topic, message).await
+            }
+            _ => self.publish(message).await,
+        }
+    }
 }
 
 #[derive(Debug)]
