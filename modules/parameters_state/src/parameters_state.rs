@@ -2,12 +2,13 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use acropolis_common::caryatid::RollbackWrapper;
-use acropolis_common::configuration::StartupMode;
+use acropolis_common::configuration::{StartupMode, ValidateRollbackHandling};
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::{
     GovernanceOutcomesMessage, SnapshotMessage, SnapshotStateMessage, StateTransitionMessage,
 };
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::rollbacks::{RollbackChecker, RollbackMemoryStore};
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
     queries::parameters::{
@@ -115,6 +116,8 @@ impl ParametersState {
         config: Arc<ParametersStateConfig>,
         history: Arc<Mutex<StateHistory<State>>>,
         mut gov_reader: GovOutcomesReader,
+
+        mut rollback_handler: Option<RollbackChecker<RollbackMemoryStore<State>>>,
     ) -> Result<()> {
         // Process the snapshot messages first to bootstrap state if needed
 
@@ -139,6 +142,10 @@ impl ParametersState {
 
                             // Publish protocol params message
                             Self::publish_update(&config, block.as_ref(), new_params.clone())?;
+
+                            if let Some(rollback_handler) = rollback_handler.as_mut() {
+                                rollback_handler.check(&state, block.epoch)?;
+                            }
 
                             // Commit state on params change
                             if current_params != new_params.params {
@@ -170,6 +177,10 @@ impl ParametersState {
         let gov_reader = GovOutcomesReader::new(&context, &config).await?;
 
         let store_history = cfg.store_history;
+        let rollback_handler =
+            ValidateRollbackHandling::from_config(config.as_ref()).value().map(|capture_block| {
+                RollbackChecker::new(capture_block, RollbackMemoryStore::<State>::default())
+            });
 
         // Initalize state history
         let history = if store_history {
@@ -292,7 +303,7 @@ impl ParametersState {
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(cfg_clone, history_clone, gov_reader)
+            Self::run(cfg_clone, history_clone, gov_reader, rollback_handler)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });
