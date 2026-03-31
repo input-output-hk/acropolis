@@ -56,6 +56,20 @@ pub struct State {
     stake_addresses: Option<Arc<Mutex<StakeAddressMap>>>,
 }
 
+impl PartialEq for State {
+    fn eq(&self, other: &Self) -> bool {
+        self.store_config == other.store_config
+            && self.block == other.block
+            && self.epoch == other.epoch
+            && self.spos == other.spos
+            && self.pending_updates == other.pending_updates
+            && self.pending_deregistrations == other.pending_deregistrations
+            && self.protocol_parameters == other.protocol_parameters
+            && self.total_blocks_minted == other.total_blocks_minted
+            && self.historical_spos == other.historical_spos
+    }
+}
+
 impl State {
     pub fn new(config: &StoreConfig) -> Self {
         Self {

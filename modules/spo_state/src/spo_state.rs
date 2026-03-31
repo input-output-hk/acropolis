@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use acropolis_common::caryatid::{RollbackWrapper, ValidationContext};
-use acropolis_common::configuration::StartupMode;
+use acropolis_common::configuration::{StartupMode, ValidateRollbackHandling};
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::{
     EpochActivityMessage, GovernanceProceduresMessage, ProtocolParamsMessage, RawBlockMessage,
@@ -11,6 +11,7 @@ use acropolis_common::messages::{
 };
 use acropolis_common::queries::errors::QueryError;
 
+use acropolis_common::rollbacks::{RollbackChecker, RollbackMemoryStore};
 use acropolis_common::{
     messages::{
         CardanoMessage, Message, SPOStateMessage, SnapshotMessage, SnapshotStateMessage,
@@ -213,6 +214,8 @@ impl SPOState {
         mut spo_state_publisher: SPOStatePublisher,
         mut pool_registration_updates_publisher: PoolRegistrationUpdatesPublisher,
         validation_publish_topic: String,
+
+        mut rollback_handler: Option<RollbackChecker<RollbackMemoryStore<State>>>,
     ) -> Result<()> {
         // Wait for snapshot bootstrap if subscription is provided
         if let Some(subscription) = snapshot_subscription {
@@ -503,11 +506,14 @@ impl SPOState {
 
             // Commit the new state, publish validation outcome
             if let Some((block_info, _)) = certs_msg {
-                history.lock().await.commit(block_info.number, state);
+                if let Some(rollback_handler) = rollback_handler.as_mut() {
+                    rollback_handler.check(&state, &block_info)?;
+                }
 
                 if block_info.intent.do_validation() {
                     ctx.publish().await;
                 }
+                history.lock().await.commit(block_info.number, state);
             }
         }
     }
@@ -570,6 +576,11 @@ impl SPOState {
 
         // store config
         let store_config = StoreConfig::from(config.clone());
+
+        let rollback_handler =
+            ValidateRollbackHandling::from_config(config.as_ref()).value().map(|capture_block| {
+                RollbackChecker::new(capture_block, RollbackMemoryStore::<State>::default())
+            });
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -906,6 +917,7 @@ impl SPOState {
                 spo_state_publisher,
                 pool_registration_updates_publisher,
                 validation_publish_topic,
+                rollback_handler,
             )
             .await
             .unwrap_or_else(|e| error!("Failed to run SPO State: {e}"));

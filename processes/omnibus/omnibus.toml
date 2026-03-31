@@ -163,6 +163,8 @@ store-metadata = false
 store-updates = false
 # Enables /governance/dreps/{drep_id}/votes endpoint
 store-votes = false
+# Enables `RollbackChecker` for drep_state
+validate-rollback-handling = 20
 
 [module.drdd-state]
 store-drdd = false

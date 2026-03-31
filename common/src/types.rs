@@ -1306,7 +1306,7 @@ pub enum PoolUpdateAction {
 }
 
 /// Pool Update Event
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PoolUpdateEvent {
     pub tx_identifier: TxIdentifier,
     pub cert_index: u64,

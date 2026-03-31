@@ -12,7 +12,7 @@ const DEFAULT_STORE_VOTES: (&str, bool) = ("store-votes", false);
 const DEFAULT_STORE_BLOCKS: (&str, bool) = ("store-blocks", false);
 const DEFAULT_STORE_STAKE_ADDRESSES: (&str, bool) = ("store-stake-addresses", false);
 
-#[derive(Default, Debug, Clone, Serialize)]
+#[derive(Default, Debug, Clone, Serialize, PartialEq)]
 pub struct StoreConfig {
     pub store_epochs_history: bool,
     pub store_retired_pools: bool,

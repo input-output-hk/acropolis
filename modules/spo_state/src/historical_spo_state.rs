@@ -8,7 +8,7 @@ use crate::store_config::StoreConfig;
 
 // Historical SPO State
 // each field can be optional (according to configurations)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HistoricalSPOState {
     pub registration: Option<PoolRegistration>,
     pub updates: Option<Vec<PoolUpdateEvent>>,
