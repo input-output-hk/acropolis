@@ -252,8 +252,6 @@ impl ValidationContext {
             {
                 error!("Publish failed in {}: {:?}", self.module, e);
             }
-        } else {
-            self.validation.print_errors(&self.module, None);
         }
     }
 

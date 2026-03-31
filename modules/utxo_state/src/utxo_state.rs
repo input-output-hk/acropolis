@@ -201,8 +201,7 @@ impl UTXOState {
                 if block.intent.do_validation() {
                     async {
                         let mut state = state.lock().await;
-
-                        ctx.handle(
+                        ctx.merge(
                             "validate",
                             state
                                 .validate(
@@ -214,10 +213,8 @@ impl UTXOState {
                                     &genesis_values,
                                     phase2_enabled,
                                 )
-                                .await
-                                .map_err(|e| e.into()),
+                                .await,
                         );
-
                         ctx.publish().await;
                     }
                     .instrument(span)

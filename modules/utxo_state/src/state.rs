@@ -7,7 +7,7 @@ use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::messages::Message;
 use acropolis_common::protocol_params::ProtocolParams;
 use acropolis_common::state_history::{StateHistory, StateHistoryStore};
-use acropolis_common::validation::ValidationError;
+use acropolis_common::validation::{ValidationError, ValidationOutcomes};
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
@@ -882,7 +882,7 @@ impl State {
         protocol_params: &ProtocolParams,
         genesis_values: &GenesisValues,
         phase2_enabled: bool,
-    ) -> Result<(), Box<ValidationError>> {
+    ) -> Result<ValidationOutcomes> {
         let mut bad_transactions = Vec::new();
         let deltas = &deltas_msg.deltas;
 
@@ -925,13 +925,12 @@ impl State {
             }
         }
 
-        if bad_transactions.is_empty() {
-            Ok(())
-        } else {
-            Err(Box::new(ValidationError::BadTransactions {
-                bad_transactions,
-            }))
+        let mut validation_outcomes = ValidationOutcomes::new();
+        if !bad_transactions.is_empty() {
+            validation_outcomes.push(ValidationError::BadTransactions { bad_transactions });
         }
+
+        Ok(validation_outcomes)
     }
 }
 

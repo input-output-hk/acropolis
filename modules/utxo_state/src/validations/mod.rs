@@ -109,7 +109,7 @@ pub fn validate_tx(
                 &scripts_provided,
                 p2.lookup_reference_script,
             )
-            .map_err(|e| Box::new(TransactionValidationError::Phase2ValidationError(e)))?;
+            .map_err(|e| Box::new(e.into()))?;
         }
     }
 

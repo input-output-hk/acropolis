@@ -915,10 +915,17 @@ impl ValidationOutcomes {
     }
 
     pub fn print_errors(&mut self, module: &str, block: Option<&BlockInfo>) {
-        if !self.outcomes.is_empty() {
-            error!("{module}: block {block:?}, outcomes {:?}", self.outcomes);
-            self.outcomes.clear();
+        match self.as_result() {
+            Ok(_) => return,
+            Err(e) => {
+                let block_number = block.map_or("unknown".to_string(), |b| b.number.to_string());
+                error!(
+                    "{module}: block number: {block_number}, outcomes: {}",
+                    e.to_string()
+                );
+            }
         }
+        self.outcomes.clear();
     }
 
     pub async fn publish(
@@ -945,7 +952,6 @@ impl ValidationOutcomes {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub fn as_result(&self) -> anyhow::Result<()> {
         if self.outcomes.is_empty() {
             return Ok(());
