@@ -2,7 +2,7 @@
 //! Validate KES signatures in the block header
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{RollbackWrapper, SideReaderSync, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -155,19 +155,19 @@ impl BlockKesValidator {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(State::new);
 
-            let blocks_msg =
+            let (blocks_msg, sync_mode) =
                 match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, blocks)) => Some((block_info, blocks)),
+                    RollbackWrapper::Normal((block_info, blocks)) => {
+                        let sync_mode = SideReaderSync::from_block(&block_info);
+                        (Some((block_info, blocks)), sync_mode)
+                    }
                     RollbackWrapper::Rollback((block_info, _)) => {
-                        // handle rollback here
                         state = history.lock().await.get_rolled_back_state(block_info.number);
-
-                        None
+                        (None, SideReaderSync::Rollback)
                     }
                 };
 
-            // read epoch boundary messages
-            if blocks_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if sync_mode.sync_rollback_capable_readers() {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {

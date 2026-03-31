@@ -12,7 +12,6 @@ use acropolis_common::{
     },
     protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -165,7 +164,9 @@ impl BlockVrfValidator {
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
         };
 
-        // Consume initial protocol parameters or bootstap message
+        // Consume initial protocol parameters or bootstrap message.
+        // Epoch 0 nonce comes from genesis; the first published epoch nonce
+        // only arrives at the first epoch transition.
         if let Some(snapshot_subscription) = snapshot_subscription {
             Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
         } else {
@@ -177,16 +178,6 @@ impl BlockVrfValidator {
                 }
                 RollbackWrapper::Rollback(_) => {
                     bail!("Unexpected rollback while reading initial params");
-                }
-            }
-            match nonce_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, active_nonce)) => {
-                    let mut state = history.lock().await.get_or_init_with(State::new);
-                    state.handle_epoch_nonce(&active_nonce);
-                    history.lock().await.commit(block_info.number, state);
-                }
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial nonce");
                 }
             }
         }
@@ -204,9 +195,6 @@ impl BlockVrfValidator {
             let (block_msg, sync_mode) =
                 match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, block_msg)) => {
-                        if block_info.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(block_info.number);
-                        }
                         let sync_mode = SideReaderSync::from_block(&block_info);
                         (Some((block_info, block_msg.header.clone())), sync_mode)
                     }

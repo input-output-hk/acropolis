@@ -2,7 +2,7 @@
 //! Unpacks block bodies to get transaction fees
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{RollbackWrapper, SideReaderSync, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -17,7 +17,6 @@ use acropolis_common::{
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -194,13 +193,11 @@ impl EpochsState {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));
 
-            let block_msg =
+            let (block_msg, sync_mode) =
                 match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((blk_info, blk_msg)) => {
-                        if blk_info.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(blk_info.number);
-                        }
-                        Some((blk_info, blk_msg))
+                        let sync_mode = SideReaderSync::from_block(&blk_info);
+                        (Some((blk_info, blk_msg)), sync_mode)
                     }
                     RollbackWrapper::Rollback((block_info, message)) => {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -208,11 +205,11 @@ impl EpochsState {
                             "publish_rollback",
                             epoch_activity_publisher.publish_rollback(message).await,
                         );
-                        None
+                        (None, SideReaderSync::Rollback)
                     }
                 };
 
-            if block_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if sync_mode.sync_rollback_capable_readers() {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {
@@ -222,7 +219,10 @@ impl EpochsState {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                if let Some((blk_info, _)) = block_msg.as_ref() {
+                if sync_mode.sync_epoch_boundary_readers() {
+                    let Some((blk_info, _)) = block_msg.as_ref() else {
+                        unreachable!("epoch-boundary sync requires a normal block message");
+                    };
                     let ea = state.end_epoch(blk_info);
                     // publish epoch activity message
                     ctx.handle(
@@ -251,7 +251,7 @@ impl EpochsState {
                     }
                 });
 
-                if blk_info.new_epoch && blk_info.epoch > 0 {
+                if sync_mode.sync_epoch_boundary_readers() {
                     let active_nonce = state.get_active_nonce();
                     ctx.handle(
                         "publish",
