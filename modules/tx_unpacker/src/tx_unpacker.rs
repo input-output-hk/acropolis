@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use acropolis_common::{
+    caryatid::SideReaderSync,
     messages::{
         AssetDeltasMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
@@ -12,14 +13,14 @@ use acropolis_common::{
     validation::ValidationOutcomes,
     *,
 };
-use anyhow::Result;
-use caryatid_sdk::{module, Context, Subscription};
+use anyhow::{Result, bail};
+use caryatid_sdk::{Context, Subscription, module};
 use config::Config;
 use futures::future::join_all;
 use pallas::codec::minicbor::encode;
 use pallas::ledger::traverse::MultiEraTx;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, info_span, Instrument};
+use tracing::{Instrument, debug, error, info, info_span, warn};
 
 use crate::state::State;
 mod crypto;
@@ -91,14 +92,14 @@ impl TxUnpacker {
                 return Err(anyhow::anyhow!("Failed to read txs subscription"));
             };
 
-            let (validate, sync_protocol_params) = match message.as_ref() {
+            let (validate, sync_mode) = match message.as_ref() {
                 Message::Cardano((
                     block_info,
                     CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
                 )) => {
                     state = history.lock().await.get_rolled_back_state(block_info.number);
                     current_block = Some(block_info.clone());
-                    (false, true)
+                    (false, SideReaderSync::Rollback)
                 }
                 Message::Cardano((block_info, _)) => {
                     // Handle replayed rollback markers on this topic as well.
@@ -108,12 +109,15 @@ impl TxUnpacker {
                     current_block = Some(block_info.clone());
 
                     // new_epoch? first_epoch?
-                    (block_info.intent.do_validation(), block_info.new_epoch)
+                    (
+                        block_info.intent.do_validation(),
+                        SideReaderSync::from_block(block_info),
+                    )
                 }
 
                 _ => {
                     error!("Unexpected message type: {message:?}");
-                    (false, false)
+                    (false, SideReaderSync::None)
                 }
             };
 
@@ -321,9 +325,10 @@ impl TxUnpacker {
                 _ => error!("Unexpected message type: {message:?}"),
             }
 
-            if sync_protocol_params {
+            if sync_mode.sync_rollback_capable_readers() {
                 if let Some(ref mut sub) = protocol_params_sub {
-                    let (_, protocol_parameters_msg) = sub.read().await?;
+                    let protocol_parameters_msg =
+                        Self::read_synced_protocol_params(sub, &current_block).await?;
                     match protocol_parameters_msg.as_ref() {
                         Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) => {
                             Self::check_sync(&current_block, block_info);
@@ -510,6 +515,40 @@ impl TxUnpacker {
                     "Messages out of sync"
                 );
             }
+        }
+    }
+
+    async fn read_synced_protocol_params(
+        sub: &mut Box<dyn Subscription<Message>>,
+        current_block: &Option<BlockInfo>,
+    ) -> Result<Arc<Message>> {
+        loop {
+            let (_, protocol_parameters_msg) = sub.read().await?;
+            let block_info = match protocol_parameters_msg.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::ProtocolParams(_)))
+                | Message::Cardano((
+                    block_info,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => block_info,
+                _ => {
+                    bail!(
+                        "Unexpected protocol parameters message type: {protocol_parameters_msg:?}"
+                    );
+                }
+            };
+
+            if let Some(expected) = current_block {
+                if block_info.number < expected.number {
+                    warn!(
+                        expected = expected.number,
+                        actual = block_info.number,
+                        "Discarding stale protocol parameters message"
+                    );
+                    continue;
+                }
+            }
+
+            return Ok(protocol_parameters_msg);
         }
     }
 }

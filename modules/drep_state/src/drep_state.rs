@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the DRep State in memory
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{RollbackWrapper, SideReaderSync, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -186,12 +186,10 @@ impl DRepState {
 
             let mut ctx = ValidationContext::new(&context, &validation_topic, "drep_state");
 
-            let (certs_message, new_epoch, sync_params_reader) =
+            let (certs_message, sync_mode) =
                 match &ctx.consume_sync("certs", subs.certs.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal(msg @ (blk_inf, _)) => {
-                        let new_epoch =
-                            (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch);
-                        (Some(msg.clone()), new_epoch, new_epoch.is_some())
+                        (Some(msg.clone()), SideReaderSync::from_block(blk_inf))
                     }
                     RollbackWrapper::Rollback((block_info, msg)) => {
                         // Handle rollbacks on this topic only
@@ -203,12 +201,12 @@ impl DRepState {
                             drep_state_publisher.publish_rollback(msg.clone()).await,
                         );
 
-                        (None, None, true)
+                        (None, SideReaderSync::Rollback)
                     }
                 };
 
             // Keep the params reader synchronized on new epochs and explicit rollbacks.
-            if sync_params_reader {
+            if sync_mode.sync_rollback_capable_readers() {
                 match ctx.consume_sync("params", subs.params.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((_, msg)) => {
                         ctx.handle("params", state.update_protocol_params(&msg.params));
@@ -218,7 +216,7 @@ impl DRepState {
             }
 
             // Read from epoch-boundary messages only when it's a new epoch
-            if let Some(new_epoch) = new_epoch {
+            if let Some(new_epoch) = sync_mode.epoch() {
                 state.update_num_dormant_epochs(new_epoch);
 
                 // Update expirations on epoch transition using the current protocol params.

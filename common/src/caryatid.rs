@@ -71,6 +71,39 @@ pub enum RollbackWrapper<T> {
     Normal((Arc<BlockInfo>, Arc<T>)),
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SideReaderSync {
+    #[default]
+    None,
+    NewEpoch(u64),
+    Rollback,
+}
+
+impl SideReaderSync {
+    pub fn from_block(block: &BlockInfo) -> Self {
+        if block.new_epoch && block.epoch > 0 {
+            Self::NewEpoch(block.epoch)
+        } else {
+            Self::None
+        }
+    }
+
+    pub fn sync_rollback_capable_readers(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    pub fn sync_epoch_boundary_readers(self) -> bool {
+        matches!(self, Self::NewEpoch(_))
+    }
+
+    pub fn epoch(self) -> Option<u64> {
+        match self {
+            Self::NewEpoch(epoch) => Some(epoch),
+            Self::None | Self::Rollback => None,
+        }
+    }
+}
+
 /// Declares locally tailored cardano reader struct, providing a lightweight wrapper around
 /// Subscribers from topics. The Main intention is to get rid of boilerplate code, and simplify:
 /// (a) topic configuration, config parameters reading and reader initialization;

@@ -2,7 +2,7 @@
 //! Validate the VRF calculation in the block header
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{RollbackWrapper, SideReaderSync, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -191,26 +191,23 @@ impl BlockVrfValidator {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(State::new);
 
-            let mut sync_epoch_boundary_readers = false;
-            let mut sync_rollback_capable_boundary_readers = false;
-            let block_msg = match ctx
+            let (block_msg, sync_mode) = match ctx
                 .consume_sync("block available", block_reader.read_with_rollbacks().await)?
             {
                 RollbackWrapper::Normal((block_info, block_msg)) => {
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
-                    sync_epoch_boundary_readers = block_info.new_epoch && block_info.epoch > 0;
-                    Some((block_info, block_msg.header.clone()))
+                    let sync_mode = SideReaderSync::from_block(&block_info);
+                    (Some((block_info, block_msg.header.clone())), sync_mode)
                 }
                 RollbackWrapper::Rollback((block_info, _)) => {
                     state = history.lock().await.get_rolled_back_state(block_info.number);
-                    sync_rollback_capable_boundary_readers = true;
-                    None
+                    (None, SideReaderSync::Rollback)
                 }
             };
 
-            if sync_epoch_boundary_readers || sync_rollback_capable_boundary_readers {
+            if sync_mode.sync_rollback_capable_readers() {
                 // Read readers that publish new-epoch snapshots or rollback markers.
                 match ctx.consume_sync("params", params_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((_, params)) => {
@@ -219,7 +216,7 @@ impl BlockVrfValidator {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                if sync_epoch_boundary_readers {
+                if sync_mode.sync_epoch_boundary_readers() {
                     match ctx.consume_sync("nonce", nonce_reader.read_with_rollbacks().await)? {
                         RollbackWrapper::Normal((_, active_nonce)) => {
                             state.handle_epoch_nonce(&active_nonce);
