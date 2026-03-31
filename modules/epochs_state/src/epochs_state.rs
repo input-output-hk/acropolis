@@ -259,7 +259,19 @@ impl EpochsState {
                         }
                     });
                 }
-                RollbackWrapper::Rollback((_, message)) => {
+                RollbackWrapper::Rollback((block_info, message)) => {
+                    state = history.lock().await.get_rolled_back_state(block_info.number);
+
+                    match ctx.consume_sync(
+                        "protocol params",
+                        params_reader.read_with_rollbacks().await,
+                    )? {
+                        RollbackWrapper::Normal((_, params)) => {
+                            state.handle_protocol_parameters(&params);
+                        }
+                        RollbackWrapper::Rollback(_) => {}
+                    }
+
                     ctx.handle(
                         "publishing rollback message",
                         epoch_activity_publisher.publish_rollback(message).await,

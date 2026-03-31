@@ -91,16 +91,27 @@ impl TxUnpacker {
                 return Err(anyhow::anyhow!("Failed to read txs subscription"));
             };
 
-            let (new_epoch, validate) = match message.as_ref() {
+            let (validate, sync_protocol_params) = match message.as_ref() {
+                Message::Cardano((
+                    block_info,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    state = history.lock().await.get_rolled_back_state(block_info.number);
+                    current_block = Some(block_info.clone());
+                    (false, true)
+                }
                 Message::Cardano((block_info, _)) => {
-                    // Handle rollbacks on this topic only
+                    // Handle replayed rollback markers on this topic as well.
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
                     current_block = Some(block_info.clone());
 
                     // new_epoch? first_epoch?
-                    (block_info.new_epoch, block_info.intent.do_validation())
+                    (
+                        block_info.intent.do_validation(),
+                        block_info.new_epoch,
+                    )
                 }
 
                 _ => {
@@ -313,20 +324,31 @@ impl TxUnpacker {
                 _ => error!("Unexpected message type: {message:?}"),
             }
 
-            if new_epoch {
+            if sync_protocol_params {
                 if let Some(ref mut sub) = protocol_params_sub {
                     let (_, protocol_parameters_msg) = sub.read().await?;
-                    if let Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) =
-                        protocol_parameters_msg.as_ref()
-                    {
-                        Self::check_sync(&current_block, block_info);
-                        let span = info_span!(
-                            "tx_unpacker.handle_protocol_params",
-                            block = block_info.number
-                        );
-                        span.in_scope(|| {
-                            state.handle_protocol_params(params);
-                        });
+                    match protocol_parameters_msg.as_ref() {
+                        Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) => {
+                            Self::check_sync(&current_block, block_info);
+                            let span = info_span!(
+                                "tx_unpacker.handle_protocol_params",
+                                block = block_info.number
+                            );
+                            span.in_scope(|| {
+                                state.handle_protocol_params(params);
+                            });
+                        }
+                        Message::Cardano((
+                            block_info,
+                            CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                        )) => {
+                            Self::check_sync(&current_block, block_info);
+                        }
+                        _ => {
+                            error!(
+                                "Unexpected protocol parameters message type: {protocol_parameters_msg:?}"
+                            );
+                        }
                     }
                 }
             }

@@ -186,12 +186,12 @@ impl DRepState {
 
             let mut ctx = ValidationContext::new(&context, &validation_topic, "drep_state");
 
-            let (certs_message, new_epoch) =
+            let (certs_message, new_epoch, sync_params_reader) =
                 match &ctx.consume_sync("certs", subs.certs.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal(msg @ (blk_inf, _)) => {
                         let new_epoch =
                             (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch);
-                        (Some(msg.clone()), new_epoch)
+                        (Some(msg.clone()), new_epoch, new_epoch.is_some())
                     }
                     RollbackWrapper::Rollback((block_info, msg)) => {
                         // Handle rollbacks on this topic only
@@ -203,23 +203,26 @@ impl DRepState {
                             drep_state_publisher.publish_rollback(msg.clone()).await,
                         );
 
-                        (None, None)
+                        (None, None, true)
                     }
                 };
+
+            // Keep the params reader synchronized on new epochs and explicit rollbacks.
+            if sync_params_reader {
+                match ctx.consume_sync("params", subs.params.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((_, msg)) => {
+                        ctx.handle("params", state.update_protocol_params(&msg.params));
+                    }
+                    RollbackWrapper::Rollback(_) => {}
+                }
+            }
 
             // Read from epoch-boundary messages only when it's a new epoch
             if let Some(new_epoch) = new_epoch {
                 state.update_num_dormant_epochs(new_epoch);
 
-                // Read params subscription if store-info is enabled to obtain DRep expiration param.
-                // Update expirations on epoch transition
-                match ctx.consume_sync("params", subs.params.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((_, msg)) => {
-                        ctx.handle("params", state.update_protocol_params(&msg.params));
-                        ctx.handle("params", state.update_drep_expirations(new_epoch));
-                    }
-                    RollbackWrapper::Rollback(_) => {}
-                }
+                // Update expirations on epoch transition using the current protocol params.
+                ctx.handle("params", state.update_drep_expirations(new_epoch));
 
                 // Publish DRep state at the end of the epoch
                 let dreps = state.active_drep_list();
