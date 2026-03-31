@@ -418,6 +418,7 @@ impl Verifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acropolis_common::DelegatedStakeDefaultVote;
 
     #[test]
     fn test_verify_spdd() {
@@ -449,6 +450,7 @@ mod tests {
                     DelegatedStake {
                         active: *cmp,
                         active_delegators_count: 1,
+                        default_vote: DelegatedStakeDefaultVote::NoDefault,
                     },
                 );
             }

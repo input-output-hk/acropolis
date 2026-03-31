@@ -29,7 +29,7 @@ def match_keyhash_tuple(s: str):
         else:
             return None
 
-        return (type, g.group(2), int(g.group(3)), [int(v) for v in g.groups()[3:]])  # (y,n,a,nv,df)
+        return (type, g.group(2), int(g.group(3)), [int(v) for v in g.groups()[3:]])  # (y,n,a,nv,df,ig)
     else:
         return None
 
@@ -50,16 +50,23 @@ def parse_keyhash_tuple(s: str):
         vote = 'No'
     elif votes[2] != 0:
         vote = 'Abstain'
-    elif votes[3] != 0:
-        vote = 'Default'
     else:
-        vote = 'NoVote'
+        # Not voted
+        return None
 
-    stake_sum = sum(votes)
+    if votes[4] != 0:
+        vote = 'Default:' + vote
+
+    if len(votes) > 5 and votes[5] != 0:
+        # Not voted/invalid
+        return None
+
+    stake_sum = sum(votes[0:4])
     if stake != stake_sum:
         print("stake does not match votes in tuple: ", stake, stake_sum, s)
         return None
 
+    df = votes[4]
     if vote != '':
         return ((type,key), (vote, stake))
     else:
@@ -76,6 +83,7 @@ def parse_line(type: str, line: str):
     yes_stake_match = re.search(r'yesStake=(\d+)', line)
     total_active_stake_match = re.search(r'totalActiveStake=(\d+)', line)
     abstain_stake_match = re.search(r'abstainStake=(\d+)', line)
+    without_abstain_stake_match = re.search(r'totalExclAbstain=(\d+)', line)
 
     if not (epoch_match and txid_match and actionix_match):
         return None
@@ -83,9 +91,10 @@ def parse_line(type: str, line: str):
     epoch = int(epoch_match.group(1))
     txid = txid_match.group(1)
     actionix = int(actionix_match.group(1))
-    yes_stake = int(yes_stake_match.group(1)) if yes_stake_match else None
-    total_active_stake = int(total_active_stake_match.group(1)) if total_active_stake_match else None
-    abstain_stake = int(abstain_stake_match.group(1)) if abstain_stake_match else None
+    yes_stake = int(yes_stake_match.group(1)) if yes_stake_match else -1
+    total_active_stake = int(total_active_stake_match.group(1)) if total_active_stake_match else -1
+    abstain_stake = int(abstain_stake_match.group(1)) if abstain_stake_match else -1
+    without_abstain_stake = int(without_abstain_stake_match.group(1)) if without_abstain_stake_match else -1
 
     #if type == "DRep":
     #    print(f"Parsing {type}: {epoch}, {txid}, {actionix}, {yes_stake}, {total_active_stake}, {abstain_stake}")
@@ -118,6 +127,7 @@ def parse_line(type: str, line: str):
         "yes_stake": yes_stake,
         "total_active_stake": total_active_stake,
         "abstain_stake": abstain_stake,
+        "without_abstain_stake": without_abstain_stake,
         "keyhashes": keyhashes,
         "raw": line.strip()
     }
@@ -184,7 +194,7 @@ def apply_pattern(hash: str, idx: int, new_epoch: int, pattern: str) -> str:
     applied = pattern.replace("{action_id}", act_id).replace("{epoch}", str(new_epoch))
     return applied
 
-def epoch_change(output_pattern, records):
+def epoch_change(output_pattern, records, general_stats):
     grouped = aggregate_records(records)
     joined = {}
     for (type,epoch,hash,idx), recs in grouped.items():
@@ -205,6 +215,8 @@ def epoch_change(output_pattern, records):
         if recs['yes_stake'] != total_yes:
             print(f"Sanity check fail for {type},{key}: {total_yes} not sums to yes stake from Haskell: {recs['yes_stake']}")
 
+        general_stats[(epoch,hash,idx,type)] = (recs['yes_stake'], recs['total_active_stake'], recs['abstain_stake'], recs['without_abstain_stake'])
+
     for (epoch,hash,idx), recs in joined.items():
         filename = apply_pattern(hash, idx, epoch, output_pattern)
 
@@ -216,21 +228,50 @@ def epoch_change(output_pattern, records):
 
             f.write(f'"{pool_type}","{pool_id}","{vote}",{stake}\n')
 
+def make_stats(stats_file, general_stats):
+    fo = open(stats_file, "wt")
+    fo.write('"epoch","tx","tx-idx","committee-yes","committee-excl-abstain","DRep-yes","DRep-excl-abstain","SPO-yes","SPO-active","SPO-abstain"\n')
+    gstats = {}
+    for (epoch,tx,idx,type),(ys,ts,abss,ws) in general_stats.items():
+        old = {}
+        if (epoch,tx,idx) in gstats:
+            old = gstats[(epoch,tx,idx)]
+        old[type] = (ys,ts,abss,ws)
+        gstats[(epoch,tx,idx)] = old
+
+    for (epoch,tx,idx),v in gstats.items():
+        h = '%d,"%s",%d,0,0,' % (epoch,tx,idx)
+        if 'DRep' in v:
+            (ys,ts,abss,ws) = v['DRep']
+            h += '%d,%d,' % (ys,ws)
+        else:
+            h += '0,0,'
+
+        if 'SPO' in v:
+            (ys,ts,abss,ws) = v['SPO']
+            h += '%d,%d,%d' % (ys,ts,abss)
+        else:
+            h += '0,0,0'
+
+        fo.write(h + '\n')
+
 def main():
     import sys
 
-    if len(sys.argv) <= 2:
-        print("Usage: python convert_haskell_governance.py [input_file] [output_pattern]")
-        print("Example: python convert_haskell_governance.py input.txt 'output_{action_id}_{epoch}.csv'")
+    if len(sys.argv) <= 3:
+        print("Usage: python convert_haskell_governance.py [input_file] [output_pattern] [stat-file]")
+        print("Example: python convert_haskell_governance.py input.txt 'output_{action_id}_{epoch}.csv' 'stats.csv'")
         sys.exit(1)
 
     input_file = sys.argv[1]
     output_pattern = sys.argv[2]
+    stats_file = sys.argv[3]
 
     f = open(input_file, "r")
     records = []
     lineno = 0
     epoch = 0
+    general_stats = {}
 
     for line in f:
         lineno += 1
@@ -247,7 +288,7 @@ def main():
             #    print("Parsed all epochs")
             #    break
             if epoch < parsed['epoch']:
-                epoch_change(output_pattern, records)
+                epoch_change(output_pattern, records, general_stats)
                 print(f"New epoch {parsed['epoch']}")
                 records = []
                 epoch = parsed['epoch']
@@ -259,7 +300,7 @@ def main():
         parsed = parse_line("DRep", line)
         if parsed:
             if epoch < parsed['epoch']:
-                epoch_change(output_pattern, records)
+                epoch_change(output_pattern, records, general_stats)
                 print(f"New epoch {parsed['epoch']}")
                 records = []
                 epoch = parsed['epoch']
@@ -272,6 +313,8 @@ def main():
             continue
 
         print(f"Failed to parse line {lineno}, {line}")
+
+    make_stats(stats_file, general_stats)
 
 if __name__ == "__main__":
     main()

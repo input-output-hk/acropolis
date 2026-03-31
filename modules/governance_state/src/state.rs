@@ -37,20 +37,25 @@ impl State {
     pub fn new(
         verification_output_file: Option<String>,
         verify_votes_files: Option<String>,
-    ) -> Self {
-        Self {
+        verify_aggregated_votes_file: Option<String>,
+    ) -> Result<Self> {
+        Ok(Self {
             drep_stake_messages_count: 0,
 
             current_era: Era::default(),
 
             alonzo_babbage_voting: AlonzoBabbageVoting::default(),
-            conway_voting: ConwayVoting::new(verification_output_file, verify_votes_files),
+            conway_voting: ConwayVoting::new(
+                verification_output_file,
+                verify_votes_files,
+                verify_aggregated_votes_file,
+            )?,
 
             drep_stake: HashMap::new(),
             drep_no_confidence: 0,
             drep_abstain: 0,
             spo_stake: HashMap::new(),
-        }
+        })
     }
 
     /// Update current fields to new epoch values. The function should be called

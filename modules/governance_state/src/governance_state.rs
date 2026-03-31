@@ -80,6 +80,7 @@ const CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 
 const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 const VERIFY_VOTES_FILES: &str = "verify-votes-files";
+const VERIFY_AGGREGATE_VOTES_FILE: &str = "verify-aggregate-votes-file";
 
 /// Governance State module
 #[module(
@@ -96,6 +97,7 @@ pub struct GovernanceStateConfig {
     snapshot_subscribe_topic: String,
     verification_output_file: Option<String>,
     verify_votes_files: Option<String>,
+    verify_aggregated_votes_file: Option<String>,
 }
 
 struct Readers {
@@ -127,6 +129,10 @@ impl GovernanceStateConfig {
                 .map(Some)
                 .unwrap_or(None),
             verify_votes_files: config.get_string(VERIFY_VOTES_FILES).map(Some).unwrap_or_default(),
+            verify_aggregated_votes_file: config
+                .get_string(VERIFY_AGGREGATE_VOTES_FILE)
+                .map(Some)
+                .unwrap_or_default(),
         })
     }
 }
@@ -161,7 +167,9 @@ impl GovernanceState {
                         .map(|p| p.gov_action_lifetime as u64)
                         .unwrap_or(6); // Default to 6 epochs if not set
 
-                    locked.get_conway_voting_mut().bootstrap_from_snapshot(gov_msg, voting_length);
+                    locked
+                        .get_conway_voting_mut()
+                        .bootstrap_from_snapshot(gov_msg, voting_length)?;
                     info!(
                         "Snapshot Bootstrap message received, {} proposals loaded",
                         gov_msg.proposals.len()
@@ -245,7 +253,8 @@ impl GovernanceState {
         let state = Arc::new(Mutex::new(State::new(
             config.verification_output_file.clone(),
             config.verify_votes_files.clone(),
-        )));
+            config.verify_aggregated_votes_file.clone(),
+        )?));
 
         // Wait for snapshot bootstrap if subscription is provided
         if let Some(subscription) = snapshot_subscription {
