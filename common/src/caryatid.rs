@@ -151,16 +151,9 @@ macro_rules! declare_cardano_reader {
 pub struct ValidationContext {
     context: Arc<Context<Message>>,
     current_block: Option<Arc<BlockInfo>>,
-    current_wrapper: Option<SyncMessageWrapper>,
     validation: ValidationOutcomes,
     validation_topic: String,
     module: String,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum SyncMessageWrapper {
-    Normal,
-    Rollback,
 }
 
 impl ValidationContext {
@@ -168,7 +161,6 @@ impl ValidationContext {
         Self {
             validation: ValidationOutcomes::new(),
             current_block: None,
-            current_wrapper: None,
             context: context.clone(),
             validation_topic: validation_topic.to_owned(),
             module: module.to_owned(),
@@ -230,7 +222,6 @@ impl ValidationContext {
     ) -> Result<RollbackWrapper<T>> {
         match &inp {
             Ok(RollbackWrapper::Normal((blk, _msg))) => {
-                self.check_sync_wrapper(handler, SyncMessageWrapper::Normal);
                 if self.current_block.is_some() {
                     self.check_sync(handler, blk);
                 } else {
@@ -238,7 +229,6 @@ impl ValidationContext {
                 }
             }
             Ok(RollbackWrapper::Rollback((blk, _msg))) => {
-                self.check_sync_wrapper(handler, SyncMessageWrapper::Rollback);
                 if self.current_block.is_some() {
                     self.check_sync(handler, blk);
                 } else {
@@ -246,6 +236,7 @@ impl ValidationContext {
                 }
             }
             Err(e) => {
+                self.current_block = None;
                 bail!("Error handling sync block: {e}");
             }
         }
@@ -279,23 +270,6 @@ impl ValidationContext {
                     ),
                 );
             }
-        }
-    }
-
-    fn check_sync_wrapper(&mut self, handler: &str, actual: SyncMessageWrapper) {
-        if let Some(expected) = self.current_wrapper {
-            if expected != actual {
-                self.handle_error(
-                    handler,
-                    &anyhow!(
-                        "Messages out of sync wrapper: expected {:?}, actual {:?}",
-                        expected,
-                        actual
-                    ),
-                );
-            }
-        } else {
-            self.current_wrapper = Some(actual);
         }
     }
 }
@@ -423,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn consume_sync_normal_then_matching_rollback_records_validation_error() {
+    fn consume_sync_normal_then_matching_rollback_keeps_validation_clean() {
         let mut ctx = create_validation_context();
         let block = Arc::new(test_block(42));
 
@@ -446,11 +420,11 @@ mod tests {
             ctx.get_current_block_opt().expect("current block should remain set").number,
             block.number
         );
-        assert!(ctx.get_validation().as_result().is_err());
+        assert_clean_validation(&mut ctx);
     }
 
     #[test]
-    fn consume_sync_rollback_then_matching_normal_records_validation_error() {
+    fn consume_sync_rollback_then_matching_normal_keeps_validation_clean() {
         let mut ctx = create_validation_context();
         let block = Arc::new(test_block(24));
 
@@ -473,11 +447,11 @@ mod tests {
             ctx.get_current_block_opt().expect("current block should remain set").number,
             block.number
         );
-        assert!(ctx.get_validation().as_result().is_err());
+        assert_clean_validation(&mut ctx);
     }
 
     #[test]
-    fn consume_sync_error_preserves_current_block_for_later_sync_validation() {
+    fn consume_sync_error_clears_current_block() {
         let mut ctx = create_validation_context();
         let block = Arc::new(test_block(9));
 
@@ -496,21 +470,8 @@ mod tests {
             "error should be wrapped by consume_sync"
         );
         assert!(
-            ctx.get_current_block_opt().is_some(),
-            "current block should be preserved on sync errors"
-        );
-
-        ctx.consume_sync(
-            "post-error-mismatch",
-            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((
-                Arc::new(test_block(10)),
-                Arc::new(2),
-            ))),
-        )
-        .expect("subsequent sync call should still be processed");
-        assert!(
-            ctx.get_validation().as_result().is_err(),
-            "post-error mismatch should still be detected"
+            ctx.get_current_block_opt().is_none(),
+            "current block should be cleared on sync errors"
         );
     }
 
