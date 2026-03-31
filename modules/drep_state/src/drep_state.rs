@@ -207,8 +207,7 @@ impl DRepState {
 
             // Keep the params reader synchronized on new epochs and explicit rollbacks.
             let epoch = primary.epoch();
-            let sync_side_readers = primary.is_rollback() || epoch.is_some();
-            if sync_side_readers {
+            if primary.should_read_epoch_messages() {
                 match ctx.consume_sync(
                     "params_reader",
                     subs.params_reader.read_with_rollbacks().await,

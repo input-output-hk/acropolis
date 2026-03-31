@@ -212,9 +212,7 @@ impl EpochsState {
                 );
             }
 
-            let epoch = primary.epoch();
-            let sync_side_readers = primary.is_rollback() || epoch.is_some();
-            if sync_side_readers {
+            if primary.should_read_epoch_messages() {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {
@@ -224,7 +222,7 @@ impl EpochsState {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                if epoch.is_some() {
+                if primary.should_read_epoch_transition_messages() {
                     let blk_info = primary.block_info().clone();
                     let ea = state.end_epoch(&blk_info);
                     // publish epoch activity message
@@ -255,7 +253,7 @@ impl EpochsState {
                     }
                 });
 
-                if epoch.is_some() {
+                if primary.should_read_epoch_transition_messages() {
                     let active_nonce = state.get_active_nonce();
                     ctx.handle(
                         "publish",

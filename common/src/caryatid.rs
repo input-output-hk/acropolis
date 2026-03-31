@@ -131,6 +131,14 @@ impl<T> PrimaryRead<T> {
         !self.is_rollback() && self.block_info().intent.do_validation()
     }
 
+    pub fn should_read_epoch_messages(&self) -> bool {
+        self.is_rollback() || self.should_read_epoch_transition_messages()
+    }
+
+    pub fn should_read_epoch_transition_messages(&self) -> bool {
+        self.epoch().is_some()
+    }
+
     pub fn epoch(&self) -> Option<u64> {
         match self {
             Self::Normal { block_info, .. } if Self::is_epoch_boundary(block_info) => {
