@@ -111,7 +111,7 @@ macro_rules! impl_to_plutus_data_for_uint {
     };
 }
 
-impl_to_plutus_data_for_uint!(u8, u16, u32, u64, u128, usize);
+impl_to_plutus_data_for_uint!(u8, u16, u32, u64, usize);
 
 impl ToPlutusData for bool {
     fn to_plutus_data<'a>(

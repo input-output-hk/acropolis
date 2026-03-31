@@ -34,6 +34,14 @@ impl TimeRange {
     }
 }
 
+fn system_time_to_posix_milliseconds(time: &SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .expect("SystemTime before UNIX_EPOCH!")
+        .as_millis()
+        .try_into()
+        .expect("POSIX time in milliseconds exceeds u64 range!")
+}
+
 impl ToPlutusData for TimeRange {
     fn to_plutus_data<'a>(
         &self,
@@ -43,8 +51,7 @@ impl ToPlutusData for TimeRange {
         let lower = {
             let (extended, closure) = match &self.lower_bound {
                 Some(time) => {
-                    let millis =
-                        time.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_millis();
+                    let millis = system_time_to_posix_milliseconds(time);
                     (
                         // Finite
                         constr(arena, 1, vec![millis.to_plutus_data(arena, version)?]),
@@ -65,8 +72,7 @@ impl ToPlutusData for TimeRange {
         let upper = {
             let (extended, closure) = match &self.upper_bound {
                 Some(time) => {
-                    let millis =
-                        time.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_millis();
+                    let millis = system_time_to_posix_milliseconds(time);
                     (
                         // Finite
                         constr(arena, 1, vec![millis.to_plutus_data(arena, version)?]),
