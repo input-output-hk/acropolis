@@ -14,7 +14,7 @@ use imbl::HashMap;
 use pallas::ledger::traverse::MultiEraHeader;
 use tracing::info;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct State {
     // block number
     block: u64,

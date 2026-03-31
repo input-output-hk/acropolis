@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{StartupMode, ValidateRollbackHandling},
     declare_cardano_reader,
     messages::{
         AddressDeltasMessage, CardanoMessage, Message, StateQuery, StateQueryResponse,
@@ -15,6 +15,7 @@ use acropolis_common::{
             StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
         },
     },
+    rollbacks::{RollbackChecker, RollbackMemoryStore},
     state_history::{StateHistory, StateHistoryStore},
     NetworkId,
 };
@@ -81,7 +82,7 @@ mod utils;
 use state::{DeltaPublisher, State};
 use utils::{process_message, CacheMode, PointerCache, Tracker};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct StakeDeltaFilterParams {
     stake_address_delta_topic: String,
     validation_topic: String,
@@ -189,6 +190,16 @@ impl StakeDeltaFilter {
                 Err(e) => {
                     info!("Cannot load cache: {}, building from scratch", e);
                     let certs_reader = CertsReader::new(&context, &config).await?;
+
+                    let rollback_handler = ValidateRollbackHandling::from_config(config.as_ref())
+                        .value()
+                        .map(|capture_block| {
+                            RollbackChecker::new(
+                                capture_block,
+                                RollbackMemoryStore::<State>::default(),
+                            )
+                        });
+
                     Self::stateful_init(
                         params,
                         context,
@@ -196,6 +207,7 @@ impl StakeDeltaFilter {
                         address_delta_reader,
                         publisher,
                         is_snapshot_mode,
+                        rollback_handler,
                     )
                     .await
                 }
@@ -203,6 +215,13 @@ impl StakeDeltaFilter {
 
             CacheMode::Write => {
                 let certs_reader = CertsReader::new(&context, &config).await?;
+
+                let rollback_handler = ValidateRollbackHandling::from_config(config.as_ref())
+                    .value()
+                    .map(|capture_block| {
+                        RollbackChecker::new(capture_block, RollbackMemoryStore::<State>::default())
+                    });
+
                 Self::stateful_init(
                     params,
                     context,
@@ -210,6 +229,7 @@ impl StakeDeltaFilter {
                     address_delta_reader,
                     publisher,
                     is_snapshot_mode,
+                    rollback_handler,
                 )
                 .await
             }
@@ -376,6 +396,7 @@ impl StakeDeltaFilter {
         address_deltas_reader: AddressDeltasReader,
         publisher: DeltaPublisher,
         is_snapshot_mode: bool,
+        rollback_handler: Option<RollbackChecker<RollbackMemoryStore<State>>>,
     ) -> Result<()> {
         info!("Stateful init: creating stake pointer cache");
 
@@ -398,6 +419,7 @@ impl StakeDeltaFilter {
             params,
             context_run,
             is_snapshot_mode,
+            rollback_handler,
         ));
 
         // Ticker to log stats
@@ -426,6 +448,7 @@ impl StakeDeltaFilter {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn stateful_run(
         history: Arc<Mutex<StateHistory<State>>>,
         mut certs_reader: CertsReader,
@@ -434,6 +457,7 @@ impl StakeDeltaFilter {
         params: Arc<StakeDeltaFilterParams>,
         context: Arc<Context<Message>>,
         is_snapshot_mode: bool,
+        mut rollback_handler: Option<RollbackChecker<RollbackMemoryStore<State>>>,
     ) -> Result<()> {
         if !is_snapshot_mode {
             match address_deltas_reader.read_with_rollbacks().await? {
@@ -484,6 +508,11 @@ impl StakeDeltaFilter {
 
             if let Some(block_info) = block_info {
                 state.save()?;
+
+                if let Some(rollback_handler) = rollback_handler.as_mut() {
+                    rollback_handler.check(&state, block_info.number)?;
+                }
+
                 history.lock().await.commit(block_info.number, state);
 
                 if block_info.intent.do_validation() {

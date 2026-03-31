@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{StartupMode, ValidateRollbackHandling},
     declare_cardano_reader,
     messages::{
         BlockTxsMessage, CardanoMessage, EpochBootstrapMessage, GenesisCompleteMessage, Message,
@@ -16,6 +16,7 @@ use acropolis_common::{
         },
         errors::QueryError,
     },
+    rollbacks::{RollbackChecker, RollbackMemoryStore},
     state_history::{StateHistory, StateHistoryStore},
 };
 use anyhow::{anyhow, bail, Result};
@@ -149,6 +150,7 @@ impl EpochsState {
         mut epoch_nonce_publisher: EpochNoncePublisher,
         validation_topic: String,
         is_snapshot_mode: bool,
+        mut rollback_handler: Option<RollbackChecker<RollbackMemoryStore<State>>>,
     ) -> Result<()> {
         let genesis = match bootstrap_reader.read_with_rollbacks().await? {
             RollbackWrapper::Normal((_, genesis)) => genesis,
@@ -276,6 +278,10 @@ impl EpochsState {
 
             // Commit the new state
             if let Some(block_info) = ctx.get_current_block_opt() {
+                if let Some(rollback_handler) = rollback_handler.as_mut() {
+                    rollback_handler.check(&state, block_info.number)?;
+                }
+
                 if block_info.intent.do_validation() {
                     ctx.publish().await;
                 }
@@ -333,6 +339,11 @@ impl EpochsState {
         } else {
             None
         };
+
+        let rollback_handler =
+            ValidateRollbackHandling::from_config(config.as_ref()).value().map(|capture_block| {
+                RollbackChecker::new(capture_block, RollbackMemoryStore::<State>::default())
+            });
 
         // Publisher
         let epoch_activity_publisher =
@@ -393,6 +404,7 @@ impl EpochsState {
                 epoch_nonce_publisher,
                 validation_outcome_topic,
                 is_snapshot_mode,
+                rollback_handler,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

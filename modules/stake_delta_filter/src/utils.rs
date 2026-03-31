@@ -16,7 +16,7 @@ use std::{
 use tracing::error;
 
 #[serde_as]
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct PointerCache {
     #[serde_as(as = "Vec<(_, _)>")]
     pub pointer_map: HashMap<ShelleyAddressPointer, Option<StakeAddress>>,
@@ -161,7 +161,7 @@ pub enum CacheMode {
     WriteIfAbsent,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OccurrenceInfo {
     block: BlockInfo,
     address_delta: AddressDelta,
@@ -175,7 +175,7 @@ enum OccurrenceInfoKind {
     Mixed,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Tracker {
     occurrence: HashMap<ShelleyAddressPointer, Vec<OccurrenceInfo>>,
 }

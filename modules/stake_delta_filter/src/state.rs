@@ -53,7 +53,7 @@ impl DeltaPublisher {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct State {
     pub pointer_cache: PointerCache,
 
