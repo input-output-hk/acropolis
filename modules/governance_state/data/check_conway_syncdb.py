@@ -81,6 +81,8 @@ for s in acropolis:
         (ty,re,en,de,ex) = rec[0]
         if ty == "InfoAction":
             ty = "Information"
+        if ty == "NewCommittee":
+            ty = "UpdateCommittee"
         if ty != sl[8]: print (idx, "types do not match: `",ty,"` `",sl[8],"`\n")
         if re != strip_some(sl[11]): print (idx, "re do not match: `",re,"` `",sl[11],"`\n")
         if en != strip_some(sl[12]): print (idx, "en do not match: `",en,"` `",sl[12],"`\n")

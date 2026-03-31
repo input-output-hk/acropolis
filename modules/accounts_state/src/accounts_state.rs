@@ -414,51 +414,44 @@ impl AccountsState {
                 }
 
                 // Handle epoch activity
-                match ctx.consume_sync("ea_reader", ea_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, ea_msg)) => {
-                        let span = info_span!(
-                            "account_state.handle_epoch_activity",
-                            block = block_info.number
-                        );
-                        async {
-                            match state
-                                .handle_epoch_activity(
-                                    context.clone(),
-                                    &ea_msg,
-                                    &block_info,
-                                    verifier,
-                                )
-                                .await
-                            {
-                                Ok(refund_deltas) => {
-                                    // publish stake reward deltas
-                                    stake_reward_deltas.extend(refund_deltas);
-                                    ctx.handle(
-                                        "publish_stake_reward_deltas",
-                                        stake_reward_deltas_publisher
-                                            .publish_stake_reward_deltas(
-                                                &block_info,
-                                                stake_reward_deltas,
-                                            )
-                                            .await,
-                                    );
-                                }
-                                Err(e) => {
-                                    ctx.handle_error("handle_epoch_activity", &e);
-                                }
-                            }
-
-                            let drdd = state.generate_drdd();
-                            ctx.handle(
-                                "publish_drdd",
-                                drep_publisher.publish_drdd(&block_info, drdd).await,
+                let deltas_block_info =
+                    match ctx.consume_sync("ea_reader", ea_reader.read_with_rollbacks().await)? {
+                        RollbackWrapper::Normal((block_info, ea_msg)) => {
+                            let span = info_span!(
+                                "account_state.handle_epoch_activity",
+                                block = block_info.number
                             );
+                            async {
+                                match state
+                                    .handle_epoch_activity(
+                                        context.clone(),
+                                        &ea_msg,
+                                        &block_info,
+                                        verifier,
+                                    )
+                                    .await
+                                {
+                                    Ok(refund_deltas) => {
+                                        // publish stake reward deltas
+                                        stake_reward_deltas.extend(refund_deltas);
+                                    }
+                                    Err(e) => {
+                                        ctx.handle_error("handle_epoch_activity", &e);
+                                    }
+                                }
+
+                                let drdd = state.generate_drdd();
+                                ctx.handle(
+                                    "publish_drdd",
+                                    drep_publisher.publish_drdd(&block_info, drdd).await,
+                                );
+                                Some(block_info)
+                            }
+                            .instrument(span)
+                            .await
                         }
-                        .instrument(span)
-                        .await;
-                    }
-                    RollbackWrapper::Rollback(_) => {}
-                }
+                        RollbackWrapper::Rollback(_) => None,
+                    };
 
                 // Handle governance outcomes (enacted/expired proposals) at epoch boundary
                 match ctx.consume_sync(
@@ -471,10 +464,11 @@ impl AccountsState {
                             block = block_info.number
                         );
                         async {
-                            ctx.handle(
+                            let refund_deltas = ctx.handle(
                                 "handle_governance_outcomes",
                                 state.handle_governance_outcomes(&outcomes_msg),
                             );
+                            stake_reward_deltas.extend(refund_deltas);
                         }
                         .instrument(span)
                         .await;
@@ -483,6 +477,19 @@ impl AccountsState {
                 }
 
                 // Clear the skip flag after first transition handling.
+                if let Some(block_info) = deltas_block_info {
+                    async {
+                        ctx.handle(
+                            "publish_stake_reward_deltas",
+                            stake_reward_deltas_publisher
+                                .publish_stake_reward_deltas(&block_info, stake_reward_deltas)
+                                .await,
+                        )
+                    }
+                    .await;
+                }
+
+                // Clear the skip flag after first epoch transition
                 skip_first_epoch_rewards = false;
             }
 

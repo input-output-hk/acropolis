@@ -141,6 +141,18 @@ governance ("bootstrap governance"):
 
 https://docs.cardano.org/about-cardano/evolution/upgrades/chang
 
+### Special voting rules for NoConfidence, UpdateCommittee, ParameterUpdate 
+
+https://github.com/IntersectMBO/cardano-ledger/issues/4645
+
+... To be more specific the solution to this problem is:
+
+* To change the default vote for SPOs to No from Abstain for all of the three proposals in question
+* Check whether SPO's reward address is delegated to the predefined AlwaysNoConfidence DRep and count default vote as Yes only on NoConfidence proposals for that SPO.
+* Check whether SPO's reward address is delegated to predefined AlwaysAbstain DRep and count default vote as Abstain for that SPO on all three: NoConfidence, UpdateCommitee and ParameterUpdate proposals.
+
+This is not a terribly complicated logic to implement, which means that we can almost certainly take care of in time for the protocol version 10.0, i.e. the intra-era hard fork, a.k.a Chang+1
+
 ### Genesis blocks
 * Conway genesis: committee key hashes have prefix 'scriptHash-' (I believe,
 'keyHash-'), followed by hex hash. To be researched....
@@ -259,6 +271,8 @@ Expected behaviour:
 Since there is no special 'end of epoch' block, then we use the first block as the 
 signal for the previous epoch end. The governance module discovers end of the epoch,
 publishes update, then parameter state module catches it and publishes new parameters.
+
+## Conway voting
 
 ### Counting votes timing
 
