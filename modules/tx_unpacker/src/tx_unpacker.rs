@@ -13,7 +13,7 @@ use acropolis_common::{
     validation::ValidationOutcomes,
     *,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use futures::future::join_all;
@@ -80,6 +80,31 @@ impl TxUnpacker {
             }
             None => None,
         };
+
+        if let Some(ref mut sub) = protocol_params_sub {
+            let (_, protocol_parameters_msg) = sub.read().await?;
+            match protocol_parameters_msg.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) => {
+                    let mut state = history
+                        .lock()
+                        .await
+                        .get_or_init_with(|| State::with_phase2_enabled(phase2_enabled));
+                    state.handle_protocol_params(params);
+                    history.lock().await.commit(block_info.number, state);
+                }
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    bail!("Unexpected rollback while reading initial protocol params");
+                }
+                _ => {
+                    bail!(
+                        "Unexpected protocol parameters message type: {protocol_parameters_msg:?}"
+                    );
+                }
+            }
+        }
 
         loop {
             let mut state = history
