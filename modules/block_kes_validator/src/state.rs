@@ -22,6 +22,10 @@ pub struct State {
     pub max_kes_evolutions: Option<u64>,
 
     pub active_spos: HashSet<PoolId>,
+
+    /// True once at least one SPO state message has been consumed.
+    /// KES validation depends on the active SPO set for the relevant epoch.
+    pub spo_state_ready: bool,
 }
 
 impl State {
@@ -31,6 +35,7 @@ impl State {
             slots_per_kes_period: None,
             max_kes_evolutions: None,
             active_spos: HashSet::new(),
+            spo_state_ready: false,
         }
     }
 
@@ -47,6 +52,24 @@ impl State {
 
     pub fn handle_spo_state(&mut self, msg: &SPOStateMessage) {
         self.active_spos = msg.spos.iter().map(|spo| spo.operator).collect();
+        self.spo_state_ready = true;
+    }
+
+    /// Returns true when we have enough state to perform KES validation for this block.
+    ///
+    /// Some networks can start directly in Shelley/Conway at epoch 0. In that case the
+    /// first validated blocks may arrive before any SPO state has been published, so KES
+    /// validation must wait until the first SPO state becomes available.
+    pub fn is_validation_ready(&self, block_info: &BlockInfo, genesis: &GenesisValues) -> bool {
+        // KES validation is not required in the pre-Shelley era
+        if block_info.epoch < genesis.shelley_epoch {
+            return true;
+        }
+
+        // KES validation is required, so readiness matters
+        self.slots_per_kes_period.is_some()
+            && self.max_kes_evolutions.is_some()
+            && self.spo_state_ready
     }
 
     pub fn update_ocert_counter(&mut self, pool_id: PoolId, declared_sequence_number: u64) {

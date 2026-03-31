@@ -43,6 +43,10 @@ pub struct State {
 
     /// epoch snapshots
     pub epoch_snapshots: EpochSnapshots,
+
+    /// True once we have consumed at least one SPO/SPDD snapshot pair.
+    /// VRF validation for Praos/TPraos depends on this previous-epoch snapshot state.
+    pub epoch_snapshot_ready: bool,
 }
 
 impl State {
@@ -52,6 +56,7 @@ impl State {
             decentralisation_param: None,
             epoch_nonce: None,
             epoch_snapshots: EpochSnapshots::default(),
+            epoch_snapshot_ready: false,
         }
     }
 
@@ -80,6 +85,25 @@ impl State {
     ) {
         let new_snapshot = Snapshot::from((spo_state_msg, spdd_msg));
         self.epoch_snapshots.push(new_snapshot);
+        self.epoch_snapshot_ready = true;
+    }
+
+    /// Returns true when we have enough state to perform VRF validation for this block.
+    ///
+    /// Some networks can start directly in Shelley/Conway at epoch 0. In that case the
+    /// first validated blocks may arrive before any epoch snapshot has been published, so
+    /// VRF validation must wait until the first SPO/SPDD snapshot pair becomes available.
+    pub fn is_validation_ready(&self, block_info: &BlockInfo, genesis: &GenesisValues) -> bool {
+        // VRF validation is not required in the pre-Shelley era
+        if block_info.epoch < genesis.shelley_epoch {
+            return true;
+        }
+
+        // VRF validation is required, so readiness matters
+        self.decentralisation_param.is_some()
+            && self.active_slots_coeff.is_some()
+            && self.epoch_nonce.is_some()
+            && self.epoch_snapshot_ready
     }
 
     pub fn validate(

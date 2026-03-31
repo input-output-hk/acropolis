@@ -18,7 +18,7 @@ use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{debug, error, info, info_span, Instrument};
 mod state;
 use state::State;
 mod ouroboros;
@@ -250,12 +250,21 @@ impl BlockVrfValidator {
                     let span =
                         info_span!("block_vrf_validator.validate", block = block_info.number);
                     async {
-                        ctx.handle(
-                            "validate",
-                            state
-                                .validate(&block_info, &block_msg.header, &genesis)
-                                .map_err(anyhow::Error::from),
-                        );
+                        if state.is_validation_ready(&block_info, &genesis) {
+                            ctx.handle(
+                                "validate",
+                                state
+                                    .validate(&block_info, &block_msg.header, &genesis)
+                                    .map_err(anyhow::Error::from),
+                            );
+                        } else {
+                            debug!(
+                                block = block_info.number,
+                                slot = block_info.slot,
+                                epoch = block_info.epoch,
+                                "Skipping VRF validation until epoch context is available"
+                            );
+                        }
                     }
                     .instrument(span)
                     .await;

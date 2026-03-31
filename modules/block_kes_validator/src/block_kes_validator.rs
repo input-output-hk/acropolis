@@ -17,7 +17,7 @@ use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{debug, error, info, info_span, Instrument};
 mod state;
 use state::State;
 mod ouroboros;
@@ -192,19 +192,28 @@ impl BlockKesValidator {
                     let span =
                         info_span!("block_kes_validator.validate", block = block_info.number);
                     async {
-                        let result_opt = ctx.handle(
-                            "validate",
-                            state
-                                .validate(&block_info, &block_msg.header, &genesis)
-                                .map_err(anyhow::Error::from),
-                        );
+                        if state.is_validation_ready(&block_info, &genesis) {
+                            let result_opt = ctx.handle(
+                                "validate",
+                                state
+                                    .validate(&block_info, &block_msg.header, &genesis)
+                                    .map_err(anyhow::Error::from),
+                            );
 
-                        if let Some((pool_id, updated_sequence_number)) = result_opt {
-                            // Update the operational certificate counter
-                            // When block is validated successfully
-                            // Reference
-                            // https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L508
-                            state.update_ocert_counter(pool_id, updated_sequence_number);
+                            if let Some((pool_id, updated_sequence_number)) = result_opt {
+                                // Update the operational certificate counter
+                                // When block is validated successfully
+                                // Reference
+                                // https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L508
+                                state.update_ocert_counter(pool_id, updated_sequence_number);
+                            }
+                        } else {
+                            debug!(
+                                block = block_info.number,
+                                slot = block_info.slot,
+                                epoch = block_info.epoch,
+                                "Skipping KES validation until epoch context is available"
+                            );
                         }
                     }
                     .instrument(span)
