@@ -13,14 +13,14 @@ use acropolis_common::{
     validation::ValidationOutcomes,
     *,
 };
-use anyhow::{Result, bail};
-use caryatid_sdk::{Context, Subscription, module};
+use anyhow::{bail, Result};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use futures::future::join_all;
 use pallas::codec::minicbor::encode;
 use pallas::ledger::traverse::MultiEraTx;
 use tokio::sync::Mutex;
-use tracing::{Instrument, debug, error, info, info_span, warn};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 use crate::state::State;
 mod crypto;
