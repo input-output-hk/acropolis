@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use acropolis_common::{
+    caryatid::SideReaderSync,
     messages::{
         AssetDeltasMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
@@ -91,14 +92,14 @@ impl TxUnpacker {
                 return Err(anyhow::anyhow!("Failed to read txs subscription"));
             };
 
-            let (validate, sync_protocol_params) = match message.as_ref() {
+            let (validate, sync_mode) = match message.as_ref() {
                 Message::Cardano((
                     block_info,
                     CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
                 )) => {
                     state = history.lock().await.get_rolled_back_state(block_info.number);
                     current_block = Some(block_info.clone());
-                    (false, true)
+                    (false, SideReaderSync::Rollback)
                 }
                 Message::Cardano((block_info, _)) => {
                     // Handle replayed rollback markers on this topic as well.
@@ -108,12 +109,15 @@ impl TxUnpacker {
                     current_block = Some(block_info.clone());
 
                     // new_epoch? first_epoch?
-                    (block_info.intent.do_validation(), block_info.new_epoch)
+                    (
+                        block_info.intent.do_validation(),
+                        SideReaderSync::from_block(block_info),
+                    )
                 }
 
                 _ => {
                     error!("Unexpected message type: {message:?}");
-                    (false, false)
+                    (false, SideReaderSync::None)
                 }
             };
 
@@ -321,7 +325,7 @@ impl TxUnpacker {
                 _ => error!("Unexpected message type: {message:?}"),
             }
 
-            if sync_protocol_params {
+            if sync_mode.sync_rollback_capable_readers() {
                 if let Some(ref mut sub) = protocol_params_sub {
                     let (_, protocol_parameters_msg) = sub.read().await?;
                     match protocol_parameters_msg.as_ref() {
