@@ -161,16 +161,20 @@ pub fn encode_tx_in_info<'a>(
 
 /// Encode datums as PlutusData.
 ///
-/// V1: `List [Constr(0, [hash, datum])]` - association list of 2-tuples
-/// V2/V3: `Map [(hash, datum)]` - map encoding
+/// V1: `List [Constr(0, [hash, datum])...]` — `[(DatumHash, Datum)]` uses
+///     standard list-of-tuples `ToData`, producing a List of Constr pairs.
+/// V2/V3: `Map [(hash, datum)...]` — `Map DatumHash Datum` uses the Map
+///     `ToData` instance, producing a PlutusData Map node.
 pub fn encode_datums<'a>(
     datums: &[(DatumHash, Vec<u8>)],
     arena: &'a Arena,
     version: PlutusVersion,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+    let mut sorted_datums: Vec<_> = datums.iter().collect();
+    sorted_datums.sort_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
     match version {
         PlutusVersion::V1 => {
-            let tuples: Vec<_> = datums
+            let tuples: Vec<_> = sorted_datums
                 .iter()
                 .map(|(hash, cbor_bytes)| {
                     let k = hash.to_plutus_data(arena, version)?;
@@ -181,8 +185,6 @@ pub fn encode_datums<'a>(
             Ok(list(arena, tuples))
         }
         PlutusVersion::V2 | PlutusVersion::V3 => {
-            let mut sorted_datums: Vec<_> = datums.iter().collect();
-            sorted_datums.sort_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
             let pairs: Vec<_> = sorted_datums
                 .iter()
                 .map(|(hash, cbor_bytes)| {

@@ -273,9 +273,12 @@ fn encode_tx_info<'a>(
         list(arena, items)
     };
 
-    let fee = {
-        let fee_value = Value::new(tx_info.fee, vec![]);
-        fee_value.to_plutus_data(arena, version)?
+    let fee = match version {
+        PlutusVersion::V3 => tx_info.fee.to_plutus_data(arena, version)?,
+        _ => {
+            let fee_value = Value::new(tx_info.fee, vec![]);
+            fee_value.to_plutus_data(arena, version)?
+        }
     };
 
     let mint_pd = encode_mint_value(&tx_info.mint, arena, version)?;
@@ -293,8 +296,9 @@ fn encode_tx_info<'a>(
     let valid_range = tx_info.valid_range.to_plutus_data(arena, version)?;
 
     let sigs = {
-        let items: Vec<_> = tx_info
-            .signatories
+        let mut sorted_sigs = tx_info.signatories.clone();
+        sorted_sigs.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+        let items: Vec<_> = sorted_sigs
             .iter()
             .map(|k| k.to_plutus_data(arena, version))
             .collect::<Result<_, _>>()?;
@@ -503,7 +507,7 @@ fn encode_redeemers_map<'a>(
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     let sorted_inputs: Vec<UTxOIdentifier> = tx_info.inputs.iter().map(|ri| ri.utxo_id).collect();
 
-    let pairs: Vec<_> = tx_info
+    let mut entries: Vec<_> = tx_info
         .redeemers
         .iter()
         .map(|redeemer| {
@@ -523,9 +527,16 @@ fn encode_redeemers_map<'a>(
             )?;
             let key = encode_redeemer_key(&purpose, arena, version)?;
             let value = from_cbor(arena, &redeemer.data)?;
-            Ok((key, value))
+            let sort_key = (&redeemer.tag, redeemer.index);
+            Ok((sort_key, key, value))
         })
         .collect::<Result<_, ScriptContextError>>()?;
+
+    // Sort by PlutusPurpose constructor order (Spend < Mint < Cert < Reward
+    // < Vote < Propose), then by index within each tag.
+    entries.sort_by_key(|(sort_key, _, _)| *sort_key);
+
+    let pairs = entries.into_iter().map(|(_, k, v)| (k, v)).collect();
     Ok(map(arena, pairs))
 }
 

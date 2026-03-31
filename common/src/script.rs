@@ -270,6 +270,8 @@ impl Datum {
     Debug,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Clone,
     Hash,
 )]

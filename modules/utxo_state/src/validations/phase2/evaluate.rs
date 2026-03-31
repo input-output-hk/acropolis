@@ -387,6 +387,13 @@ mod tests {
     )]
     #[test_case(validation_fixture!(
         "conway",
+        "eed81408c2b2542eb41931bd3c410c28798e2ec52d9432428cdfbb12ffee0554"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 3 - with 2 Plutus V1 Scripts"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
         "332aac636f8476b1a91c0071a445103d8f55309c23bfddaf242732630efcf0ec",
         "always_fail"
     ) =>
