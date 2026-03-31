@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{StartupMode, ValidateRollbackHandling},
     declare_cardano_reader,
     messages::{
         CardanoMessage, Message, PoolRegistrationUpdatesMessage, ProtocolParamsMessage,
@@ -11,6 +11,7 @@ use acropolis_common::{
         StateQueryResponse, StateTransitionMessage, UTXODeltasMessage,
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+    rollbacks::{RollbackChecker, RollbackMemoryStore},
 };
 use caryatid_sdk::{module, Context, Subscription};
 
@@ -106,6 +107,7 @@ impl UTXOState {
         mut stake_updates_reader: Option<StakeUpdatesReader>,
         publish_tx_validation_topic: String,
         is_snapshot_mode: bool,
+        mut rollback_handler: Option<RollbackChecker<RollbackMemoryStore<State>>>,
     ) -> Result<()> {
         let mut bootstrap_block_processed = false;
 
@@ -228,6 +230,10 @@ impl UTXOState {
                     .lock()
                     .await
                     .commit_protocol_parameters(&block_info, current_protocol_params.clone());
+
+                if let Some(rollback_handler) = rollback_handler.as_mut() {
+                    rollback_handler.check(&state.lock().await.clone(), block_info.number)?;
+                }
             }
         }
     }
@@ -298,6 +304,11 @@ impl UTXOState {
         let snapshot_store = store.clone();
         let mut state = State::new(store, address_delta_publish_mode);
 
+        let rollback_handler =
+            ValidateRollbackHandling::from_config(config.as_ref()).value().map(|capture_block| {
+                RollbackChecker::new(capture_block, RollbackMemoryStore::<State>::default())
+            });
+
         // Create address delta publisher and pass it observations
         let deltas_publisher =
             AddressDeltaPublisher::new(context.clone(), config.clone(), address_delta_publish_mode);
@@ -321,6 +332,7 @@ impl UTXOState {
                 stake_updates_reader,
                 utxo_validation_publish_topic,
                 is_snapshot_mode,
+                rollback_handler,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

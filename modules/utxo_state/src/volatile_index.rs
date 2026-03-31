@@ -4,6 +4,7 @@ use acropolis_common::UTxOIdentifier;
 use std::collections::VecDeque;
 use tracing::error;
 
+#[derive(PartialEq, Default, Clone)]
 pub struct VolatileIndex {
     /// First block number represented in the index VecDeque
     first_block: Option<u64>,

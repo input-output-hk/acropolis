@@ -69,7 +69,7 @@ impl std::fmt::Display for UTxOIdentifier {
 }
 
 /// Value stored in UTXO
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, PartialEq)]
 pub struct UTXOValue {
     /// Address in binary
     pub address: Address,

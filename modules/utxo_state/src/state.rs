@@ -85,6 +85,7 @@ pub trait ImmutableUTXOStore: Send + Sync {
 }
 
 /// Ledger state storage
+#[derive(Clone)]
 pub struct State {
     /// Last slot number received
     last_slot: u64,
@@ -129,6 +130,22 @@ pub struct State {
 
     /// Address delta publish mode for emitted observer deltas.
     address_delta_publish_mode: AddressDeltaPublishMode,
+}
+
+impl PartialEq for State {
+    fn eq(&self, other: &Self) -> bool {
+        self.last_slot == other.last_slot
+            && self.last_number == other.last_number
+            && self.volatile_utxos == other.volatile_utxos
+            && self.reference_scripts_history.current() == other.reference_scripts_history.current()
+            && self.volatile_created == other.volatile_created
+            && self.volatile_spent == other.volatile_spent
+            && self.lovelace_at_shelley_start == other.lovelace_at_shelley_start
+            && self.avvm_cancelled_value == other.avvm_cancelled_value
+            && self.pointer_address_values == other.pointer_address_values
+            && self.protocol_parameters_history.current()
+                == other.protocol_parameters_history.current()
+    }
 }
 
 impl State {

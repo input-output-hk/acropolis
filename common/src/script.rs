@@ -27,7 +27,7 @@ impl ScriptLang {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct ScriptRef {
     pub script_hash: ScriptHash,
     pub script_lang: ScriptLang,

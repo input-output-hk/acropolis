@@ -7,9 +7,16 @@ use tracing::info;
 
 use crate::params::SECURITY_PARAMETER_K;
 
+#[derive(Clone)]
 pub enum StateHistoryStore {
     Bounded(u64), // Used for rollbacks, bounded at k
     Unbounded,    // Used for historical lookups, unbounded
+}
+
+impl Default for StateHistoryStore {
+    fn default() -> Self {
+        Self::default_block_store()
+    }
 }
 
 impl StateHistoryStore {
@@ -21,12 +28,14 @@ impl StateHistoryStore {
     }
 }
 
+#[derive(Clone)]
 struct HistoryEntry<S> {
     index: u64,
     state: S,
 }
 
 /// Generic state history - S is the state to be stored
+#[derive(Default, Clone)]
 pub struct StateHistory<S> {
     /// History, one per block or epoch
     history: VecDeque<HistoryEntry<S>>,

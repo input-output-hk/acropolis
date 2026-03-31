@@ -54,9 +54,14 @@ where
 //
 // In-memory store
 //
-#[derive(Default)]
 pub struct RollbackMemoryStore<S> {
     state: Option<S>,
+}
+
+impl<S> Default for RollbackMemoryStore<S> {
+    fn default() -> Self {
+        Self { state: None }
+    }
 }
 
 impl<S: Clone> StateStore for RollbackMemoryStore<S> {
