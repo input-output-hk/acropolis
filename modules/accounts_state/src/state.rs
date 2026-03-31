@@ -2,22 +2,20 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
-use acropolis_common::caryatid::ValidationContext;
-use acropolis_common::epoch_snapshot::EpochSnapshot;
-use acropolis_common::messages::{
-    GovernanceProceduresMessage, Message, StateQuery, StateQueryResponse,
-};
-use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::{
+    caryatid::ValidationContext,
     certificate::TxCertificateIdentifier,
+    epoch_snapshot::EpochSnapshot,
     math::update_value_with_delta,
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, EpochActivityMessage,
-        GovernanceOutcomesMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
-        StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+        GovernanceOutcomesMessage, GovernanceProceduresMessage, Message, PotDeltasMessage,
+        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, StateQuery,
+        StateQueryResponse, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
     queries::{
+        accounts::OptimalPoolSizing,
         get_query_topic,
         stake_deltas::{
             StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
@@ -28,16 +26,18 @@ use acropolis_common::{
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
     InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
     PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind,
-    SPORewards, ShelleyAddressPointer, StakeAddress, StakeRewardDelta, TxCertificate,
+    SPORewards, ShelleyAddressPointer, StakeAddress, StakeRegistrationOutcome,
+    StakeRegistrationUpdate, StakeRewardDelta, TxCertificate,
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
-use acropolis_common::{StakeRegistrationOutcome, StakeRegistrationUpdate};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use imbl::{HashMap as ImHashMap, OrdMap, OrdSet};
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::mem::take;
-use std::sync::{mpsc, Arc, Mutex};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    mem::take,
+    sync::{mpsc, Arc, Mutex},
+};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::{debug, error, info, warn, Level};
 
@@ -92,7 +92,7 @@ pub struct State {
     protocol_parameters: Option<ProtocolParams>,
 
     /// Protocol parameters that applied in the previous epoch
-    previous_protocol_parameters: Option<ProtocolParams>,
+    //previous_protocol_parameters: Option<ProtocolParams>,
 
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<(PoolId, StakeAddress)>,
@@ -536,7 +536,7 @@ impl State {
         // rewards to calculate
         // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
         // have to use the genesis parameters we just received
-        let shelley_params = match &self.previous_protocol_parameters {
+        let shelley_params = match &self.protocol_parameters {
             Some(ProtocolParams {
                 shelley: Some(sp), ..
             }) => sp,
@@ -598,7 +598,12 @@ impl State {
 
         // Pay the refunds after snapshot, so they don't appear in active_stake
         reward_deltas.extend(self.pay_pool_refunds());
+        info!("Refunds (entering epoch): {}", self.proposal_refunds.len());
         reward_deltas.extend(self.pay_proposal_refunds());
+        info!(
+            "Refunds (entering epoch, after pay): {}",
+            self.proposal_refunds.len()
+        );
 
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
@@ -1069,7 +1074,7 @@ impl State {
     /// Key of returned map is the SPO 'operator' ID
     pub fn generate_spdd(&self) -> BTreeMap<PoolId, DelegatedStake> {
         let stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses.generate_spdd()
+        stake_addresses.generate_spdd(&self.spos)
     }
 
     pub fn dump_spdd_state(&self) -> HashMap<PoolId, Vec<(StakeAddress, u64)>> {
@@ -1107,7 +1112,7 @@ impl State {
         if different {
             info!("New parameter set: {:?}", params_msg.params);
         }
-        self.previous_protocol_parameters = self.protocol_parameters.clone();
+        //self.previous_protocol_parameters = self.protocol_parameters.clone();
         self.protocol_parameters = Some(params_msg.params.clone());
 
         Ok(())
@@ -1726,7 +1731,7 @@ impl State {
     pub fn handle_governance_outcomes(
         &mut self,
         outcomes_msg: &GovernanceOutcomesMessage,
-    ) -> Result<()> {
+    ) -> Result<Vec<StakeRewardDelta>> {
         for outcome in &outcomes_msg.conway_outcomes {
             let proposal = &outcome.voting.procedure;
             let deposit = proposal.deposit;
@@ -1772,7 +1777,14 @@ impl State {
             );
         }
 
-        Ok(())
+        let mut reward_deltas = Vec::new();
+        reward_deltas.extend(self.pay_proposal_refunds());
+        info!(
+            "Refunds: {}, rewards: {}",
+            self.proposal_refunds.len(),
+            reward_deltas.len()
+        );
+        Ok(reward_deltas)
     }
 
     // Remove an account from a DReps delegation set
@@ -1803,7 +1815,7 @@ impl State {
     // Retrieve the major protocol version from the previous protocol parameters
     // During bootstrap we use the current protocol parameters for the first epoch
     fn is_chang(&self) -> bool {
-        self.previous_protocol_parameters
+        self.protocol_parameters
             .as_ref()
             .or(self.protocol_parameters.as_ref())
             .is_some_and(|p| p.major_protocol_version() == Some(9))

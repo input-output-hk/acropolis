@@ -200,7 +200,7 @@ impl EpochsHistoryState {
 
 #[cfg(test)]
 mod tests {
-    use acropolis_common::{DelegatedStake, SPORewards};
+    use acropolis_common::{DelegatedStake, DelegatedStakeDefaultVote, SPORewards};
 
     use super::*;
     use crate::test_utils::*;
@@ -238,6 +238,7 @@ mod tests {
             DelegatedStake {
                 active: 1,
                 active_delegators_count: 1,
+                default_vote: DelegatedStakeDefaultVote::NoDefault,
             },
         )];
         epochs_history.handle_spdd(&block, &spdd_msg);

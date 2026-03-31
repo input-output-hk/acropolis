@@ -1,7 +1,7 @@
 use crate::{
     math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice,
-    DRepCredential, DelegatedStake, Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress,
-    StakeAddressDelta, Withdrawal,
+    DRepCredential, DelegatedStake, DelegatedStakeDefaultVote, Lovelace, PoolId, PoolLiveStakeInfo,
+    PoolRegistration, StakeAddress, StakeAddressDelta, Withdrawal,
 };
 use anyhow::{anyhow, bail, Result};
 use dashmap::DashMap;
@@ -314,9 +314,29 @@ impl StakeAddressMap {
     /// (both with and without rewards) for each active SPO
     /// And Stake Pool Reward State (rewards and delegators_count for each pool)
     /// <KeyHash -> DelegatedStake>;Key of returned map is the SPO 'operator' ID
-    pub fn generate_spdd(&self) -> BTreeMap<PoolId, DelegatedStake> {
+    pub fn generate_spdd(
+        &self,
+        pool_info: &OrdMap<PoolId, PoolRegistration>,
+    ) -> BTreeMap<PoolId, DelegatedStake> {
         // Shareable Dashmap with referenced keys
         let spo_stakes = DashMap::<PoolId, DelegatedStake>::new();
+
+        // In Conway, before v. 10.0, all SPOs vote by default as "No".
+        // Since protocol v. 10.0, when SPO reward account is attached to some default DRep
+        // (abstain or noConfidence), the default SPO vote is chosen accoring to rules of those
+        // DReps. This code just prepares SPO data, the real voting (and protocol version check) is
+        // implemented in governance_state module.
+        let mut pool_default_vote = HashMap::<PoolId, DelegatedStakeDefaultVote>::new();
+        for (pool_id, reg) in pool_info.iter() {
+            if let Some(sas) = self.inner.get(&reg.reward_account) {
+                let default_vote = match sas.delegated_drep {
+                    Some(DRepChoice::Abstain) => DelegatedStakeDefaultVote::AlwaysAbstain,
+                    Some(DRepChoice::NoConfidence) => DelegatedStakeDefaultVote::AlwaysNoConfidence,
+                    Some(_) | None => continue,
+                };
+                pool_default_vote.insert(*pool_id, default_vote);
+            }
+        }
 
         // Total stake across all addresses in parallel, first collecting into a vector
         // because imbl::OrdMap doesn't work in Rayon
@@ -343,6 +363,10 @@ impl StakeAddressMap {
                     .or_insert(DelegatedStake {
                         active: total_stake,
                         active_delegators_count: 1,
+                        default_vote: pool_default_vote
+                            .get(spo)
+                            .copied()
+                            .unwrap_or(DelegatedStakeDefaultVote::NoDefault),
                     });
             });
 
@@ -1208,7 +1232,7 @@ mod tests {
                 .unwrap();
             stake_addresses.add_to_reward(&addr2, 100);
 
-            let spdd = stake_addresses.generate_spdd();
+            let spdd = stake_addresses.generate_spdd(&Default::default());
 
             let pool_stake = spdd.get(&SPO_HASH).unwrap();
             assert_eq!(pool_stake.active, 3150);
@@ -1244,7 +1268,7 @@ mod tests {
                 })
                 .unwrap();
 
-            let spdd = stake_addresses.generate_spdd();
+            let spdd = stake_addresses.generate_spdd(&Default::default());
 
             assert_eq!(spdd.len(), 2);
             assert_eq!(spdd.get(&SPO_HASH).unwrap().active, 1000);
@@ -1266,7 +1290,7 @@ mod tests {
                 })
                 .unwrap();
 
-            let spdd = stake_addresses.generate_spdd();
+            let spdd = stake_addresses.generate_spdd(&Default::default());
             assert!(spdd.is_empty());
         }
 
