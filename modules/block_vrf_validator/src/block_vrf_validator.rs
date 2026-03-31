@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{StartupMode, ValidateRollbackHandling},
     declare_cardano_reader,
     messages::{
         AccountsBootstrapMessage, CardanoMessage, Message, ProtocolParamsMessage, RawBlockMessage,
@@ -11,6 +11,7 @@ use acropolis_common::{
         StateTransitionMessage,
     },
     protocol_params::Nonce,
+    rollbacks::{RollbackChecker, RollbackMemoryStore},
     state_history::{StateHistory, StateHistoryStore},
 };
 use anyhow::{bail, Result};
@@ -151,6 +152,7 @@ impl BlockVrfValidator {
         mut spdd_reader: SPDDReader,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_vrf_validation_topic: String,
+        mut rollback_handler: Option<RollbackChecker<RollbackMemoryStore<State>>>,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -268,6 +270,10 @@ impl BlockVrfValidator {
                     ctx.publish().await;
                 }
 
+                if let Some(rollback_handler) = rollback_handler.as_mut() {
+                    rollback_handler.check(&state, block_info.number)?;
+                }
+
                 // Commit the new state
                 history.lock().await.commit(block_info.number, state);
             }
@@ -290,6 +296,11 @@ impl BlockVrfValidator {
         let snapshot_subscribe_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+
+        let rollback_handler =
+            ValidateRollbackHandling::from_config(config.as_ref()).value().map(|capture_block| {
+                RollbackChecker::new(capture_block, RollbackMemoryStore::<State>::default())
+            });
 
         // Subscribers
         let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
@@ -327,6 +338,7 @@ impl BlockVrfValidator {
                 spdd_reader,
                 snapshot_subscription,
                 validation_vrf_publisher_topic,
+                rollback_handler,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

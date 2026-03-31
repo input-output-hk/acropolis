@@ -3,13 +3,14 @@
 
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{StartupMode, ValidateRollbackHandling},
     declare_cardano_reader,
     messages::{
         BlockKesValidatorBootstrapMessage, CardanoMessage, Message, ProtocolParamsMessage,
         RawBlockMessage, SPOStateMessage, SnapshotMessage, SnapshotStateMessage,
         StateTransitionMessage,
     },
+    rollbacks::{RollbackChecker, RollbackMemoryStore},
     state_history::{StateHistory, StateHistoryStore},
 };
 use anyhow::{bail, Result};
@@ -123,6 +124,7 @@ impl BlockKesValidator {
         mut spo_state_reader: SPOReader,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         kes_validation_topic: String,
+        mut rollback_handler: Option<RollbackChecker<RollbackMemoryStore<State>>>,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -215,6 +217,10 @@ impl BlockKesValidator {
                     ctx.publish().await;
                 }
 
+                if let Some(rollback_handler) = rollback_handler.as_mut() {
+                    rollback_handler.check(&state, block_info.number)?;
+                }
+
                 // Commit the new state
                 history.lock().await.commit(block_info.number, state);
             }
@@ -237,6 +243,11 @@ impl BlockKesValidator {
         let snapshot_subscribe_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+
+        let rollback_handler =
+            ValidateRollbackHandling::from_config(config.as_ref()).value().map(|capture_block| {
+                RollbackChecker::new(capture_block, RollbackMemoryStore::<State>::default())
+            });
 
         // Subscribers
         let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
@@ -269,6 +280,7 @@ impl BlockKesValidator {
                 spo_state_reader,
                 snapshot_subscription,
                 kes_validation_topic,
+                rollback_handler,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

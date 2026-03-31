@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
 /// Epoch data for block vrf validation
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Snapshot {
     /// Map of pool_id to its vrf_key_hash
     pub active_spos: HashMap<PoolId, VrfKeyHash>,
