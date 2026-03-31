@@ -12,7 +12,6 @@ use acropolis_common::{
     },
     protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -179,6 +178,16 @@ impl BlockVrfValidator {
                     bail!("Unexpected rollback while reading initial params");
                 }
             }
+            match nonce_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, active_nonce)) => {
+                    let mut state = history.lock().await.get_or_init_with(State::new);
+                    state.handle_epoch_nonce(&active_nonce);
+                    history.lock().await.commit(block_info.number, state);
+                }
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial nonce");
+                }
+            }
         }
 
         loop {
@@ -191,28 +200,29 @@ impl BlockVrfValidator {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(State::new);
 
-            let block_msg = match ctx
-                .consume_sync("block available", block_reader.read_with_rollbacks().await)?
-            {
-                RollbackWrapper::Normal((block_info, block_msg)) => {
-                    if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
+            let block_msg =
+                match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((block_info, block_msg)) => {
+                        Some((block_info, block_msg.header.clone()))
                     }
-                    Some((block_info, block_msg.header.clone()))
-                }
-                RollbackWrapper::Rollback(_) => None,
-            };
+                    RollbackWrapper::Rollback((block_info, _)) => {
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
+                        None
+                    }
+                };
 
             if block_msg.as_ref().map(|(blk, _)| blk.new_epoch && blk.epoch > 0).unwrap_or(true) {
                 // read epoch boundary messages
-                match ctx.consume_sync("params", params_reader.read_with_rollbacks().await)? {
+                match ctx
+                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
+                {
                     RollbackWrapper::Normal((_, params)) => {
                         state.handle_protocol_parameters(&params);
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                match ctx.consume_sync("nonce", nonce_reader.read_with_rollbacks().await)? {
+                match ctx.consume_sync("nonce_reader", nonce_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((_, active_nonce)) => {
                         state.handle_epoch_nonce(&active_nonce);
                     }
@@ -220,16 +230,17 @@ impl BlockVrfValidator {
                 }
 
                 let spo_state_msg =
-                    match ctx.consume_sync("spo state", spo_reader.read_with_rollbacks().await)? {
+                    match ctx.consume_sync("spo_reader", spo_reader.read_with_rollbacks().await)? {
                         RollbackWrapper::Normal((_, spo_state)) => Some(spo_state),
                         RollbackWrapper::Rollback(_) => None,
                     };
 
-                let spdd_msg =
-                    match ctx.consume_sync("SPDD", spdd_reader.read_with_rollbacks().await)? {
-                        RollbackWrapper::Normal((_, spdd_msg)) => Some(spdd_msg),
-                        RollbackWrapper::Rollback(_) => None,
-                    };
+                let spdd_msg = match ctx
+                    .consume_sync("spdd_reader", spdd_reader.read_with_rollbacks().await)?
+                {
+                    RollbackWrapper::Normal((_, spdd_msg)) => Some(spdd_msg),
+                    RollbackWrapper::Rollback(_) => None,
+                };
 
                 if let Some(spo_state_msg) = spo_state_msg {
                     if let Some(spdd_msg) = spdd_msg {
@@ -244,7 +255,7 @@ impl BlockVrfValidator {
                         info_span!("block_vrf_validator.validate", block = block_info.number);
                     async {
                         ctx.handle(
-                            "vrf",
+                            "validate",
                             state
                                 .validate(block_info, block_header, &genesis)
                                 .map_err(anyhow::Error::from),
@@ -252,11 +263,13 @@ impl BlockVrfValidator {
                     }
                     .instrument(span)
                     .await;
+
+                    // Publish validation outcomes
+                    ctx.publish().await;
                 }
 
-                // Commit the new state and publish validation outcomes
+                // Commit the new state
                 history.lock().await.commit(block_info.number, state);
-                ctx.publish().await;
             }
         }
     }

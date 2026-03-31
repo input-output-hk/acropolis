@@ -485,6 +485,10 @@ impl StakeDeltaFilter {
             if let Some(block_info) = block_info {
                 state.save()?;
                 history.lock().await.commit(block_info.number, state);
+
+                if block_info.intent.do_validation() {
+                    ctx.publish().await;
+                }
             }
         }
     }

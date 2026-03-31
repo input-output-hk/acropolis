@@ -181,20 +181,22 @@ impl GovernanceState {
         state: Arc<Mutex<State>>,
         readers: &mut Box<Readers>,
     ) -> Result<()> {
-        let d_drep =
-            match vld.consume_sync("drep", readers.drep_reader.read_with_rollbacks().await)? {
-                RollbackWrapper::Normal((_, d_drep)) => Some(d_drep),
-                RollbackWrapper::Rollback(_) => None,
-            };
+        let d_drep = match vld.consume_sync(
+            "drep_reader",
+            readers.drep_reader.read_with_rollbacks().await,
+        )? {
+            RollbackWrapper::Normal((_, d_drep)) => Some(d_drep),
+            RollbackWrapper::Rollback(_) => None,
+        };
 
         let spo_msg =
-            match vld.consume_sync("spo", readers.spo_reader.read_with_rollbacks().await)? {
+            match vld.consume_sync("spo_reader", readers.spo_reader.read_with_rollbacks().await)? {
                 RollbackWrapper::Normal((blk_spo, d_spo)) => Some((blk_spo, d_spo)),
                 RollbackWrapper::Rollback(_) => None,
             };
 
         let drep_state = match vld.consume_sync(
-            "drep state",
+            "drep_state_reader",
             readers.drep_state_reader.read_with_rollbacks().await,
         )? {
             RollbackWrapper::Normal((_, drep_state)) => Some(drep_state),
@@ -216,7 +218,7 @@ impl GovernanceState {
 
                     if drep_state.epoch != d_drep.epoch {
                         vld.handle_error(
-                            "drep state",
+                            "drep_state",
                             &anyhow!(
                                 "DRep state {} epoch != DRep epoch ({})",
                                 drep_state.epoch,
@@ -226,7 +228,7 @@ impl GovernanceState {
                     }
 
                     vld.handle(
-                        "stakes",
+                        "handle_drep_stake",
                         state.lock().await.handle_drep_stake(&d_drep, &drep_state, &d_spo).await,
                     );
                 }
@@ -339,22 +341,23 @@ impl GovernanceState {
                 "governance_state",
             );
 
-            let gov_msg =
-                match vld.consume_sync("gov", readers.gov_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal(gov_msg) => Some(gov_msg),
-                    RollbackWrapper::Rollback((_, message)) => {
-                        context.publish(&config.enact_publish_topic, message).await?;
-                        None
-                    }
-                };
+            let gov_msg = match vld
+                .consume_sync("gov_reader", readers.gov_reader.read_with_rollbacks().await)?
+            {
+                RollbackWrapper::Normal(gov_msg) => Some(gov_msg),
+                RollbackWrapper::Rollback((_, message)) => {
+                    context.publish(&config.enact_publish_topic, message).await?;
+                    None
+                }
+            };
 
             async {
-                if let Some((blk_g, gov_procs)) = gov_msg {
+                if let Some((blk_g, gov_procs)) = gov_msg.as_ref() {
                     if blk_g.new_epoch {
                         // New governance from new epoch means that we must prepare all governance
                         // outcome for the previous epoch.
                         let mut state = state.lock().await;
-                        let gov_outcomes = state.process_new_epoch(&blk_g);
+                        let gov_outcomes = state.process_new_epoch(blk_g);
                         if let Some(gov_outcomes) =
                             vld.handle("process outcome", gov_outcomes.map(Some))
                         {
@@ -363,7 +366,7 @@ impl GovernanceState {
                                 CardanoMessage::GovernanceOutcomes(gov_outcomes),
                             )));
                             vld.handle(
-                                "send outcome",
+                                "publish",
                                 context.publish(&config.enact_publish_topic, message).await,
                             );
                         }
@@ -371,18 +374,18 @@ impl GovernanceState {
 
                     // Governance may present in any block -- not only in 'new epoch' blocks.
                     vld.handle(
-                        "governance",
-                        state.lock().await.handle_governance(&blk_g, &gov_procs).await,
+                        "handle_governance",
+                        state.lock().await.handle_governance(blk_g, gov_procs).await,
                     );
 
                     if blk_g.new_epoch {
                         match vld.consume_sync(
-                            "params",
+                            "param_reader",
                             readers.param_reader.read_with_rollbacks().await,
                         )? {
                             RollbackWrapper::Normal((blk_g, params)) => {
                                 vld.handle(
-                                    "params",
+                                    "handle_protocol_parameters",
                                     state.lock().await.handle_protocol_parameters(&params).await,
                                 );
 
@@ -392,7 +395,7 @@ impl GovernanceState {
                                 }
 
                                 vld.handle(
-                                    "advancing epoch",
+                                    "advance_epoch",
                                     state.lock().await.advance_epoch(&blk_g),
                                 );
                             }
@@ -400,7 +403,10 @@ impl GovernanceState {
                         }
                     }
                 } else {
-                    vld.consume_sync("params", readers.param_reader.read_with_rollbacks().await)?;
+                    vld.consume_sync(
+                        "param_reader",
+                        readers.param_reader.read_with_rollbacks().await,
+                    )?;
                     Self::process_drep_spo(&mut vld, state.clone(), &mut readers).await?;
                 }
 
@@ -408,7 +414,11 @@ impl GovernanceState {
             }
             .await?;
 
-            vld.publish().await;
+            if let Some((blk_info, _)) = gov_msg {
+                if blk_info.intent.do_validation() {
+                    vld.publish().await;
+                }
+            }
         }
     }
 
