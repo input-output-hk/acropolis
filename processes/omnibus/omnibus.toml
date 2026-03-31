@@ -60,9 +60,9 @@ validators = [
 #           "cardano.validation.utxo",
 #           "cardano.validation.spo"
 ]
-# By default, the consesus module will mark blocks for validation, but this can
-# be turned off to allow blocks from the mithril snapshot to skip validation
-force-validation = true
+# By default, the consesus module will skip validation for blocks 
+# from the Mithril snapshot but this can be set to true to force validation
+force-validation = false
 
 [module.block-unpacker]
 

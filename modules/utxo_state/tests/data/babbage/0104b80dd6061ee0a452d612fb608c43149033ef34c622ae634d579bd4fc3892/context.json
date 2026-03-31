@@ -7,7 +7,7 @@
         "assets": []
       },
       "datum": null,
-      "reference_script": null
+      "script_ref": null
     },
     "e8c07ae4a1b7785a5b1b8c95ca66c63b4c22bbdb8759f996b7ce07f3188b0658#0": {
       "address": "addr1x94ec3t25egvhqy2n265xfhq882jxhkknurfe9ny4rl9k6dj764lvrxdayh2ux30fl0ktuh27csgmpevdu89jlxppvrst84slu",
@@ -16,7 +16,7 @@
         "assets": []
       },
       "datum": null,
-      "reference_script": null
+      "script_ref": null
     },
     "e72133d7ece8b1313242a3cae9fb5802657acdadc7637e120bcd41d31befc2fd#0": {
       "address": "addr1qy3hzwy22mg3wwanpdg42j4jswwzck53mpgff4tl7ujryx78glqeskyf5gy0qm6zc2rt2khmqgvmtkru7p6rdw743tjqq5kmq8",
@@ -25,7 +25,7 @@
         "assets": []
       },
       "datum": null,
-      "reference_script": null
+      "script_ref": null
     },
     "0cbdc46bbe1a5ce4b4889fe1dfcd6cfee14ae74ff1f148abb6a1d0e9c5360950#2": {
       "address": "addr1q8kmf8s9fdrgqz082lnrq22m2zdxf4r4cszm95yr309zqfedcsszmdpqck3x045p9d3d89fht8cux79t0cer0fzzlznqkhyclu",
@@ -34,7 +34,7 @@
         "assets": []
       },
       "datum": null,
-      "reference_script": null
+      "script_ref": null
     }
   }
 }

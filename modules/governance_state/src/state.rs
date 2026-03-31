@@ -6,10 +6,9 @@ use crate::{
 };
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
-    caryatid::RollbackAwarePublisher,
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, DRepStateMessage, GovernanceOutcomesMessage,
-        GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
+        DRepStakeDistributionMessage, DRepStateMessage, GovernanceOutcomesMessage,
+        GovernanceProceduresMessage, ProtocolParamsMessage, SPOStakeDistributionMessage,
     },
     protocol_params::ProtocolVersion,
     validation::{GovernanceValidationError, ValidationError},
@@ -17,14 +16,11 @@ use acropolis_common::{
     ProposalProcedure, TxHash, Voter, VotingProcedure,
 };
 use anyhow::{anyhow, bail, Result};
-use caryatid_sdk::Context;
 use hex::ToHex;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 use tracing::info;
 
 pub struct State {
-    publisher: RollbackAwarePublisher<Message>,
-
     pub drep_stake_messages_count: usize,
 
     current_era: Era,
@@ -39,14 +35,10 @@ pub struct State {
 
 impl State {
     pub fn new(
-        context: Arc<Context<Message>>,
-        enact_state_topic: String,
         verification_output_file: Option<String>,
         verify_votes_files: Option<String>,
     ) -> Self {
         Self {
-            publisher: RollbackAwarePublisher::new(context, enact_state_topic),
-
             drep_stake_messages_count: 0,
 
             current_era: Era::default(),
@@ -240,23 +232,6 @@ impl State {
             self.drep_stake_messages_count,
             self.drep_stake.len(),
         );
-    }
-
-    pub async fn send(
-        &mut self,
-        block: &BlockInfo,
-        message: GovernanceOutcomesMessage,
-    ) -> Result<()> {
-        let packed_message = Arc::new(Message::Cardano((
-            block.clone(),
-            CardanoMessage::GovernanceOutcomes(message),
-        )));
-        self.publisher.publish(packed_message).await
-    }
-
-    /// Publish a rollback message, if we have anything to roll back
-    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
-        self.publisher.publish(message).await
     }
 
     /// Get list of actual voting proposals
