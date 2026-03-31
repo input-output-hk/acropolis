@@ -507,7 +507,7 @@ impl SPOState {
             // Commit the new state, publish validation outcome
             if let Some((block_info, _)) = certs_msg {
                 if let Some(rollback_handler) = rollback_handler.as_mut() {
-                    rollback_handler.check(&state, &block_info)?;
+                    rollback_handler.check(&state, block_info.number)?;
                 }
 
                 if block_info.intent.do_validation() {

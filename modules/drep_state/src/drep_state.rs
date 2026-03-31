@@ -289,7 +289,7 @@ impl DRepState {
                 }
 
                 if let Some(rollback_handler) = rollback_handler.as_mut() {
-                    rollback_handler.check(&state, block_info)?;
+                    rollback_handler.check(&state, block_info.number)?;
                 }
 
                 history.lock().await.commit(block_info.number, state);

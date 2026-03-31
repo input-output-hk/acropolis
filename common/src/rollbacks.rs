@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::{BlockInfo, BlockNumber};
+use crate::BlockNumber;
 use anyhow::{anyhow, Result};
 
 //
@@ -17,7 +17,7 @@ pub trait StateStore {
 // RollbackChecker
 //
 pub struct RollbackChecker<T: StateStore> {
-    capture_block: BlockNumber,
+    capture_number: u64,
     store: T,
 }
 
@@ -25,26 +25,25 @@ impl<T: StateStore> RollbackChecker<T>
 where
     T::State: PartialEq + Clone,
 {
-    pub fn new(capture_block: BlockNumber, store: T) -> Self {
+    pub fn new(capture_number: BlockNumber, store: T) -> Self {
         Self {
-            capture_block,
+            capture_number,
             store,
         }
     }
 
-    pub fn check(&mut self, state: &T::State, block_info: &BlockInfo) -> Result<()> {
-        if block_info.number != self.capture_block {
+    pub fn check(&mut self, state: &T::State, actual_number: u64) -> Result<()> {
+        if actual_number != self.capture_number {
             return Ok(());
         }
 
         match self.store.load() {
-            Some(captured) if state != &captured => Err(anyhow!(
-                "State mismatch at capture block {}",
-                self.capture_block
-            )),
+            Some(captured) if state != &captured => {
+                Err(anyhow!("State mismatch at {}", self.capture_number))
+            }
             Some(_) => Ok(()),
             None => {
-                tracing::info!("Captured state at block {}", self.capture_block);
+                tracing::info!("Captured state at {}", self.capture_number);
                 self.store.save(state.clone());
                 Ok(())
             }
