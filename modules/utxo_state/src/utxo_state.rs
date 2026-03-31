@@ -6,9 +6,10 @@ use acropolis_common::{
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
-        CardanoMessage, Message, PoolRegistrationUpdatesMessage, ProtocolParamsMessage,
-        SnapshotMessage, SnapshotStateMessage, StakeRegistrationUpdatesMessage, StateQuery,
-        StateQueryResponse, StateTransitionMessage, UTXODeltasMessage,
+        CardanoMessage, GenesisCompleteMessage, Message, PoolRegistrationUpdatesMessage,
+        ProtocolParamsMessage, SnapshotMessage, SnapshotStateMessage,
+        StakeRegistrationUpdatesMessage, StateQuery, StateQueryResponse, StateTransitionMessage,
+        UTXODeltasMessage,
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
 };
@@ -48,8 +49,15 @@ use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
 use crate::reference_scripts_state::ReferenceScriptsState;
 mod utils;
-mod validations;
+pub mod validations;
 
+declare_cardano_reader!(
+    BootstrappedReader,
+    "bootstrapped-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+    GenesisComplete,
+    GenesisCompleteMessage
+);
 declare_cardano_reader!(
     UTxODeltasReader,
     "utxo-deltas-subscribe-topic",
@@ -100,13 +108,22 @@ impl UTXOState {
     async fn run(
         context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,
+        mut bootstrapped_reader: BootstrappedReader,
         mut utxo_deltas_reader: UTxODeltasReader,
         mut params_reader: ParamsReader,
         mut pool_updates_reader: Option<PoolUpdatesReader>,
         mut stake_updates_reader: Option<StakeUpdatesReader>,
         publish_tx_validation_topic: String,
+        phase2_enabled: bool,
         is_snapshot_mode: bool,
     ) -> Result<()> {
+        let genesis_values = match bootstrapped_reader.read_with_rollbacks().await? {
+            RollbackWrapper::Normal((_, genesis)) => genesis.values.clone(),
+            RollbackWrapper::Rollback(_) => {
+                panic!("Unexpected rollback while reading genesis");
+            }
+        };
+
         let mut bootstrap_block_processed = false;
 
         loop {
@@ -184,8 +201,7 @@ impl UTXOState {
                 if block.intent.do_validation() {
                     async {
                         let mut state = state.lock().await;
-
-                        ctx.handle(
+                        ctx.merge(
                             "validate",
                             state
                                 .validate(
@@ -194,11 +210,11 @@ impl UTXOState {
                                     &pool_registration_updates,
                                     &stake_registration_updates,
                                     &current_protocol_params,
+                                    &genesis_values,
+                                    phase2_enabled,
                                 )
-                                .await
-                                .map_err(|e| e.into()),
+                                .await,
                         );
-
                         ctx.publish().await;
                     }
                     .instrument(span)
@@ -246,6 +262,12 @@ impl UTXOState {
             info!("Creating stake registration updates subscriber on '{topic}'");
         }
 
+        // Phase 2 script validation (disabled by default)
+        let phase2_enabled = config.get_bool("phase2-enabled").unwrap_or(false);
+        if phase2_enabled {
+            info!("Phase 2 script validation enabled");
+        }
+
         // Subscribers
         let pool_updates_reader = if pool_registration_updates_subscribe_topic.is_some() {
             Some(PoolUpdatesReader::new(&context, &config).await?)
@@ -257,6 +279,7 @@ impl UTXOState {
         } else {
             None
         };
+        let bootstrapped_reader = BootstrappedReader::new(&context, &config).await?;
         let utxo_deltas_reader = UTxODeltasReader::new(&context, &config).await?;
         let params_reader = ParamsReader::new(&context, &config).await?;
 
@@ -315,11 +338,13 @@ impl UTXOState {
             Self::run(
                 context_run,
                 state_run,
+                bootstrapped_reader,
                 utxo_deltas_reader,
                 params_reader,
                 pool_updates_reader,
                 stake_updates_reader,
                 utxo_validation_publish_topic,
+                phase2_enabled,
                 is_snapshot_mode,
             )
             .await

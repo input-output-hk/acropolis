@@ -152,9 +152,9 @@ pub fn get_scripts_provided(
     // Check scripts witnesses
     if let Some(script_witnesses) = tx_deltas.script_witnesses.as_ref() {
         scripts_provided.extend(
-            script_witnesses
-                .iter()
-                .map(|(script_hash, script_lang)| (*script_hash, script_lang.clone())),
+            script_witnesses.iter().map(|(script_hash, reference_script)| {
+                (*script_hash, reference_script.get_script_lang())
+            }),
         );
     }
 

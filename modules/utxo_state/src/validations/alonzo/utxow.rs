@@ -216,10 +216,17 @@ mod tests {
 
     #[test_case(validation_fixture!(
         "alonzo",
+        "a95d16e891e51f98a3b1d3fe862ed355ebc8abffb7a7269d86f775553d9e653f"
+    ) =>
+        matches Ok(());
+        "alonzo - valid transaction 1 - with contract"
+    )]
+    #[test_case(validation_fixture!(
+        "alonzo",
         "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590"
     ) =>
         matches Ok(());
-        "alonzo - valid transaction 1 - with contracts"
+        "alonzo - valid transaction 2 - with contracts"
     )]
     #[test_case(validation_fixture!(
         "conway",

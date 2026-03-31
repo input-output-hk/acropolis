@@ -69,7 +69,6 @@ grpc-bind-address = "0.0.0.0:50051"
 # Subscriptions needed for validation
 bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
 protocol-parameters-subscribe-topic = "cardano.protocol.parameters"
-phase2-enabled = false
 
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
@@ -83,6 +82,7 @@ block-totals-topic = "cardano.block.txs"
 address-delta-publish-mode = "extended"
 pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
 stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"
+phase2-enabled = false
 
 [module.spo-state]
 

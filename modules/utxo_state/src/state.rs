@@ -1,12 +1,13 @@
 //! Acropolis UTXOState: State storage
 use crate::address_delta_mode::AddressDeltaPublishMode;
 use crate::reference_scripts_state::ReferenceScriptsState;
-use crate::validations;
+use crate::validations::{self, Phase2Params};
 use crate::volatile_index::VolatileIndex;
+use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::messages::Message;
 use acropolis_common::protocol_params::ProtocolParams;
 use acropolis_common::state_history::{StateHistory, StateHistoryStore};
-use acropolis_common::validation::ValidationError;
+use acropolis_common::validation::{ValidationError, ValidationOutcomes};
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
@@ -871,6 +872,7 @@ impl State {
         utxos
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn validate(
         &mut self,
         block: &BlockInfo,
@@ -878,7 +880,9 @@ impl State {
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
         protocol_params: &ProtocolParams,
-    ) -> Result<(), Box<ValidationError>> {
+        genesis_values: &GenesisValues,
+        phase2_enabled: bool,
+    ) -> Result<ValidationOutcomes> {
         let mut bad_transactions = Vec::new();
         let deltas = &deltas_msg.deltas;
 
@@ -890,6 +894,18 @@ impl State {
 
         for tx_deltas in deltas.iter() {
             if block.status != BlockStatus::Bootstrap {
+                let phase2_params: Option<Phase2Params> = if phase2_enabled {
+                    Some(Phase2Params {
+                        cost_models: &protocol_params.cost_models(),
+                        genesis_values,
+                        lookup_reference_script: &|script_hash| {
+                            self.lookup_reference_script(script_hash)
+                        },
+                    })
+                } else {
+                    None
+                };
+
                 if let Err(e) = validations::validate_tx(
                     tx_deltas,
                     pool_registration_updates,
@@ -897,6 +913,7 @@ impl State {
                     &utxos,
                     protocol_params,
                     block.era,
+                    phase2_params.as_ref(),
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
                 }
@@ -908,13 +925,12 @@ impl State {
             }
         }
 
-        if bad_transactions.is_empty() {
-            Ok(())
-        } else {
-            Err(Box::new(ValidationError::BadTransactions {
-                bad_transactions,
-            }))
+        let mut validation_outcomes = ValidationOutcomes::new();
+        if !bad_transactions.is_empty() {
+            validation_outcomes.push(ValidationError::BadTransactions { bad_transactions });
         }
+
+        Ok(validation_outcomes)
     }
 }
 

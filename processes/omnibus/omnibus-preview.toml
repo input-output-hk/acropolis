@@ -74,14 +74,6 @@ force-validation = false
 bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
 protocol-parameters-subscribe-topic = "cardano.protocol.parameters"
 
-# Plutus Phase 2 Validation
-# Enable Phase 2 script validation (Plutus/native scripts).
-# When enabled, transactions with Plutus scripts will be fully evaluated.
-# When disabled (default), script validation is skipped for faster sync.
-# WARNING: Enable only after thorough testing. Incorrect script evaluation
-# can cause consensus failures or missed invalid transactions.
-phase2-enabled = false
-
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
@@ -95,6 +87,14 @@ address-delta-topic = "cardano.address.deltas"
 block-totals-topic = "cardano.block.txs"
 pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
 stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"
+
+# Plutus Phase 2 Validation
+# Enable Phase 2 script validation (Plutus/native scripts).
+# When enabled, transactions with Plutus scripts will be fully evaluated.
+# When disabled (default), script validation is skipped for faster sync.
+# WARNING: Enable only after thorough testing. Incorrect script evaluation
+# can cause consensus failures or missed invalid transactions.
+phase2-enabled = false
 
 [module.spo-state]
 # Enables /pools/{pool_id}/history endpoint, enables to query active_stakes

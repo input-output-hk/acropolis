@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use acropolis_common::{
+    genesis_values::GenesisValues,
     protocol_params::ProtocolParams,
     validation::{Phase1ValidationError, TransactionValidationError},
-    Era, PoolRegistrationUpdate, ReferenceScript, ScriptHash, StakeRegistrationUpdate,
+    CostModels, Era, PoolRegistrationUpdate, ReferenceScript, ScriptHash, StakeRegistrationUpdate,
     TxUTxODeltas, UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
@@ -11,7 +12,15 @@ use anyhow::Result;
 use crate::utils;
 mod alonzo;
 mod babbage;
+pub mod phase2;
 mod shelley;
+
+/// Parameters for optional phase 2 script validation.
+pub struct Phase2Params<'a> {
+    pub genesis_values: &'a GenesisValues,
+    pub cost_models: &'a CostModels,
+    pub lookup_reference_script: &'a dyn Fn(&ScriptHash) -> Option<ReferenceScript>,
+}
 
 pub fn validate_tx(
     tx_deltas: &TxUTxODeltas,
@@ -20,6 +29,7 @@ pub fn validate_tx(
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
     protocol_params: &ProtocolParams,
     era: Era,
+    phase2_params: Option<&Phase2Params>,
 ) -> Result<(), Box<TransactionValidationError>> {
     let inputs = &tx_deltas.consumes;
     let total_consumed = tx_deltas.calculate_total_consumed(stake_registration_updates, utxos);
@@ -84,6 +94,23 @@ pub fn validate_tx(
             .collect();
         babbage::utxow::validate(created_reference_scripts)
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
+    }
+
+    // Phase 2: Plutus script execution (if params provided and redeemers present)
+    let has_redeemers = tx_deltas.redeemers.as_ref().is_some_and(|r| !r.is_empty());
+    if has_redeemers && era >= Era::Alonzo {
+        if let Some(p2) = phase2_params {
+            phase2::validate_tx_phase2(
+                tx_deltas,
+                utxos,
+                p2.genesis_values,
+                p2.cost_models,
+                &scripts_needed,
+                &scripts_provided,
+                p2.lookup_reference_script,
+            )
+            .map_err(|e| Box::new(e.into()))?;
+        }
     }
 
     Ok(())
