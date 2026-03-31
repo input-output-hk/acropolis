@@ -36,7 +36,7 @@ pub fn validate_output_too_big_utxo(
 ) -> UTxOValidationResult {
     let max_value_size = if era < Era::Allegra {
         unreachable!("This check should be called since Allegra era");
-    } else if era == Era::Allegra {
+    } else if era == Era::Allegra || era == Era::Mary {
         ALLEGRA_MAX_VALUE_SIZE
     } else {
         protocol_params.max_value_size().ok_or_else(|| {
