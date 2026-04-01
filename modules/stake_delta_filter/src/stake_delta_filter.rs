@@ -16,7 +16,7 @@ use acropolis_common::{
         },
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus, NetworkId,
+    NetworkId,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -302,7 +302,8 @@ impl StakeDeltaFilter {
                         .await
                         .unwrap_or_else(|e| error!("Publish error: {e}"))
                 }
-                RollbackWrapper::Rollback(message) => {
+                RollbackWrapper::Rollback((_, message)) => {
+                    // Publish rollbacks downstream
                     publisher
                         .publish_rollback(message)
                         .await
@@ -451,10 +452,6 @@ impl StakeDeltaFilter {
             let block_info =
                 match ctx.consume_sync("certs", certs_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, tx_cert_msg)) => {
-                        if block_info.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(block_info.number);
-                        }
-
                         state
                             .handle_certs(&block_info, &tx_cert_msg)
                             .await
@@ -463,8 +460,13 @@ impl StakeDeltaFilter {
 
                         Some(block_info)
                     }
-                    RollbackWrapper::Rollback(message) => {
+                    RollbackWrapper::Rollback((block_info, message)) => {
+                        // Handle rollbacks on this topic only
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
+
+                        // Publish rollbacks downstream
                         publisher.publish_rollback(message).await?;
+
                         None
                     }
                 };
@@ -483,6 +485,10 @@ impl StakeDeltaFilter {
             if let Some(block_info) = block_info {
                 state.save()?;
                 history.lock().await.commit(block_info.number, state);
+
+                if block_info.intent.do_validation() {
+                    ctx.publish().await;
+                }
             }
         }
     }

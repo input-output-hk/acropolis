@@ -14,7 +14,7 @@ use acropolis_common::{
         ParametersStateQuery, ParametersStateQueryResponse, DEFAULT_PARAMETERS_QUERY_TOPIC,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
+    BlockInfo,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -30,14 +30,7 @@ mod state;
 use parameters_updater::ParametersUpdater;
 use state::State;
 
-declare_cardano_reader!(
-    GovOutcomesReader,
-    "enact-state-topic",
-    "cardano.enact.state",
-    GovernanceOutcomes,
-    GovernanceOutcomesMessage
-);
-
+const CONFIG_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 const CONFIG_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const CONFIG_NETWORK_NAME: (&str, &str) = ("startup.network-name", "mainnet");
@@ -45,6 +38,14 @@ const CONFIG_STORE_HISTORY: (&str, bool) = ("store-history", false);
 /// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
 const CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
+
+declare_cardano_reader!(
+    GovOutcomesReader,
+    CONFIG_ENACT_STATE_TOPIC.0,
+    CONFIG_ENACT_STATE_TOPIC.1,
+    GovernanceOutcomes,
+    GovernanceOutcomesMessage
+);
 
 /// Parameters State module
 #[module(
@@ -128,21 +129,16 @@ impl ParametersState {
                             h.get_or_init_with(|| State::new(config.network_name.clone()))
                         };
 
-                        // Handle rollback if needed
-                        if block.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(block.epoch);
-                        }
-
                         if block.new_epoch {
                             // Get current params
                             let current_params = state.current_params.get_params();
 
                             // Process GovOutcomes message on epoch transition
-                            let new_params = state.handle_enact_state(&block.era, &gov).await?;
+                            let new_params =
+                                state.handle_enact_state(&block.era, gov.as_ref()).await?;
 
                             // Publish protocol params message
-                            Self::publish_update(&config, &block, new_params.clone())?;
-                            tracing::error!("params: Published params");
+                            Self::publish_update(&config, block.as_ref(), new_params.clone())?;
 
                             // Commit state on params change
                             if current_params != new_params.params {
@@ -161,8 +157,7 @@ impl ParametersState {
                     .instrument(span)
                     .await?;
                 }
-                RollbackWrapper::Rollback(message) => {
-                    tracing::error!("params: Published rollback");
+                RollbackWrapper::Rollback((_, message)) => {
                     // forward the rollback downstream
                     config.context.publish(&config.protocol_parameters_topic, message).await?;
                 }

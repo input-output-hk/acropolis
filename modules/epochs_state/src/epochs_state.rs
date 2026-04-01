@@ -2,7 +2,7 @@
 //! Unpacks block bodies to get transaction fees
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -17,7 +17,6 @@ use acropolis_common::{
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -194,81 +193,88 @@ impl EpochsState {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));
 
-            match ctx.consume_sync("proposed block", block_reader.read_with_rollbacks().await)? {
-                RollbackWrapper::Normal((blk_info, blk_msg)) => {
-                    if blk_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(blk_info.number);
+            let primary = PrimaryRead::from_sync(
+                &mut ctx,
+                "block_reader",
+                block_reader.read_with_rollbacks().await,
+            )?;
+
+            if primary.is_rollback() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+
+                let rollback_message = primary
+                    .rollback_message()
+                    .cloned()
+                    .expect("rollback primary read should include rollback message");
+                ctx.handle(
+                    "publish_rollback",
+                    epoch_activity_publisher.publish_rollback(rollback_message).await,
+                );
+            }
+
+            if primary.should_read_epoch_messages() {
+                match ctx
+                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
+                {
+                    RollbackWrapper::Normal((_, params)) => {
+                        state.handle_protocol_parameters(&params);
                     }
-                    let is_new_epoch = blk_info.new_epoch && blk_info.epoch > 0;
-
-                    if is_new_epoch {
-                        match ctx.consume_sync(
-                            "protocol params",
-                            params_reader.read_with_rollbacks().await,
-                        )? {
-                            RollbackWrapper::Normal((_, params)) => {
-                                state.handle_protocol_parameters(&params);
-                            }
-                            RollbackWrapper::Rollback(_) => {}
-                        }
-
-                        let ea = state.end_epoch(&blk_info);
-                        // publish epoch activity message
-                        ctx.handle(
-                            "publish epoch activity",
-                            epoch_activity_publisher.publish(&blk_info, ea).await,
-                        );
-                    }
-
-                    let header = ctx.handle(
-                        "epochs_state.decode_header",
-                        match MultiEraHeader::decode(blk_info.era as u8, None, &blk_msg.header) {
-                            Err(e) => Err(anyhow!("Can't decode header {}: {e}", blk_info.slot)),
-                            Ok(res) => Ok(Some(res)),
-                        },
-                    );
-
-                    let span = info_span!("epochs_state.evolve_nonces", block = blk_info.number);
-                    span.in_scope(|| {
-                        if let Some(header) = header.as_ref() {
-                            ctx.handle(
-                                "evolve_nonces",
-                                state.evolve_nonces(&genesis.values, &blk_info, header),
-                            )
-                        }
-                    });
-
-                    // At the beginning of epoch, publish the newly evolved active nonce
-                    // for that epoch
-                    if is_new_epoch {
-                        let active_nonce = state.get_active_nonce();
-                        ctx.handle(
-                            "publish epoch nonce",
-                            epoch_nonce_publisher.publish(&blk_info, active_nonce).await,
-                        );
-                    }
-
-                    let span = info_span!("epochs_state.handle_mint", block = blk_info.number);
-                    span.in_scope(|| {
-                        if let Some(header) = header.as_ref() {
-                            state.handle_mint(
-                                &blk_info,
-                                header.issuer_vkey(),
-                                header.as_byron().is_some(),
-                            );
-                        }
-                    });
+                    RollbackWrapper::Rollback(_) => {}
                 }
-                RollbackWrapper::Rollback(raw_message) => {
+
+                if primary.should_read_epoch_transition_messages() {
+                    let blk_info = primary.block_info().clone();
+                    let ea = state.end_epoch(&blk_info);
+                    // publish epoch activity message
                     ctx.handle(
-                        "publishing rollback message",
-                        epoch_activity_publisher.publish_rollback(raw_message).await,
+                        "epoch_activity_publisher.publish",
+                        epoch_activity_publisher.publish(&blk_info, ea).await,
                     );
                 }
             }
 
+            if let Some(blk_msg) = primary.message() {
+                let blk_info = primary.block_info().clone();
+                let header = ctx.handle(
+                    "decode",
+                    match MultiEraHeader::decode(blk_info.era as u8, None, &blk_msg.header) {
+                        Err(e) => Err(anyhow!("Can't decode header {}: {e}", blk_info.slot)),
+                        Ok(res) => Ok(Some(res)),
+                    },
+                );
+
+                let span = info_span!("epochs_state.evolve_nonces", block = blk_info.number);
+                span.in_scope(|| {
+                    if let Some(header) = header.as_ref() {
+                        ctx.handle(
+                            "evolve_nonces",
+                            state.evolve_nonces(&genesis.values, &blk_info, header),
+                        )
+                    }
+                });
+
+                if primary.should_read_epoch_transition_messages() {
+                    let active_nonce = state.get_active_nonce();
+                    ctx.handle(
+                        "publish",
+                        epoch_nonce_publisher.publish(&blk_info, active_nonce).await,
+                    );
+                }
+
+                let span = info_span!("epochs_state.handle_mint", block = blk_info.number);
+                span.in_scope(|| {
+                    if let Some(header) = header.as_ref() {
+                        state.handle_mint(
+                            &blk_info,
+                            header.issuer_vkey(),
+                            header.as_byron().is_some(),
+                        );
+                    }
+                });
+            }
+
             // Handle block txs second so new epoch's state don't get counted in the last one
-            match ctx.consume_sync("block_txs", txs_reader.read_with_rollbacks().await)? {
+            match ctx.consume_sync("txs_reader", txs_reader.read_with_rollbacks().await)? {
                 RollbackWrapper::Normal((blk_info, msg)) => {
                     let span = info_span!("epochs_state.handle_block_txs", block = blk_info.number);
                     span.in_scope(|| state.handle_block_txs(&blk_info, &msg));
@@ -278,10 +284,11 @@ impl EpochsState {
 
             // Commit the new state
             if let Some(block_info) = ctx.get_current_block_opt() {
+                if block_info.intent.do_validation() {
+                    ctx.publish().await;
+                }
                 history.lock().await.commit(block_info.number, state);
             }
-
-            ctx.publish().await;
         }
     }
 
