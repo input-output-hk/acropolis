@@ -47,6 +47,22 @@ impl RollbackAwarePublisher<Message> {
             _ => self.context.publish(&self.topic, message).await,
         }
     }
+
+    /// Publish a rollback message without suppressing it based on prior activity.
+    /// This keeps synchronized downstream readers from desynchronizing when the
+    /// rollback point is ahead of the last message published on the topic.
+    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> Result<()> {
+        match message.as_ref() {
+            Message::Cardano((
+                _,
+                CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+            )) => {
+                self.last_activity_at = None;
+                self.context.publish(&self.topic, message).await
+            }
+            _ => self.publish(message).await,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -59,6 +75,107 @@ pub enum RollbackWrapper<T> {
 pub enum RollbackWrapperStatus {
     Normal,
     Rollback,
+}
+
+#[derive(Debug)]
+pub enum PrimaryRead<T> {
+    Normal {
+        block_info: Arc<BlockInfo>,
+        message: Arc<T>,
+    },
+    Rollback {
+        block_info: Arc<BlockInfo>,
+        rollback_message: Arc<Message>,
+    },
+}
+
+impl<T> PrimaryRead<T> {
+    pub fn from_sync(
+        ctx: &mut ValidationContext,
+        handler: &str,
+        input: Result<RollbackWrapper<T>>,
+    ) -> Result<Self> {
+        match ctx.consume_sync(handler, input)? {
+            RollbackWrapper::Normal((block_info, message)) => Ok(Self::Normal {
+                block_info,
+                message,
+            }),
+            RollbackWrapper::Rollback((block_info, rollback_message)) => Ok(Self::Rollback {
+                block_info,
+                rollback_message,
+            }),
+        }
+    }
+
+    pub fn block_info(&self) -> &Arc<BlockInfo> {
+        match self {
+            Self::Normal { block_info, .. } | Self::Rollback { block_info, .. } => block_info,
+        }
+    }
+
+    pub fn message(&self) -> Option<&Arc<T>> {
+        match self {
+            Self::Normal { message, .. } => Some(message),
+            Self::Rollback { .. } => None,
+        }
+    }
+
+    pub fn rollback_message(&self) -> Option<&Arc<Message>> {
+        match self {
+            Self::Normal { .. } => None,
+            Self::Rollback {
+                rollback_message, ..
+            } => Some(rollback_message),
+        }
+    }
+
+    pub fn is_rollback(&self) -> bool {
+        matches!(self, Self::Rollback { .. })
+    }
+
+    pub fn do_validation(&self) -> bool {
+        !self.is_rollback() && self.block_info().intent.do_validation()
+    }
+
+    pub fn should_read_epoch_messages(&self) -> bool {
+        self.is_rollback() || self.block_info().new_epoch
+    }
+
+    pub fn should_read_epoch_transition_messages(&self) -> bool {
+        self.is_rollback() || Self::is_epoch_boundary(self.block_info())
+    }
+
+    pub fn epoch(&self) -> Option<u64> {
+        match self {
+            Self::Normal { block_info, .. } if Self::is_epoch_boundary(block_info) => {
+                Some(block_info.epoch)
+            }
+            Self::Normal { .. } | Self::Rollback { .. } => None,
+        }
+    }
+
+    fn is_epoch_boundary(block_info: &BlockInfo) -> bool {
+        block_info.new_epoch && block_info.epoch > 0
+    }
+}
+
+impl PrimaryRead<Message> {
+    pub fn from_cardano_message(message: Arc<Message>) -> Result<Self> {
+        match message.as_ref() {
+            Message::Cardano((
+                block_info,
+                CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+            )) => Ok(Self::Rollback {
+                block_info: Arc::new(block_info.clone()),
+                rollback_message: message,
+            }),
+            Message::Cardano((block_info, _)) => Ok(Self::Normal {
+                block_info: Arc::new(block_info.clone()),
+                message,
+            }),
+            msg => bail!("Unexpected message {msg:?}"),
+        }
+    }
 }
 
 /// Declares locally tailored cardano reader struct, providing a lightweight wrapper around

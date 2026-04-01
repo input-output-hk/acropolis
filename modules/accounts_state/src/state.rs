@@ -1662,7 +1662,7 @@ impl State {
                 withdrawal.address, withdrawal.tx_identifier, withdrawal.value
             );
             ctx.handle(
-                "process withdrawal",
+                "process_withdrawal",
                 stake_addresses.process_withdrawal(withdrawal),
             );
         }
@@ -1678,7 +1678,7 @@ impl State {
         for delta in deltas_msg.deltas.iter() {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
             ctx.handle(
-                "process stake delta",
+                "process_stake_delta",
                 stake_addresses.process_stake_delta(delta),
             );
         }
