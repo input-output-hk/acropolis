@@ -166,8 +166,7 @@ impl BlockKesValidator {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
             }
 
-            let sync_side_readers = primary.is_rollback() || primary.epoch().is_some();
-            if sync_side_readers {
+            if primary.should_read_epoch_transition_messages() {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {

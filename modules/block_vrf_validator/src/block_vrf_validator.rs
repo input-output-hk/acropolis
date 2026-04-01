@@ -204,8 +204,7 @@ impl BlockVrfValidator {
             }
 
             let epoch = primary.epoch();
-            let sync_side_readers = primary.is_rollback() || epoch.is_some();
-            if sync_side_readers {
+            if primary.should_read_epoch_transition_messages() {
                 // Read readers that publish new-epoch snapshots or rollback markers.
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?

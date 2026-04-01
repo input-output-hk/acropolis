@@ -208,13 +208,16 @@ impl EpochsState {
                     .expect("rollback primary read should include rollback message");
                 ctx.handle(
                     "publish_message",
-                    epoch_activity_publisher.publish_message(rollback_message).await,
+                    epoch_activity_publisher.publish_message(rollback_message.clone()).await,
                 );
+                ctx.handle(
+                    "publish_rollback",
+                    epoch_nonce_publisher.publish_rollback(rollback_message).await,
+                )
             }
 
             let epoch = primary.epoch();
-            let sync_side_readers = primary.is_rollback() || epoch.is_some();
-            if sync_side_readers {
+            if primary.should_read_epoch_transition_messages() {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {
