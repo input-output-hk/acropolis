@@ -55,6 +55,12 @@ pub enum RollbackWrapper<T> {
     Normal((Arc<BlockInfo>, Arc<T>)),
 }
 
+#[derive(Debug, PartialEq)]
+pub enum RollbackWrapperStatus {
+    Normal,
+    Rollback,
+}
+
 /// Declares locally tailored cardano reader struct, providing a lightweight wrapper around
 /// Subscribers from topics. The Main intention is to get rid of boilerplate code, and simplify:
 /// (a) topic configuration, config parameters reading and reader initialization;
@@ -151,6 +157,7 @@ macro_rules! declare_cardano_reader {
 pub struct ValidationContext {
     context: Arc<Context<Message>>,
     current_block: Option<Arc<BlockInfo>>,
+    current_wrapper: Option<RollbackWrapperStatus>,
     validation: ValidationOutcomes,
     validation_topic: String,
     module: String,
@@ -162,6 +169,7 @@ impl ValidationContext {
             validation: ValidationOutcomes::new(),
             current_block: None,
             context: context.clone(),
+            current_wrapper: None,
             validation_topic: validation_topic.to_owned(),
             module: module.to_owned(),
         }
@@ -223,20 +231,21 @@ impl ValidationContext {
         match &inp {
             Ok(RollbackWrapper::Normal((blk, _msg))) => {
                 if self.current_block.is_some() {
-                    self.check_sync(handler, blk);
+                    self.check_sync(handler, blk, RollbackWrapperStatus::Normal);
                 } else {
+                    self.current_wrapper = Some(RollbackWrapperStatus::Normal);
                     self.current_block = Some(blk.clone());
                 }
             }
             Ok(RollbackWrapper::Rollback((blk, _msg))) => {
                 if self.current_block.is_some() {
-                    self.check_sync(handler, blk);
+                    self.check_sync(handler, blk, RollbackWrapperStatus::Rollback);
                 } else {
+                    self.current_wrapper = Some(RollbackWrapperStatus::Rollback);
                     self.current_block = Some(blk.clone());
                 }
             }
             Err(e) => {
-                self.current_block = None;
                 bail!("Error handling sync block: {e}");
             }
         }
@@ -258,9 +267,9 @@ impl ValidationContext {
     }
 
     /// Check for synchronisation
-    fn check_sync(&mut self, handler: &str, actual: &BlockInfo) {
+    fn check_sync(&mut self, handler: &str, actual: &BlockInfo, status: RollbackWrapperStatus) {
         if let Some(ref block) = self.current_block {
-            if block.number != actual.number {
+            if block.number != actual.number || self.current_wrapper != Some(status) {
                 self.handle_error(
                     handler,
                     &anyhow!(
@@ -397,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn consume_sync_normal_then_matching_rollback_keeps_validation_clean() {
+    fn consume_sync_records_validation_error_for_normal_then_matching_rollback() {
         let mut ctx = create_validation_context();
         let block = Arc::new(test_block(42));
 
@@ -420,11 +429,14 @@ mod tests {
             ctx.get_current_block_opt().expect("current block should remain set").number,
             block.number
         );
-        assert_clean_validation(&mut ctx);
+        assert!(
+            ctx.get_validation().as_result().is_err(),
+            "validation should be dirty"
+        );
     }
 
     #[test]
-    fn consume_sync_rollback_then_matching_normal_keeps_validation_clean() {
+    fn consume_sync_records_validation_error_for_rollback_then_matching_normal() {
         let mut ctx = create_validation_context();
         let block = Arc::new(test_block(24));
 
@@ -447,17 +459,20 @@ mod tests {
             ctx.get_current_block_opt().expect("current block should remain set").number,
             block.number
         );
-        assert_clean_validation(&mut ctx);
+        assert!(
+            ctx.get_validation().as_result().is_err(),
+            "validation should be dirty"
+        );
     }
 
     #[test]
-    fn consume_sync_error_clears_current_block() {
+    fn consume_sync_error_retains_block() {
         let mut ctx = create_validation_context();
         let block = Arc::new(test_block(9));
 
         ctx.consume_sync(
             "normal",
-            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((block, Arc::new(1)))),
+            Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((block.clone(), Arc::new(1)))),
         )
         .expect("normal sync should succeed");
         assert!(ctx.get_current_block_opt().is_some());
@@ -469,9 +484,10 @@ mod tests {
             err.to_string().contains("Error handling sync block"),
             "error should be wrapped by consume_sync"
         );
-        assert!(
-            ctx.get_current_block_opt().is_none(),
-            "current block should be cleared on sync errors"
+        assert_eq!(
+            ctx.get_current_block_opt(),
+            Some(block),
+            "current block should not be cleared on sync errors"
         );
     }
 
