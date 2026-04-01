@@ -301,6 +301,7 @@ impl MithrilSnapshotFetcher {
         let mut last_block_number: u64 = 0;
         let mut last_epoch: Option<u64> = None;
         let mut last_era: Option<Era> = None;
+        let mut was_new_epoch: Option<bool> = None;
 
         let mut current_point = point;
         let publish_rollback_block = rollback_block;
@@ -412,7 +413,8 @@ impl MithrilSnapshotFetcher {
                                     current_point = pallas::network::miniprotocols::Point::Specific(
                                         block.slot(),
                                         vec![],
-                                    )
+                                    );
+                                    was_new_epoch = Some(block_info.new_epoch);
                                 }
                             }
 
@@ -455,7 +457,11 @@ impl MithrilSnapshotFetcher {
                                     if publish_rollback_block.is_some() && rollback_block.is_none()
                                     {
                                         if let Some(rollback_block) = publish_rollback_block {
-                                            if block_info.number == rollback_block {
+                                            if block_info.number
+                                                == rollback_block - blocks_to_rollback as u64
+                                            {
+                                                block_info.new_epoch =
+                                                    was_new_epoch.expect("No new epoch set");
                                                 block_info.status = BlockStatus::RolledBack;
                                                 tracing::error!("Publishing rolled back block");
                                             }
@@ -484,10 +490,13 @@ impl MithrilSnapshotFetcher {
                                     body: raw_block,
                                 };
 
-                                tracing::info!("Block number: {}", block_info.number);
                                 if publish_rollback_block.is_some() && rollback_block.is_none() {
                                     if let Some(rollback_block) = publish_rollback_block {
-                                        if block_info.number == rollback_block {
+                                        if block_info.number
+                                            == rollback_block - blocks_to_rollback as u64
+                                        {
+                                            block_info.new_epoch =
+                                                was_new_epoch.expect("No new epoch set");
                                             block_info.status = BlockStatus::RolledBack;
                                             tracing::error!("Publishing rolledback block");
                                         }
