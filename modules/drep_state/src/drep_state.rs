@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the DRep State in memory
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     configuration::{StartupMode, ValidateRollbackHandling},
     declare_cardano_reader,
     messages::{
@@ -188,32 +188,30 @@ impl DRepState {
 
             let mut ctx = ValidationContext::new(&context, &validation_topic, "drep_state");
 
-            let (certs_message, new_epoch) = match &ctx.consume_sync(
+            let primary = PrimaryRead::from_sync(
+                &mut ctx,
                 "certs_reader",
                 subs.certs_reader.read_with_rollbacks().await,
-            )? {
-                RollbackWrapper::Normal(msg @ (blk_inf, _)) => {
-                    let new_epoch =
-                        (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch);
-                    (Some(msg.clone()), new_epoch)
-                }
-                RollbackWrapper::Rollback((_, msg)) => {
-                    ctx.handle(
-                        "publish_rollback",
-                        drep_state_publisher.publish_rollback(msg.clone()).await,
-                    );
-                    (None, None)
-                }
-            };
+            )?;
 
-            // Read from epoch-boundary messages only when it's a new epoch
-            if let Some(new_epoch) = new_epoch {
-                state.update_num_dormant_epochs(new_epoch);
+            if primary.is_rollback() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
 
-                // Read params subscription if store-info is enabled to obtain DRep expiration param.
-                // Update expirations on epoch transition
+                let rollback_message = primary
+                    .rollback_message()
+                    .cloned()
+                    .expect("rollback primary read should include rollback message");
+                ctx.handle(
+                    "publish_rollback",
+                    drep_state_publisher.publish_rollback(rollback_message).await,
+                );
+            }
+
+            // Keep the params reader synchronized on new epochs and explicit rollbacks.
+            let epoch = primary.epoch();
+            if primary.should_read_epoch_messages() {
                 match ctx.consume_sync(
-                    "sparams_reader",
+                    "params_reader",
                     subs.params_reader.read_with_rollbacks().await,
                 )? {
                     RollbackWrapper::Normal((_, msg)) => {
@@ -221,22 +219,30 @@ impl DRepState {
                             "update_protocol_params",
                             state.update_protocol_params(&msg.params),
                         );
-                        ctx.handle(
-                            "update_drep_expirations",
-                            state.update_drep_expirations(new_epoch),
-                        );
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
+            }
+
+            // Read from epoch-boundary messages only when it's a new epoch
+            if let Some(new_epoch) = epoch {
+                state.update_num_dormant_epochs(new_epoch);
+
+                // Update expirations on epoch transition using the current protocol params.
+                ctx.handle(
+                    "update_drep_expirations",
+                    state.update_drep_expirations(new_epoch),
+                );
 
                 // Publish DRep state at the end of the epoch
                 let dreps = state.active_drep_list();
-                let block_info = ctx.get_block_info()?;
+                let block_info = primary.block_info().clone();
                 let inactive_dreps = state.inactive_drep_list(block_info.epoch);
                 drep_state_publisher.publish_drep_state(&block_info, dreps, inactive_dreps).await?;
             }
 
-            if let Some((block_info, tx_certs)) = certs_message {
+            if let Some(tx_certs) = primary.message() {
+                let block_info = primary.block_info().clone();
                 let span = info_span!("drep_state.handle_certs", block = block_info.number);
                 async {
                     ctx.merge(

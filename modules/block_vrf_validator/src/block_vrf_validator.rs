@@ -2,7 +2,7 @@
 //! Validate the VRF calculation in the block header
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     configuration::{StartupMode, ValidateRollbackHandling},
     declare_cardano_reader,
     messages::{
@@ -166,7 +166,9 @@ impl BlockVrfValidator {
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
         };
 
-        // Consume initial protocol parameters or bootstap message
+        // Consume initial protocol parameters or bootstrap message.
+        // Epoch 0 nonce comes from genesis; the first published epoch nonce
+        // only arrives at the first epoch transition.
         if let Some(snapshot_subscription) = snapshot_subscription {
             Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
         } else {
@@ -178,16 +180,6 @@ impl BlockVrfValidator {
                 }
                 RollbackWrapper::Rollback(_) => {
                     bail!("Unexpected rollback while reading initial params");
-                }
-            }
-            match nonce_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, active_nonce)) => {
-                    let mut state = history.lock().await.get_or_init_with(State::new);
-                    state.handle_epoch_nonce(&active_nonce);
-                    history.lock().await.commit(block_info.number, state);
-                }
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial nonce");
                 }
             }
         }
@@ -202,19 +194,18 @@ impl BlockVrfValidator {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(State::new);
 
-            let block_msg =
-                match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, block_msg)) => {
-                        Some((block_info, block_msg.header.clone()))
-                    }
-                    RollbackWrapper::Rollback((block_info, _)) => {
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
-                        None
-                    }
-                };
+            let primary = PrimaryRead::from_sync(
+                &mut ctx,
+                "block_reader",
+                block_reader.read_with_rollbacks().await,
+            )?;
 
-            if block_msg.as_ref().map(|(blk, _)| blk.new_epoch && blk.epoch > 0).unwrap_or(true) {
-                // read epoch boundary messages
+            if primary.is_rollback() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
+
+            if primary.should_read_epoch_messages() {
+                // Read readers that publish new-epoch snapshots or rollback markers.
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {
@@ -224,11 +215,15 @@ impl BlockVrfValidator {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                match ctx.consume_sync("nonce_reader", nonce_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((_, active_nonce)) => {
-                        state.handle_epoch_nonce(&active_nonce);
+                if primary.should_read_epoch_transition_messages() {
+                    match ctx
+                        .consume_sync("nonce_reader", nonce_reader.read_with_rollbacks().await)?
+                    {
+                        RollbackWrapper::Normal((_, active_nonce)) => {
+                            state.handle_epoch_nonce(&active_nonce);
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
-                    RollbackWrapper::Rollback(_) => {}
                 }
 
                 let spo_state_msg =
@@ -251,15 +246,16 @@ impl BlockVrfValidator {
                 }
             }
 
-            if let Some((block_info, block_header)) = block_msg.as_ref() {
-                if block_info.intent.do_validation() {
+            if let Some(block_msg) = primary.message() {
+                let block_info = primary.block_info().clone();
+                if primary.do_validation() {
                     let span =
                         info_span!("block_vrf_validator.validate", block = block_info.number);
                     async {
                         ctx.handle(
                             "validate",
                             state
-                                .validate(block_info, block_header, &genesis)
+                                .validate(&block_info, &block_msg.header, &genesis)
                                 .map_err(anyhow::Error::from),
                         );
                     }
