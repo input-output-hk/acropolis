@@ -38,4 +38,8 @@ impl EpochNoncePublisher {
             )
             .await
     }
+
+    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
+        self.context.message_bus.publish(&self.topic, message).await
+    }
 }

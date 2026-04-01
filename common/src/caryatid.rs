@@ -132,11 +132,11 @@ impl<T> PrimaryRead<T> {
     }
 
     pub fn should_read_epoch_messages(&self) -> bool {
-        self.is_rollback() || self.should_read_epoch_transition_messages()
+        self.is_rollback() || self.block_info().new_epoch
     }
 
     pub fn should_read_epoch_transition_messages(&self) -> bool {
-        self.epoch().is_some()
+        self.is_rollback() || Self::is_epoch_boundary(self.block_info())
     }
 
     pub fn epoch(&self) -> Option<u64> {
