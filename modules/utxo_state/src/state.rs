@@ -255,7 +255,6 @@ impl State {
     }
 
     /// Look up a Reference script
-    #[allow(dead_code)]
     pub fn lookup_reference_script(&self, script_hash: &ScriptHash) -> Option<ReferenceScript> {
         self.reference_scripts_history.get_current_state().lookup_reference_script(script_hash)
     }

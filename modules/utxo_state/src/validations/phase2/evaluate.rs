@@ -346,10 +346,7 @@ fn evaluate_single_script(
             Ok(_) => Err(Phase2ValidationError::UplcMachineError(
                 "evaluated to a non-unit term".into(),
             )),
-            Err(e) => {
-                println!("error: {:?}", e);
-                Err(Phase2ValidationError::UplcMachineError(e.to_string()))
-            }
+            Err(e) => Err(Phase2ValidationError::UplcMachineError(e.to_string())),
         },
     }
 }
