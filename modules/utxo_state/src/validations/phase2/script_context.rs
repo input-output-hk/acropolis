@@ -1,4 +1,5 @@
 use acropolis_common::{
+    crypto::keyhash_256,
     genesis_values::GenesisValues, validation::ScriptContextError, Address, Datum, DatumHash,
     GovActionId, KeyHash, NativeAssetDelta, NativeAssetsDelta, PolicyId, ProposalProcedure,
     Redeemer, RedeemerPointer, RedeemerTag, ScriptHash, ScriptLang, ScriptPurpose, ScriptRef,
@@ -17,6 +18,7 @@ use super::value::encode_mint_value;
 /// Complete transaction information record needed for Plutus script evaluation.
 /// Constructed from `TxUTxODeltas` with resolved UTXO inputs.
 /// Shared across all `ScriptContext`s for the same transaction.
+#[derive(Debug)]
 pub struct TxInfo {
     pub inputs: Vec<ResolvedInput>,
     pub reference_inputs: Vec<ResolvedInput>,
@@ -100,7 +102,20 @@ impl TxInfo {
         let mint = tx_deltas.mint_burn_deltas.clone().unwrap_or_default();
         let signatories = tx_deltas.required_signers.clone().unwrap_or_default();
         let redeemers = tx_deltas.redeemers.clone().unwrap_or_default();
-        let datums = tx_deltas.plutus_data.clone().unwrap_or_default();
+
+        // In Babbage/Conway era, txInfoData includes both explicit datum witnesses AND
+        // inline datums from all inputs and reference inputs (keyed by their hash).
+        let mut datums = tx_deltas.plutus_data.clone().unwrap_or_default();
+        for utxo_id in tx_deltas.consumes.iter().chain(tx_deltas.reference_inputs.iter()) {
+            if let Some(utxo) = utxos.get(utxo_id) {
+                if let Some(Datum::Inline(bytes)) = &utxo.datum {
+                    let hash: DatumHash = keyhash_256(bytes);
+                    if !datums.iter().any(|(h, _)| h == &hash) {
+                        datums.push((hash, bytes.clone()));
+                    }
+                }
+            }
+        }
 
         let tx_hash =
             tx_deltas.produces.first().map(|out| out.utxo_identifier.tx_hash).unwrap_or_default();
@@ -131,6 +146,7 @@ impl TxInfo {
 /// Each `ScriptContext` represents one script that needs to be evaluated,
 /// holding a reference to the shared `TxInfo` plus the execution-specific
 /// data (redeemer, purpose, datum, script identity).
+#[derive(Debug)]
 pub struct ScriptContext<'a> {
     pub tx_info: &'a TxInfo,
     pub script_hash: ScriptHash,
@@ -532,7 +548,7 @@ fn encode_redeemers_map<'a>(
         })
         .collect::<Result<_, ScriptContextError>>()?;
 
-    // Sort by PlutusPurpose constructor order (Spend < Mint < Cert < Reward
+    // Sort by PlutusPurpose constructor order (Mint < Spend < Cert < Reward
     // < Vote < Propose), then by index within each tag.
     entries.sort_by_key(|(sort_key, _, _)| *sort_key);
 

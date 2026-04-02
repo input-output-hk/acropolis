@@ -9,6 +9,7 @@ use super::to_plutus_data::*;
 ///
 /// Constructed from slot-based validity intervals using GenesisValues
 /// for slot-to-timestamp conversion.
+#[derive(Debug)]
 pub struct TimeRange {
     pub lower_bound: Option<SystemTime>,
     pub upper_bound: Option<SystemTime>,

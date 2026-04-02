@@ -277,9 +277,9 @@ impl Datum {
 )]
 pub enum RedeemerTag {
     #[n(0)]
-    Spend,
-    #[n(1)]
     Mint,
+    #[n(1)]
+    Spend,
     #[n(2)]
     Cert,
     #[n(3)]
@@ -338,6 +338,7 @@ pub struct RedeemerPointer {
     pub index: u32,
 }
 
+#[derive(Debug)]
 pub enum ScriptPurpose {
     Spending(UTxOIdentifier),
     Minting(PolicyId),

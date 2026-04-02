@@ -6,6 +6,7 @@ use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::to_plutus_data::*;
 
+#[derive(Debug)]
 pub struct ResolvedInput {
     pub utxo_id: UTxOIdentifier,
     pub utxo_value: UTXOValue,
