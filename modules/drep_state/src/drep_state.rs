@@ -77,6 +77,8 @@ const DEFAULT_STORE_METADATA: (&str, bool) = ("store-metadata", false);
 const DEFAULT_STORE_UPDATES: (&str, bool) = ("store-updates", false);
 const DEFAULT_STORE_VOTES: (&str, bool) = ("store-votes", false);
 
+const DEFAULT_DUMP_INDEX: &str = "startup.dump-state-block";
+
 /// DRep State module
 #[module(
     message_type(Message),
@@ -345,12 +347,14 @@ impl DRepState {
         let validation_topic = get_string_flag(&config, DEFAULT_VALIDATION_OUTPUT_TOPIC);
         info!("Creating DRep state publisher on '{validation_topic}'");
 
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
+
         // Initalize state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "DRepState",
             StateHistoryStore::default_block_store(),
-            None,
-            None,
+            dump_index,
+            Some("drep_state".to_string()),
         )));
         let history_run = history.clone();
         let query_history = history.clone();

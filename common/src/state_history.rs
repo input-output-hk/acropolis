@@ -3,7 +3,11 @@
 //! Use imbl collections in the state to avoid memory explosion!
 
 use serde::Serialize;
-use std::{collections::VecDeque, fs::File, io::Write};
+use std::{
+    collections::VecDeque,
+    fs::{self, File},
+    io::Write,
+};
 use tracing::info;
 
 use crate::params::SECURITY_PARAMETER_K;
@@ -40,6 +44,8 @@ pub struct StateHistory<S> {
     dump_index: Option<u64>,
 
     dump_path: Option<String>,
+
+    rolled_back: bool,
 }
 
 impl<S: Clone + Default + Serialize> StateHistory<S> {
@@ -56,6 +62,7 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
             store,
             dump_index,
             dump_path,
+            rolled_back: false,
         }
     }
 
@@ -89,6 +96,7 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
                 break;
             }
         }
+        self.rolled_back = true;
         self.get_current_state()
     }
 
@@ -147,7 +155,11 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
 
         if let Some(dump_index) = self.dump_index {
             if index == dump_index {
-                self.dump_to_file();
+                if self.rolled_back {
+                    self.compare_states();
+                } else {
+                    self.dump_to_file();
+                }
             }
         }
     }
@@ -191,6 +203,45 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
             }
         } else {
             info!("{} no state to dump", self.module);
+        }
+    }
+
+    fn compare_states(&mut self) {
+        let Some(path) = &self.dump_path else {
+            info!("{} no dump path set", self.module);
+            return;
+        };
+
+        let bytes_pre = match fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!("failed to read {}: {}", path, e);
+                return;
+            }
+        };
+
+        let Some(after_state) = self.history.back().map(|e| &e.state) else {
+            info!("{} no current state to compare", self.module);
+            return;
+        };
+
+        let bytes_after = match bincode::serialize(after_state) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!("serialize after failed: {}", e);
+                return;
+            }
+        };
+
+        if bytes_pre == bytes_after {
+            info!("{} state match after replay", self.module);
+        } else {
+            tracing::error!(
+                "{} state mismatch after replay ({} vs {} bytes)",
+                self.module,
+                bytes_pre.len(),
+                bytes_after.len()
+            );
         }
     }
 }
