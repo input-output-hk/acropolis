@@ -146,7 +146,9 @@ impl HistoricalAccountsState {
                 state.volatile.next_block();
             }
 
-            // Read from epoch-boundary messages only when it's a new epoch
+            let epoch = primary.epoch();
+
+            // Protocol parameters publish on any new epoch, including epoch 0.
             if primary.should_read_epoch_messages() {
                 match params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((block_info, params)) => {
@@ -158,13 +160,16 @@ impl HistoricalAccountsState {
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
+            }
 
+            // Rewards publish on real epoch transitions (>0) and rollbacks.
+            if primary.should_read_epoch_transition_messages() {
                 match rewards_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal((block_info, rewards_msg)) => {
+                    RollbackWrapper::Normal((block_info, rewards_msg)) if epoch.is_some() => {
                         let mut state = state_mutex.lock().await;
                         state.handle_rewards(&rewards_msg, block_info.epoch as u32);
                     }
-                    RollbackWrapper::Rollback(_) => {}
+                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
                 }
             }
 

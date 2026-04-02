@@ -340,69 +340,10 @@ impl SPOState {
                 .await;
             }
 
-            // read from epoch-boundary messages only when it's a new epoch or rollback
+            let epoch = primary.epoch();
+
+            // Protocol parameters publish on any new epoch, including epoch 0.
             if primary.should_read_epoch_messages() {
-                if let Some(reader) = spdd_reader.as_mut() {
-                    // Handle SPDD
-                    match ctx.consume_sync("spdd", reader.read_with_rollbacks().await)? {
-                        RollbackWrapper::Normal((block_info, spdd_message)) => {
-                            // update epochs_history
-                            epochs_history.handle_spdd(&block_info, &spdd_message);
-                        }
-                        RollbackWrapper::Rollback(_) => {}
-                    }
-                }
-
-                // Handle SPO rewards
-                if let Some(reader) = spo_rewards_reader.as_mut() {
-                    match ctx
-                        .consume_sync("spo_rewards_reader", reader.read_with_rollbacks().await)?
-                    {
-                        RollbackWrapper::Normal((block_info, spo_rewards_message)) => {
-                            let span = info_span!(
-                                "spo_state.handle_spo_rewards",
-                                block = block_info.number
-                            );
-                            span.in_scope(|| {
-                                // update epochs_history
-                                ctx.handle(
-                                    "handle_spo_rewards",
-                                    epochs_history
-                                        .handle_spo_rewards(&block_info, &spo_rewards_message)
-                                        .as_result(),
-                                );
-                            });
-                        }
-                        RollbackWrapper::Rollback(_) => {}
-                    }
-                }
-
-                // Handle Stake Reward Deltas
-                if let Some(reader) = stake_reward_deltas_reader.as_mut() {
-                    match ctx.consume_sync(
-                        "stake_reward_deltas_reader",
-                        reader.read_with_rollbacks().await,
-                    )? {
-                        RollbackWrapper::Normal((block_info, stake_reward_deltas_message)) => {
-                            let span = info_span!(
-                                "spo_state.handle_stake_reward_deltas",
-                                block = block_info.number
-                            );
-                            span.in_scope(|| {
-                                // update epochs_history
-                                ctx.handle(
-                                    "handle_stake_reward_deltas",
-                                    state.handle_stake_reward_deltas(
-                                        &block_info,
-                                        &stake_reward_deltas_message,
-                                    ),
-                                );
-                            });
-                        }
-                        RollbackWrapper::Rollback(_) => {}
-                    }
-                }
-
                 // Handle ProtocolParamsMessage
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
@@ -418,13 +359,83 @@ impl SPOState {
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
+            }
+
+            // Transition-only side streams do not publish on the epoch-0 boundary.
+            if primary.should_read_epoch_transition_messages() {
+                if let Some(reader) = spdd_reader.as_mut() {
+                    // Handle SPDD
+                    match ctx.consume_sync("spdd", reader.read_with_rollbacks().await)? {
+                        RollbackWrapper::Normal((block_info, spdd_message)) if epoch.is_some() => {
+                            // update epochs_history
+                            epochs_history.handle_spdd(&block_info, &spdd_message);
+                        }
+                        RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                    }
+                }
+
+                // Handle SPO rewards
+                if let Some(reader) = spo_rewards_reader.as_mut() {
+                    match ctx
+                        .consume_sync("spo_rewards_reader", reader.read_with_rollbacks().await)?
+                    {
+                        RollbackWrapper::Normal((block_info, spo_rewards_message))
+                            if epoch.is_some() =>
+                        {
+                            let span = info_span!(
+                                "spo_state.handle_spo_rewards",
+                                block = block_info.number
+                            );
+                            span.in_scope(|| {
+                                // update epochs_history
+                                ctx.handle(
+                                    "handle_spo_rewards",
+                                    epochs_history
+                                        .handle_spo_rewards(&block_info, &spo_rewards_message)
+                                        .as_result(),
+                                );
+                            });
+                        }
+                        RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                    }
+                }
+
+                // Handle Stake Reward Deltas
+                if let Some(reader) = stake_reward_deltas_reader.as_mut() {
+                    match ctx.consume_sync(
+                        "stake_reward_deltas_reader",
+                        reader.read_with_rollbacks().await,
+                    )? {
+                        RollbackWrapper::Normal((block_info, stake_reward_deltas_message))
+                            if epoch.is_some() =>
+                        {
+                            let span = info_span!(
+                                "spo_state.handle_stake_reward_deltas",
+                                block = block_info.number
+                            );
+                            span.in_scope(|| {
+                                // update epochs_history
+                                ctx.handle(
+                                    "handle_stake_reward_deltas",
+                                    state.handle_stake_reward_deltas(
+                                        &block_info,
+                                        &stake_reward_deltas_message,
+                                    ),
+                                );
+                            });
+                        }
+                        RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                    }
+                }
 
                 // Handle EpochActivityMessage
                 if let Some(reader) = epoch_activity_reader.as_mut() {
                     match ctx
                         .consume_sync("epoch_activity_reader", reader.read_with_rollbacks().await)?
                     {
-                        RollbackWrapper::Normal((block_info, epoch_activity_message)) => {
+                        RollbackWrapper::Normal((block_info, epoch_activity_message))
+                            if epoch.is_some() =>
+                        {
                             let span = info_span!(
                                 "spo_state.handle_epoch_activity",
                                 block = block_info.number
@@ -443,7 +454,7 @@ impl SPOState {
                                 );
                             });
                         }
-                        RollbackWrapper::Rollback(_) => {}
+                        RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
                     }
                 }
             }

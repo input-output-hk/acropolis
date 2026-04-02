@@ -303,9 +303,31 @@ impl AccountsState {
                 state.notify_block(primary.block_info());
             }
 
-            // Read from epoch-boundary messages only when it's a new epoch or rollback
+            let epoch = primary.epoch();
+
+            // Protocol parameters publish on any new epoch, including epoch 0.
             if primary.should_read_epoch_messages() {
-                let mut stake_reward_deltas = if primary.should_read_epoch_transition_messages() {
+                match ctx
+                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
+                {
+                    RollbackWrapper::Normal((block_info, params_msg)) => {
+                        let span = info_span!(
+                            "account_state.handle_parameters",
+                            block = block_info.number
+                        );
+                        async {
+                            ctx.handle("handle_parameters", state.handle_parameters(&params_msg));
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+                    RollbackWrapper::Rollback(_) => {}
+                }
+            }
+
+            // Transition-only side streams publish on real epoch boundaries (>0) and rollbacks.
+            if primary.should_read_epoch_transition_messages() {
+                let mut stake_reward_deltas = if epoch.is_some() {
                     let block_info = primary.block_info();
                     // Applies rewards from previous epoch
                     match state
@@ -339,7 +361,7 @@ impl AccountsState {
                 // b. POOLREAP: for any retiring pools, refund,
                 // remove from pool registry, clear delegations
 
-                if primary.should_read_epoch_transition_messages() {
+                if epoch.is_some() {
                     let block_info = primary.block_info();
                     // Apply pending MIRs before generating SPDD so they're included in active stake
                     state.apply_pending_mirs();
@@ -383,7 +405,7 @@ impl AccountsState {
 
                 // Handle SPOs
                 match ctx.consume_sync("spos_reader", spos_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, spo_msg)) => {
+                    RollbackWrapper::Normal((block_info, spo_msg)) if epoch.is_some() => {
                         let span =
                             info_span!("account_state.handle_spo_state", block = block_info.number);
                         async {
@@ -392,30 +414,12 @@ impl AccountsState {
                         .instrument(span)
                         .await;
                     }
-                    RollbackWrapper::Rollback(_) => {}
-                }
-
-                // Handle params
-                match ctx
-                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
-                {
-                    RollbackWrapper::Normal((block_info, params_msg)) => {
-                        let span = info_span!(
-                            "account_state.handle_parameters",
-                            block = block_info.number
-                        );
-                        async {
-                            ctx.handle("handle_parameters", state.handle_parameters(&params_msg));
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-                    RollbackWrapper::Rollback(_) => {}
+                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
                 }
 
                 // Handle epoch activity
                 match ctx.consume_sync("ea_reader", ea_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, ea_msg)) => {
+                    RollbackWrapper::Normal((block_info, ea_msg)) if epoch.is_some() => {
                         let span = info_span!(
                             "account_state.handle_epoch_activity",
                             block = block_info.number
@@ -457,7 +461,7 @@ impl AccountsState {
                         .instrument(span)
                         .await;
                     }
-                    RollbackWrapper::Rollback(_) => {}
+                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
                 }
 
                 // Handle governance outcomes (enacted/expired proposals) at epoch boundary
@@ -465,7 +469,7 @@ impl AccountsState {
                     "governance_outcomes_reader",
                     governance_outcomes_reader.read_with_rollbacks().await,
                 )? {
-                    RollbackWrapper::Normal((block_info, outcomes_msg)) => {
+                    RollbackWrapper::Normal((block_info, outcomes_msg)) if epoch.is_some() => {
                         let span = info_span!(
                             "account_state.handle_governance_outcomes",
                             block = block_info.number
@@ -479,11 +483,13 @@ impl AccountsState {
                         .instrument(span)
                         .await;
                     }
-                    RollbackWrapper::Rollback(_) => {}
+                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
                 }
 
-                // Clear the skip flag after first epoch transition
-                skip_first_epoch_rewards = false;
+                if epoch.is_some() {
+                    // Clear the skip flag after first real epoch transition.
+                    skip_first_epoch_rewards = false;
+                }
             }
 
             // Now handle the certs_message properly

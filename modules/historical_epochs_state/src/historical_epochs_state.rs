@@ -106,7 +106,9 @@ impl HistoricalEpochsState {
                 state.volatile.rollback_before(primary.block_info().number);
             }
 
-            // Read from epoch-boundary messages only when it's a new epoch or rollback
+            let epoch = primary.epoch();
+
+            // Protocol parameters publish on any new epoch, including epoch 0.
             if primary.should_read_epoch_messages() {
                 match params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((_, params)) => {
@@ -117,13 +119,16 @@ impl HistoricalEpochsState {
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
+            }
 
+            // Epoch activity publishes on real epoch transitions (>0) and rollbacks.
+            if primary.should_read_epoch_transition_messages() {
                 match epoch_activity_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal((block_info, ea_msg)) => {
+                    RollbackWrapper::Normal((block_info, ea_msg)) if epoch.is_some() => {
                         let mut state = state_mutex.lock().await;
                         state.volatile.handle_new_epoch(&block_info, &ea_msg);
                     }
-                    RollbackWrapper::Rollback(_) => {}
+                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
                 }
             }
 
