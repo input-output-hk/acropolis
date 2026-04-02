@@ -8,6 +8,7 @@ use acropolis_common::messages::{
     GovernanceOutcomesMessage, SnapshotMessage, SnapshotStateMessage, StateTransitionMessage,
 };
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::state_history::DEFAULT_DUMP_INDEX;
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
     queries::parameters::{
@@ -172,19 +173,18 @@ impl ParametersState {
         let store_history = cfg.store_history;
 
         // Initalize state history
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
         let history = if store_history {
             Arc::new(Mutex::new(StateHistory::<State>::new(
                 "ParameterState",
                 StateHistoryStore::Unbounded,
-                None,
-                None,
+                dump_index,
             )))
         } else {
             Arc::new(Mutex::new(StateHistory::new(
                 "ParameterState",
                 StateHistoryStore::default_epoch_store(),
-                None,
-                None,
+                dump_index,
             )))
         };
 

@@ -10,7 +10,7 @@ use acropolis_common::{
         AssetDeltasMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
     validation::ValidationOutcomes,
     *,
 };
@@ -467,11 +467,11 @@ impl TxUnpacker {
         }
 
         // Initialize State
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "tx_unpacker",
             StateHistoryStore::default_block_store(),
-            None,
-            None,
+            dump_index,
         )));
 
         let context_run = context.clone();

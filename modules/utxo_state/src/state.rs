@@ -136,6 +136,7 @@ impl State {
     pub fn new(
         immutable_utxo_store: Arc<dyn ImmutableUTXOStore>,
         address_delta_publish_mode: AddressDeltaPublishMode,
+        dump_index: Option<u64>,
     ) -> Self {
         Self {
             last_slot: 0,
@@ -144,8 +145,7 @@ impl State {
             reference_scripts_history: StateHistory::new(
                 "utxo_state.reference_scripts_history",
                 StateHistoryStore::default_block_store(),
-                None,
-                None,
+                dump_index,
             ),
             volatile_created: VolatileIndex::new(),
             volatile_spent: VolatileIndex::new(),
@@ -156,8 +156,7 @@ impl State {
             protocol_parameters_history: StateHistory::new(
                 "utxo_state.protocol_parameters_history",
                 StateHistoryStore::default_block_store(),
-                None,
-                None,
+                dump_index,
             ),
             avvm_cancelled_value: None,
             pointer_address_values: None,
@@ -989,7 +988,11 @@ mod tests {
 
     fn new_state_with_mode(mode: AddressDeltaPublishMode) -> State {
         let config = Arc::new(Config::builder().build().unwrap());
-        State::new(Arc::new(InMemoryImmutableUTXOStore::new(config)), mode)
+        State::new(
+            Arc::new(InMemoryImmutableUTXOStore::new(config)),
+            mode,
+            None,
+        )
     }
 
     fn policy_id() -> PolicyId {

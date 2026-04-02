@@ -906,7 +906,6 @@ mod tests {
             "spo_state",
             StateHistoryStore::default_block_store(),
             None,
-            None,
         )));
         let mut state = history.lock().await.get_current_state();
         let mut block = new_block(0);
@@ -993,7 +992,6 @@ mod tests {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "spo_state",
             StateHistoryStore::default_block_store(),
-            None,
             None,
         )));
         let mut state = history.lock().await.get_current_state();

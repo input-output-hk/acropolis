@@ -4,7 +4,7 @@ use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper};
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::SPOStakeDistributionMessage;
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::state_history::{StateHistory, StateHistoryStore};
+use acropolis_common::state_history::{DEFAULT_DUMP_INDEX, StateHistory, StateHistoryStore};
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
     queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse, DEFAULT_SPDD_QUERY_TOPIC},
@@ -87,11 +87,11 @@ impl SPDDState {
         let store_spdd = config.get_bool(DEFAULT_STORE_SPDD.0).unwrap_or(DEFAULT_STORE_SPDD.1);
 
         let history_opt = if store_spdd {
+            let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
             let history = Arc::new(Mutex::new(StateHistory::<State>::new(
                 "spdd_state",
                 StateHistoryStore::Unbounded,
-                None,
-                None,
+                dump_index,
             )));
 
             // Register /spdd REST endpoint

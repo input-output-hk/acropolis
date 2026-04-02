@@ -5,6 +5,7 @@ use crate::state::State;
 use crate::stores::{fjall::FjallStore, Store};
 
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::state_history::DEFAULT_DUMP_INDEX;
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     declare_cardano_reader,
@@ -78,11 +79,11 @@ impl ChainStore {
             _ => bail!("Unknown store type {store_type}"),
         };
 
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "chain_store",
             StateHistoryStore::default_epoch_store(),
-            None,
-            None,
+            dump_index,
         )));
         history.lock().await.commit_forced(State::new());
 

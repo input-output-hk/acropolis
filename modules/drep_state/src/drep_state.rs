@@ -17,7 +17,7 @@ use acropolis_common::{
             DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
         },
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{DEFAULT_DUMP_INDEX, StateHistory, StateHistoryStore},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -76,8 +76,6 @@ const DEFAULT_STORE_DELEGATORS: (&str, bool) = ("store-delegators", false);
 const DEFAULT_STORE_METADATA: (&str, bool) = ("store-metadata", false);
 const DEFAULT_STORE_UPDATES: (&str, bool) = ("store-updates", false);
 const DEFAULT_STORE_VOTES: (&str, bool) = ("store-votes", false);
-
-const DEFAULT_DUMP_INDEX: &str = "startup.dump-state-block";
 
 /// DRep State module
 #[module(
@@ -354,7 +352,6 @@ impl DRepState {
             "DRepState",
             StateHistoryStore::default_block_store(),
             dump_index,
-            Some("drep_state".to_string()),
         )));
         let history_run = history.clone();
         let query_history = history.clone();

@@ -16,7 +16,7 @@ use acropolis_common::{
         },
         errors::QueryError,
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -333,11 +333,11 @@ impl EpochsState {
         info!("Creating query handler on '{}'", epochs_query_topic);
 
         // state history
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "epochs_state",
             StateHistoryStore::default_block_store(),
-            None,
-            None,
+            dump_index,
         )));
         let history_query = history.clone();
 

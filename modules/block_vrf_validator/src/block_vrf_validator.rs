@@ -11,7 +11,7 @@ use acropolis_common::{
         StateTransitionMessage,
     },
     protocol_params::Nonce,
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{DEFAULT_DUMP_INDEX, StateHistory, StateHistoryStore},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -302,11 +302,11 @@ impl BlockVrfValidator {
         let spdd_reader = SPDDReader::new(&context, &config).await?;
 
         // state history
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "block_vrf_validator",
             StateHistoryStore::default_block_store(),
-            None,
-            None,
+            dump_index,
         )));
 
         // Start run task

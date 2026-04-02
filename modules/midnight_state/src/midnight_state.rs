@@ -8,7 +8,7 @@ use acropolis_common::{
         StateTransitionMessage,
     },
     protocol_params::Nonce,
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -122,11 +122,11 @@ impl MidnightState {
         let protocol_params_reader = ProtocolParamsReader::new(&context, &config).await?;
 
         // Initialize unbounded state history for rollback-safe replay.
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "midnight_state",
             StateHistoryStore::Unbounded,
-            None,
-            None,
+            dump_index,
         )));
         let grpc_history = history.clone();
         let grpc_context = context.clone();

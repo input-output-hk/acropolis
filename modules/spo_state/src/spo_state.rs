@@ -11,6 +11,7 @@ use acropolis_common::messages::{
 };
 use acropolis_common::queries::errors::QueryError;
 
+use acropolis_common::state_history::DEFAULT_DUMP_INDEX;
 use acropolis_common::{
     messages::{
         CardanoMessage, Message, SPOStateMessage, SnapshotMessage, SnapshotStateMessage,
@@ -576,11 +577,11 @@ impl SPOState {
         let store_config = StoreConfig::from(config.clone());
 
         // Create history
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "spo_state",
             StateHistoryStore::default_block_store(),
-            None,
-            None,
+            dump_index,
         )));
         let history_spo_state = history.clone();
         let history_tick = history.clone();

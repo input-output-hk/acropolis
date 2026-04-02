@@ -545,7 +545,6 @@ mod tests {
             "epochs_state",
             StateHistoryStore::default_block_store(),
             None,
-            None,
         )));
         let mut state = history.lock().await.get_current_state();
         let mut block = make_block(1);

@@ -10,7 +10,7 @@ use acropolis_common::{
         SnapshotMessage, SnapshotStateMessage, StakeRegistrationUpdatesMessage, StateQuery,
         StateQueryResponse, StateTransitionMessage, UTXODeltasMessage,
     },
-    queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+    queries::utxos::{DEFAULT_UTXOS_QUERY_TOPIC, UTxOStateQuery, UTxOStateQueryResponse}, state_history::DEFAULT_DUMP_INDEX,
 };
 use caryatid_sdk::{module, Context, Subscription};
 
@@ -311,7 +311,8 @@ impl UTXOState {
             _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
         let snapshot_store = store.clone();
-        let mut state = State::new(store, address_delta_publish_mode);
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
+        let mut state = State::new(store, address_delta_publish_mode, dump_index);
 
         // Create address delta publisher and pass it observations
         let deltas_publisher =

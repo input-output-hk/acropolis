@@ -1192,7 +1192,6 @@ mod tests {
             "midnight_state_parameters_test",
             StateHistoryStore::Unbounded,
             None,
-            None,
         );
 
         let block1 = test_block_info_for(1, 10);
@@ -1383,7 +1382,6 @@ mod tests {
         let mut history = StateHistory::<State>::new(
             "midnight_state_governance_test",
             StateHistoryStore::Unbounded,
-            None,
             None,
         );
 

@@ -10,7 +10,7 @@ use acropolis_common::{
         RawBlockMessage, SPOStateMessage, SnapshotMessage, SnapshotStateMessage,
         StateTransitionMessage,
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -251,11 +251,11 @@ impl BlockKesValidator {
         let spo_state_reader = SPOReader::new(&context, &config).await?;
 
         // state history
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "block_kes_validator",
             StateHistoryStore::default_block_store(),
-            None,
-            None,
+            dump_index,
         )));
 
         // Start run task

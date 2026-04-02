@@ -12,6 +12,8 @@ use tracing::info;
 
 use crate::params::SECURITY_PARAMETER_K;
 
+pub const DEFAULT_DUMP_INDEX: &str = "startup.dump-state-block";
+
 pub enum StateHistoryStore {
     Bounded(u64), // Used for rollbacks, bounded at k
     Unbounded,    // Used for historical lookups, unbounded
@@ -43,25 +45,17 @@ pub struct StateHistory<S> {
 
     dump_index: Option<u64>,
 
-    dump_path: Option<String>,
-
     rolled_back: bool,
 }
 
 impl<S: Clone + Default + Serialize> StateHistory<S> {
     /// Construct
-    pub fn new(
-        module: &str,
-        store: StateHistoryStore,
-        dump_index: Option<u64>,
-        dump_path: Option<String>,
-    ) -> Self {
+    pub fn new(module: &str, store: StateHistoryStore, dump_index: Option<u64>) -> Self {
         Self {
             history: VecDeque::new(),
             module: module.to_string(),
             store,
             dump_index,
-            dump_path,
             rolled_back: false,
         }
     }
@@ -178,48 +172,39 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
                 }
             };
 
-            if let Some(path) = &self.dump_path {
-                let mut file = match File::create(path) {
-                    Ok(file) => file,
-                    Err(e) => {
-                        tracing::error!("{}", e);
-                        return;
-                    }
-                };
-
-                match file.write_all(&bytes) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::error!("{}", e);
-                        return;
-                    }
+            let mut file = match File::create(self.module.clone()) {
+                Ok(file) => file,
+                Err(e) => {
+                    tracing::error!("{}", e);
+                    return;
                 }
+            };
 
-                info!(
-                    "{} dumped state at index {} to {} ({} bytes)",
-                    self.module,
-                    entry.index,
-                    path,
-                    bytes.len()
-                );
-            } else {
-                info!("Dump path not set")
+            match file.write_all(&bytes) {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("{}", e);
+                    return;
+                }
             }
+
+            info!(
+                "{} dumped state at index {} to {} ({} bytes)",
+                self.module,
+                entry.index,
+                self.module,
+                bytes.len()
+            );
         } else {
             info!("{} no state to dump", self.module);
         }
     }
 
     fn compare_states(&mut self) -> bool {
-        let Some(path) = &self.dump_path else {
-            info!("{} no dump path set", self.module);
-            return false;
-        };
-
-        let bytes_pre = match fs::read(path) {
+        let bytes_pre = match fs::read(self.module.clone()) {
             Ok(b) => b,
             Err(e) => {
-                tracing::error!("failed to read {}: {}", path, e);
+                tracing::error!("failed to read {}: {}", self.module, e);
                 return false;
             }
         };
