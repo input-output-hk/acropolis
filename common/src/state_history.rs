@@ -156,7 +156,11 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
         if let Some(dump_index) = self.dump_index {
             if index == dump_index {
                 if self.rolled_back {
-                    self.compare_states();
+                    if self.compare_states() {
+                        tracing::info!("{} rollback validation success", self.module);
+                    } else {
+                        tracing::error!("{} rollback validation failed", self.module);
+                    };
                 } else {
                     self.dump_to_file();
                 }
@@ -206,43 +210,34 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
         }
     }
 
-    fn compare_states(&mut self) {
+    fn compare_states(&mut self) -> bool {
         let Some(path) = &self.dump_path else {
             info!("{} no dump path set", self.module);
-            return;
+            return false;
         };
 
         let bytes_pre = match fs::read(path) {
             Ok(b) => b,
             Err(e) => {
                 tracing::error!("failed to read {}: {}", path, e);
-                return;
+                return false;
             }
         };
 
         let Some(after_state) = self.history.back().map(|e| &e.state) else {
             info!("{} no current state to compare", self.module);
-            return;
+            return false;
         };
 
         let bytes_after = match bincode::serialize(after_state) {
             Ok(b) => b,
             Err(e) => {
                 tracing::error!("serialize after failed: {}", e);
-                return;
+                return false;
             }
         };
 
-        if bytes_pre == bytes_after {
-            info!("{} state match after replay", self.module);
-        } else {
-            tracing::error!(
-                "{} state mismatch after replay ({} vs {} bytes)",
-                self.module,
-                bytes_pre.len(),
-                bytes_after.len()
-            );
-        }
+        bytes_pre == bytes_after
     }
 }
 
