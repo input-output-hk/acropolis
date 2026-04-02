@@ -5,7 +5,6 @@ use crate::state::State;
 use crate::stores::{fjall::FjallStore, Store};
 
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::BlockStatus;
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     declare_cardano_reader,
@@ -169,7 +168,7 @@ impl ChainStore {
                     blocks_reader.read_with_rollbacks().await,
                 )?;
 
-                if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+                if primary.is_rollback() {
                     let mut history = history.lock().await;
                     state = history.get_rolled_back_state(primary.block_info().number);
                     store.rollback(primary.block_info())?;

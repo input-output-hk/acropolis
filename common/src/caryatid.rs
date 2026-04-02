@@ -127,10 +127,6 @@ impl<T> PrimaryRead<T> {
         }
     }
 
-    pub fn is_epoch_transition(&self) -> bool {
-        self.epoch().is_some()
-    }
-
     fn is_epoch_boundary(block_info: &BlockInfo) -> bool {
         block_info.new_epoch && block_info.epoch > 0
     }

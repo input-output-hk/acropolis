@@ -340,8 +340,6 @@ impl SPOState {
                 .await;
             }
 
-            let epoch = primary.epoch();
-
             // Init drains the epoch-0 bootstrap messages, so the main loop only
             // synchronizes these side readers on rollbacks and real transitions.
             if primary.should_read_epoch_transition_messages() {
@@ -364,11 +362,11 @@ impl SPOState {
                 if let Some(reader) = spdd_reader.as_mut() {
                     // Handle SPDD
                     match ctx.consume_sync("spdd", reader.read_with_rollbacks().await)? {
-                        RollbackWrapper::Normal((block_info, spdd_message)) if epoch.is_some() => {
+                        RollbackWrapper::Normal((block_info, spdd_message)) => {
                             // update epochs_history
                             epochs_history.handle_spdd(&block_info, &spdd_message);
                         }
-                        RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
 
@@ -377,9 +375,7 @@ impl SPOState {
                     match ctx
                         .consume_sync("spo_rewards_reader", reader.read_with_rollbacks().await)?
                     {
-                        RollbackWrapper::Normal((block_info, spo_rewards_message))
-                            if epoch.is_some() =>
-                        {
+                        RollbackWrapper::Normal((block_info, spo_rewards_message)) => {
                             let span = info_span!(
                                 "spo_state.handle_spo_rewards",
                                 block = block_info.number
@@ -394,7 +390,7 @@ impl SPOState {
                                 );
                             });
                         }
-                        RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
 
@@ -404,9 +400,7 @@ impl SPOState {
                         "stake_reward_deltas_reader",
                         reader.read_with_rollbacks().await,
                     )? {
-                        RollbackWrapper::Normal((block_info, stake_reward_deltas_message))
-                            if epoch.is_some() =>
-                        {
+                        RollbackWrapper::Normal((block_info, stake_reward_deltas_message)) => {
                             let span = info_span!(
                                 "spo_state.handle_stake_reward_deltas",
                                 block = block_info.number
@@ -422,7 +416,7 @@ impl SPOState {
                                 );
                             });
                         }
-                        RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
 
@@ -431,9 +425,7 @@ impl SPOState {
                     match ctx
                         .consume_sync("epoch_activity_reader", reader.read_with_rollbacks().await)?
                     {
-                        RollbackWrapper::Normal((block_info, epoch_activity_message))
-                            if epoch.is_some() =>
-                        {
+                        RollbackWrapper::Normal((block_info, epoch_activity_message)) => {
                             let span = info_span!(
                                 "spo_state.handle_epoch_activity",
                                 block = block_info.number
@@ -452,7 +444,7 @@ impl SPOState {
                                 );
                             });
                         }
-                        RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
             }

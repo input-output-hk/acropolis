@@ -9,7 +9,6 @@ use acropolis_common::{
     },
     protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -78,7 +77,7 @@ impl MidnightState {
             let primary =
                 PrimaryRead::from_read(address_deltas_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+            if primary.is_rollback() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
                 warn!(
                     block_number = primary.block_info().number,
@@ -87,8 +86,6 @@ impl MidnightState {
                 );
             }
 
-            let is_epoch_transition = primary.is_epoch_transition();
-
             if primary.should_read_epoch_messages() {
                 match protocol_params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((_, protocol_params)) => {
@@ -96,17 +93,14 @@ impl MidnightState {
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
-            }
-
-            if primary.should_read_epoch_transition_messages() {
-                let nonce = match epoch_nonce_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal((_, nonce)) if is_epoch_transition => {
-                        Some(nonce.as_ref().clone())
+                match epoch_nonce_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((_, nonce)) => {
+                        state.handle_new_epoch(
+                            primary.block_info().as_ref(),
+                            nonce.as_ref().clone(),
+                        );
                     }
-                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => None,
-                };
-                if let Some(nonce) = nonce {
-                    state.handle_new_epoch(primary.block_info().as_ref(), nonce);
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 

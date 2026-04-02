@@ -17,7 +17,6 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQueryResponse},
     queries::epochs::EpochsStateQueryResponse,
     queries::errors::QueryError,
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -99,12 +98,10 @@ impl HistoricalEpochsState {
             // Use blocks_message as the synchroniser
             let primary = PrimaryRead::from_read(blocks_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+            if primary.is_rollback() {
                 let mut state = state_mutex.lock().await;
                 state.volatile.rollback_before(primary.block_info().number);
             }
-
-            let epoch = primary.epoch();
 
             // Init drains the epoch-0 bootstrap params, so the loop only
             // synchronizes these readers on rollbacks and real transitions.
@@ -123,11 +120,11 @@ impl HistoricalEpochsState {
             // Epoch activity publishes on real epoch transitions (>0) and rollbacks.
             if primary.should_read_epoch_transition_messages() {
                 match epoch_activity_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal((block_info, ea_msg)) if epoch.is_some() => {
+                    RollbackWrapper::Normal((block_info, ea_msg)) => {
                         let mut state = state_mutex.lock().await;
                         state.volatile.handle_new_epoch(&block_info, &ea_msg);
                     }
-                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 

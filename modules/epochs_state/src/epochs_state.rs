@@ -258,7 +258,7 @@ impl EpochsState {
                     }
                 });
 
-                if epoch.is_some() {
+                if primary.block_info().new_epoch {
                     let active_nonce = state.get_active_nonce();
                     ctx.handle(
                         "publish",

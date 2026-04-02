@@ -202,7 +202,6 @@ impl BlockVrfValidator {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
             }
 
-            let epoch = primary.epoch();
             if primary.should_read_epoch_transition_messages() {
                 // Read readers that publish new-epoch snapshots or rollback markers.
                 match ctx
@@ -212,18 +211,6 @@ impl BlockVrfValidator {
                         state.handle_protocol_parameters(&params);
                     }
                     RollbackWrapper::Rollback(_) => {}
-                }
-
-                let active_nonce = match ctx
-                    .consume_sync("nonce_reader", nonce_reader.read_with_rollbacks().await)?
-                {
-                    RollbackWrapper::Normal((_, active_nonce)) if epoch.is_some() => {
-                        Some(active_nonce)
-                    }
-                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => None,
-                };
-                if let Some(active_nonce) = active_nonce {
-                    state.handle_epoch_nonce(&active_nonce);
                 }
 
                 let spo_state_msg =
@@ -243,6 +230,15 @@ impl BlockVrfValidator {
                     if let Some(spdd_msg) = spdd_msg {
                         state.handle_new_snapshot(&spo_state_msg, &spdd_msg);
                     }
+                }
+            }
+
+            if primary.should_read_epoch_messages() {
+                match ctx.consume_sync("nonce_reader", nonce_reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((_, active_nonce)) => {
+                        state.handle_epoch_nonce(&active_nonce);
+                    }
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 

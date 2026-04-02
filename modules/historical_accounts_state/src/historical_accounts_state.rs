@@ -4,6 +4,7 @@
 use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper};
 use acropolis_common::configuration::StartupMode;
 use acropolis_common::declare_cardano_reader;
+use acropolis_common::messages::{CardanoMessage, Message, StateQuery, StateQueryResponse};
 use acropolis_common::messages::{
     ProtocolParamsMessage, StakeAddressDeltasMessage, StakeRewardDeltasMessage,
     StateTransitionMessage, TxCertificatesMessage, WithdrawalsMessage,
@@ -12,10 +13,6 @@ use acropolis_common::queries::accounts::{
     AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
 };
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::{
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    BlockStatus,
-};
 use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
@@ -134,13 +131,11 @@ impl HistoricalAccountsState {
             // Use certs_message as the synchroniser
             let primary = PrimaryRead::from_read(certs_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+            if primary.is_rollback() {
                 let mut state = state_mutex.lock().await;
                 state.volatile.rollback_before(primary.block_info().number);
                 state.volatile.next_block();
             }
-
-            let epoch = primary.epoch();
 
             // Init drains the epoch-0 bootstrap messages, so the main loop only
             // synchronizes these readers on rollbacks and real transitions.
@@ -160,11 +155,11 @@ impl HistoricalAccountsState {
             // Rewards publish on real epoch transitions (>0) and rollbacks.
             if primary.should_read_epoch_transition_messages() {
                 match rewards_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal((block_info, rewards_msg)) if epoch.is_some() => {
+                    RollbackWrapper::Normal((block_info, rewards_msg)) => {
                         let mut state = state_mutex.lock().await;
                         state.handle_rewards(&rewards_msg, block_info.epoch as u32);
                     }
-                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 

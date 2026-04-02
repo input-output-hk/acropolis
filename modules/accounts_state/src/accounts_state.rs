@@ -401,7 +401,7 @@ impl AccountsState {
 
                 // Handle SPOs
                 match ctx.consume_sync("spos_reader", spos_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, spo_msg)) if epoch.is_some() => {
+                    RollbackWrapper::Normal((block_info, spo_msg)) => {
                         let span =
                             info_span!("account_state.handle_spo_state", block = block_info.number);
                         async {
@@ -410,12 +410,12 @@ impl AccountsState {
                         .instrument(span)
                         .await;
                     }
-                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                    RollbackWrapper::Rollback(_) => {}
                 }
 
                 // Handle epoch activity
                 match ctx.consume_sync("ea_reader", ea_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, ea_msg)) if epoch.is_some() => {
+                    RollbackWrapper::Normal((block_info, ea_msg)) => {
                         let span = info_span!(
                             "account_state.handle_epoch_activity",
                             block = block_info.number
@@ -457,7 +457,7 @@ impl AccountsState {
                         .instrument(span)
                         .await;
                     }
-                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                    RollbackWrapper::Rollback(_) => {}
                 }
 
                 // Handle governance outcomes (enacted/expired proposals) at epoch boundary
@@ -465,7 +465,7 @@ impl AccountsState {
                     "governance_outcomes_reader",
                     governance_outcomes_reader.read_with_rollbacks().await,
                 )? {
-                    RollbackWrapper::Normal((block_info, outcomes_msg)) if epoch.is_some() => {
+                    RollbackWrapper::Normal((block_info, outcomes_msg)) => {
                         let span = info_span!(
                             "account_state.handle_governance_outcomes",
                             block = block_info.number
@@ -479,13 +479,11 @@ impl AccountsState {
                         .instrument(span)
                         .await;
                     }
-                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => {}
+                    RollbackWrapper::Rollback(_) => {}
                 }
 
-                if epoch.is_some() {
-                    // Clear the skip flag after first real epoch transition.
-                    skip_first_epoch_rewards = false;
-                }
+                // Clear the skip flag after first transition handling.
+                skip_first_epoch_rewards = false;
             }
 
             // Now handle the certs_message properly

@@ -20,7 +20,6 @@ use acropolis_common::{
     queries::addresses::{
         AddressStateQuery, AddressStateQueryResponse, DEFAULT_ADDRESS_QUERY_TOPIC,
     },
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -98,7 +97,7 @@ impl AddressState {
             let primary =
                 PrimaryRead::from_read(address_deltas_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+            if primary.is_rollback() {
                 let mut state = state_mutex.lock().await;
                 state.volatile.rollback_before(primary.block_info().number);
                 state.volatile.next_block();

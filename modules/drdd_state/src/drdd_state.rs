@@ -6,7 +6,6 @@ use acropolis_common::{
     messages::{CardanoMessage, DRepStakeDistributionMessage, Message, StateTransitionMessage},
     rest_helper::handle_rest_with_query_parameters,
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -49,7 +48,7 @@ impl DRDDState {
 
             let primary = PrimaryRead::from_read(drdd_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+            if primary.is_rollback() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().epoch);
             }
 
