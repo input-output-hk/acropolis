@@ -69,9 +69,12 @@ impl AddressState {
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            let RollbackWrapper::Normal(_) = params_reader.read_with_rollbacks().await? else {
-                bail!("Unexpected rollback while reading initial params");
-            };
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            }
             debug!("Consumed initial genesis params from params_subscription");
         }
 
@@ -103,8 +106,7 @@ impl AddressState {
 
             // Epoch-0 params are consumed during init, so the main loop only needs
             // real epoch transitions plus rollback markers to keep the reader aligned.
-            let sync_params_reader = primary.should_read_epoch_transition_messages();
-            if sync_params_reader {
+            if primary.should_read_epoch_transition_messages() {
                 match params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((block_info, params)) => {
                         let mut state = state_mutex.lock().await;

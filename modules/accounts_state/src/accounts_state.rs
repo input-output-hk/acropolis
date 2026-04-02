@@ -232,30 +232,36 @@ impl AccountsState {
         // Skip genesis-specific initialization when starting from snapshot
         // (pots are already loaded from snapshot bootstrap data)
         if !is_snapshot_mode {
-            let RollbackWrapper::Normal(_) = params_reader.read_with_rollbacks().await? else {
-                bail!("Unexpected rollback while reading initial params");
-            };
-            let RollbackWrapper::Normal(_) =
-                governance_outcomes_reader.read_with_rollbacks().await?
-            else {
-                bail!("Unexpected rollback while reading initial gov outcomes");
-            };
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            }
+            match governance_outcomes_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial gov outcomes");
+                }
+            }
 
             // Initialisation messages
             {
-                let RollbackWrapper::Normal((block_info, pot_deltas_msg)) =
-                    pot_deltas_reader.read_with_rollbacks().await?
-                else {
-                    bail!("Unexpected rollback while reading initial pots");
-                };
-                let mut state = history.lock().await.get_current_state();
+                match pot_deltas_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((block_info, pot_deltas_msg)) => {
+                        let mut state = history.lock().await.get_current_state();
 
-                state
-                    .handle_pot_deltas(&pot_deltas_msg)
-                    .inspect_err(|e| error!("Pots handling error: {e:#}"))
-                    .ok();
+                        state
+                            .handle_pot_deltas(&pot_deltas_msg)
+                            .inspect_err(|e| error!("Pots handling error: {e:#}"))
+                            .ok();
 
-                history.lock().await.commit(block_info.number, state);
+                        history.lock().await.commit(block_info.number, state);
+                    }
+                    RollbackWrapper::Rollback(_) => {
+                        bail!("Unexpected rollback while reading initial pots");
+                    }
+                }
             }
         }
 

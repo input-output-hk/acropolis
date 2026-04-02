@@ -166,21 +166,25 @@ impl EpochsState {
         // Without consuming them here, they desync the readers in the main loop
         // (epoch N boundary reads epoch N-1 params instead of epoch N params).
         if !is_snapshot_mode {
-            let RollbackWrapper::Normal((_, initial_params)) =
-                params_reader.read_with_rollbacks().await?
-            else {
-                bail!("Unexpected rollback while reading initial params");
-            };
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((_, initial_params)) => {
+                    let mut history_guard = history.lock().await;
+                    let mut state = history_guard.get_or_init_with(|| State::new(&genesis.values));
 
-            let mut history_guard = history.lock().await;
-            let mut state = history_guard.get_or_init_with(|| State::new(&genesis.values));
+                    state.handle_protocol_parameters(&initial_params);
+                    history_guard.commit(0, state);
+                }
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            }
 
-            state.handle_protocol_parameters(&initial_params);
-            history_guard.commit(0, state);
-
-            let RollbackWrapper::Normal(_) = txs_reader.read_with_rollbacks().await? else {
-                bail!("Unexpected rollback while reading initial txs");
-            };
+            match txs_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial txs");
+                }
+            }
         }
 
         loop {

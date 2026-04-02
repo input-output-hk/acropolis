@@ -219,18 +219,24 @@ impl SPOState {
             Self::wait_for_bootstrap(history.clone(), subscription).await?;
         } else {
             // Consume initial protocol parameters (only needed for genesis bootstrap)
-            let RollbackWrapper::Normal(_) = params_reader.read_with_rollbacks().await? else {
-                bail!("Unexpected rollback while reading initial params");
-            };
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            }
         }
 
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
         // !TODO this seems overly specific to our startup process
         if let Some(sub) = stake_deltas_reader.as_mut() {
-            let RollbackWrapper::Normal(_) = sub.read_with_rollbacks().await? else {
-                bail!("Unexpected rollback while reading initial stake deltas");
-            };
+            match sub.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial stake deltas");
+                }
+            }
         }
 
         // Main loop of synchronised messages

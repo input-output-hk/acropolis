@@ -73,9 +73,12 @@ impl HistoricalEpochsState {
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            let RollbackWrapper::Normal(_) = params_reader.read_with_rollbacks().await? else {
-                bail!("Unexpected rollback while reading initial params");
-            };
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            }
             debug!("Consumed initial genesis params from params_subscription");
         }
 
