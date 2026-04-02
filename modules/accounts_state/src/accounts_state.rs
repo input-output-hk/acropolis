@@ -357,7 +357,7 @@ impl AccountsState {
                 // b. POOLREAP: for any retiring pools, refund,
                 // remove from pool registry, clear delegations
 
-                if epoch.is_some() {
+                if primary.message().is_some() {
                     let block_info = primary.block_info();
                     // Apply pending MIRs before generating SPDD so they're included in active stake
                     state.apply_pending_mirs();
