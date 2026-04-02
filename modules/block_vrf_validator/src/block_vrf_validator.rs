@@ -215,15 +215,16 @@ impl BlockVrfValidator {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                if epoch.is_some() {
-                    match ctx
-                        .consume_sync("nonce_reader", nonce_reader.read_with_rollbacks().await)?
-                    {
-                        RollbackWrapper::Normal((_, active_nonce)) => {
-                            state.handle_epoch_nonce(&active_nonce);
-                        }
-                        RollbackWrapper::Rollback(_) => {}
+                let active_nonce = match ctx
+                    .consume_sync("nonce_reader", nonce_reader.read_with_rollbacks().await)?
+                {
+                    RollbackWrapper::Normal((_, active_nonce)) if epoch.is_some() => {
+                        Some(active_nonce)
                     }
+                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => None,
+                };
+                if let Some(active_nonce) = active_nonce {
+                    state.handle_epoch_nonce(&active_nonce);
                 }
 
                 let spo_state_msg =

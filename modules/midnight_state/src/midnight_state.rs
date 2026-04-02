@@ -97,10 +97,14 @@ impl MidnightState {
 
                 if primary.should_read_epoch_transition_messages() {
                     let nonce = match epoch_nonce_reader.read_with_rollbacks().await? {
-                        RollbackWrapper::Normal((_, nonce)) => nonce.as_ref().clone(),
-                        RollbackWrapper::Rollback(_) => None,
+                        RollbackWrapper::Normal((_, nonce)) if primary.epoch().is_some() => {
+                            Some(nonce.as_ref().clone())
+                        }
+                        RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => None,
                     };
-                    state.handle_new_epoch(primary.block_info().as_ref(), nonce);
+                    if let Some(nonce) = nonce {
+                        state.handle_new_epoch(primary.block_info().as_ref(), nonce);
+                    }
                 }
             }
 
