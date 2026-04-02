@@ -102,14 +102,22 @@ impl<T> PrimaryRead<T> {
         !self.is_rollback() && self.block_info().intent.do_validation()
     }
 
+    /// Read epoch-scoped side streams on rollbacks and on every `new_epoch`,
+    /// including the initial epoch-0 message.
     pub fn should_read_epoch_messages(&self) -> bool {
         self.is_rollback() || self.block_info().new_epoch
     }
 
+    /// Read transition-only side streams on rollbacks and on real epoch
+    /// transitions. This excludes the initial epoch-0 message, and is also the
+    /// right choice for epoch-scoped streams whose epoch-0 message was already
+    /// consumed during startup.
     pub fn should_read_epoch_transition_messages(&self) -> bool {
         self.is_rollback() || Self::is_epoch_boundary(self.block_info())
     }
 
+    /// Returns the epoch only for real epoch transitions on normal messages.
+    /// Use this when local state updates should not run during rollbacks.
     pub fn epoch(&self) -> Option<u64> {
         match self {
             Self::Normal { block_info, .. } if Self::is_epoch_boundary(block_info) => {
@@ -117,6 +125,10 @@ impl<T> PrimaryRead<T> {
             }
             Self::Normal { .. } | Self::Rollback { .. } => None,
         }
+    }
+
+    pub fn is_epoch_transition(&self) -> bool {
+        self.epoch().is_some()
     }
 
     fn is_epoch_boundary(block_info: &BlockInfo) -> bool {

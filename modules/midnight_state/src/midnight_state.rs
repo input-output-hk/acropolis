@@ -87,6 +87,8 @@ impl MidnightState {
                 );
             }
 
+            let is_epoch_transition = primary.is_epoch_transition();
+
             if primary.should_read_epoch_messages() {
                 match protocol_params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((_, protocol_params)) => {
@@ -94,17 +96,17 @@ impl MidnightState {
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
+            }
 
-                if primary.should_read_epoch_transition_messages() {
-                    let nonce = match epoch_nonce_reader.read_with_rollbacks().await? {
-                        RollbackWrapper::Normal((_, nonce)) if primary.epoch().is_some() => {
-                            Some(nonce.as_ref().clone())
-                        }
-                        RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => None,
-                    };
-                    if let Some(nonce) = nonce {
-                        state.handle_new_epoch(primary.block_info().as_ref(), nonce);
+            if primary.should_read_epoch_transition_messages() {
+                let nonce = match epoch_nonce_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((_, nonce)) if is_epoch_transition => {
+                        Some(nonce.as_ref().clone())
                     }
+                    RollbackWrapper::Normal(_) | RollbackWrapper::Rollback(_) => None,
+                };
+                if let Some(nonce) = nonce {
+                    state.handle_new_epoch(primary.block_info().as_ref(), nonce);
                 }
             }
 

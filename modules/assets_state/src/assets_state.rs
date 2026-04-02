@@ -81,26 +81,16 @@ impl AssetsState {
         registry: Arc<Mutex<AssetRegistry>>,
     ) -> Result<()> {
         if let Some(reader) = utxo_deltas_reader.as_mut() {
-            loop {
-                match reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal(_) => {
-                        debug!("Consumed initial message from utxo_deltas_subscription");
-                        break;
-                    }
-                    RollbackWrapper::Rollback(_) => {}
-                }
-            }
+            let RollbackWrapper::Normal(_) = reader.read_with_rollbacks().await? else {
+                bail!("Unexpected rollback while reading initial UTxO deltas");
+            };
+            debug!("Consumed initial message from utxo_deltas_subscription");
         }
         if let Some(reader) = address_deltas_reader.as_mut() {
-            loop {
-                match reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal(_) => {
-                        debug!("Consumed initial message from address_deltas_subscription");
-                        break;
-                    }
-                    RollbackWrapper::Rollback(_) => {}
-                }
-            }
+            let RollbackWrapper::Normal(_) = reader.read_with_rollbacks().await? else {
+                bail!("Unexpected rollback while reading initial address deltas");
+            };
+            debug!("Consumed initial message from address_deltas_subscription");
         }
         // Main loop of synchronised messages
         loop {

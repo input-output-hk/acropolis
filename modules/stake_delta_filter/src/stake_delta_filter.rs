@@ -286,12 +286,10 @@ impl StakeDeltaFilter {
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            loop {
-                match address_delta_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal(_) => break,
-                    RollbackWrapper::Rollback(_) => {}
-                }
-            }
+            let RollbackWrapper::Normal(_) = address_delta_reader.read_with_rollbacks().await?
+            else {
+                bail!("Unexpected rollback while reading initial deltas message")
+            };
         }
         loop {
             let primary = PrimaryRead::from_read(address_delta_reader.read_with_rollbacks().await?);
@@ -435,12 +433,10 @@ impl StakeDeltaFilter {
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            loop {
-                match address_deltas_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal(_) => break,
-                    RollbackWrapper::Rollback(_) => {}
-                }
-            }
+            let RollbackWrapper::Normal(_) = address_deltas_reader.read_with_rollbacks().await?
+            else {
+                bail!("Unexpected rollback while reading initial deltas message")
+            };
         }
         loop {
             let mut ctx =

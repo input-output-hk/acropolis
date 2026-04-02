@@ -73,15 +73,10 @@ impl HistoricalEpochsState {
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            loop {
-                match params_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal(_) => {
-                        debug!("Consumed initial genesis params from params_subscription");
-                        break;
-                    }
-                    RollbackWrapper::Rollback(_) => {}
-                }
-            }
+            let RollbackWrapper::Normal(_) = params_reader.read_with_rollbacks().await? else {
+                bail!("Unexpected rollback while reading initial params");
+            };
+            debug!("Consumed initial genesis params from params_subscription");
         }
 
         // Background task to persist epoch sequentially
@@ -108,8 +103,9 @@ impl HistoricalEpochsState {
 
             let epoch = primary.epoch();
 
-            // Protocol parameters publish on any new epoch, including epoch 0.
-            if primary.should_read_epoch_messages() {
+            // Init drains the epoch-0 bootstrap params, so the loop only
+            // synchronizes these readers on rollbacks and real transitions.
+            if primary.should_read_epoch_transition_messages() {
                 match params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((_, params)) => {
                         let mut state = state_mutex.lock().await;

@@ -140,26 +140,18 @@ impl ChainStore {
         let run_ctx = context.clone();
 
         context.run::<Result<(), anyhow::Error>, _>(async move {
-            loop {
-                match blocks_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal((block_info, block)) => {
-                        if let Err(err) =
-                            State::handle_first_block(&store, block_info.as_ref(), block.as_ref())
-                        {
-                            panic!("Corrupted DB: {err}")
-                        };
-                        break;
-                    }
-                    RollbackWrapper::Rollback(_) => {}
-                }
+            let RollbackWrapper::Normal((block_info, block)) =
+                blocks_reader.read_with_rollbacks().await?
+            else {
+                bail!("Unexpected rollback while reading blocks");
+            };
+            if let Err(err) = State::handle_first_block(&store, block_info.as_ref(), block.as_ref())
+            {
+                panic!("Corrupted DB: {err}")
             }
-
-            loop {
-                match params_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal((_, _params)) => break,
-                    RollbackWrapper::Rollback(_) => {}
-                }
-            }
+            let RollbackWrapper::Normal(_) = params_reader.read_with_rollbacks().await? else {
+                bail!("Unexpected rollback while reading initial params");
+            };
 
             loop {
                 let mut ctx = ValidationContext::new(&run_ctx, &validation_topic, "chain_store");
@@ -188,7 +180,10 @@ impl ChainStore {
                     );
                 }
 
-                if primary.should_read_epoch_messages() {
+                // Epoch-0 params are consumed during init, so the loop only syncs
+                // the params reader on rollbacks and real epoch transitions.
+                let sync_params_reader = primary.should_read_epoch_transition_messages();
+                if sync_params_reader {
                     match ctx
                         .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                     {

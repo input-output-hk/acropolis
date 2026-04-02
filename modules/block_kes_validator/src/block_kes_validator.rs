@@ -136,17 +136,14 @@ impl BlockKesValidator {
         if let Some(subscription) = snapshot_subscription {
             Self::wait_for_bootstrap(history.clone(), subscription).await?;
         } else {
-            loop {
-                match params_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal((block_info, params)) => {
-                        let mut state = history.lock().await.get_or_init_with(State::new);
-                        state.handle_protocol_parameters(&params);
-                        history.lock().await.commit(block_info.number, state);
-                        break;
-                    }
-                    RollbackWrapper::Rollback(_) => {}
-                }
-            }
+            let RollbackWrapper::Normal((block_info, params)) =
+                params_reader.read_with_rollbacks().await?
+            else {
+                bail!("Unexpected rollback while reading initial params");
+            };
+            let mut state = history.lock().await.get_or_init_with(State::new);
+            state.handle_protocol_parameters(&params);
+            history.lock().await.commit(block_info.number, state);
         }
 
         loop {

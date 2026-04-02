@@ -315,7 +315,7 @@ impl TxUnpacker {
                 _ => error!("Unexpected message type: {raw_message:?}"),
             }
 
-            let sync_protocol_params = primary.is_rollback() || primary.epoch().is_some();
+            let sync_protocol_params = primary.should_read_epoch_transition_messages();
             if sync_protocol_params {
                 if let Some(ref mut sub) = protocol_params_sub {
                     let protocol_parameters_msg =

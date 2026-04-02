@@ -232,37 +232,30 @@ impl AccountsState {
         // Skip genesis-specific initialization when starting from snapshot
         // (pots are already loaded from snapshot bootstrap data)
         if !is_snapshot_mode {
-            loop {
-                match params_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal(_) => break,
-                    RollbackWrapper::Rollback(_) => {}
-                }
-            }
-            loop {
-                match governance_outcomes_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal(_) => break,
-                    RollbackWrapper::Rollback(_) => {}
-                }
-            }
+            let RollbackWrapper::Normal(_) = params_reader.read_with_rollbacks().await? else {
+                bail!("Unexpected rollback while reading initial params");
+            };
+            let RollbackWrapper::Normal(_) =
+                governance_outcomes_reader.read_with_rollbacks().await?
+            else {
+                bail!("Unexpected rollback while reading initial gov outcomes");
+            };
 
             // Initialisation messages
             {
-                loop {
-                    match pot_deltas_reader.read_with_rollbacks().await? {
-                        RollbackWrapper::Normal((block_info, pot_deltas_msg)) => {
-                            let mut state = history.lock().await.get_current_state();
+                let RollbackWrapper::Normal((block_info, pot_deltas_msg)) =
+                    pot_deltas_reader.read_with_rollbacks().await?
+                else {
+                    bail!("Unexpected rollback while reading initial pots");
+                };
+                let mut state = history.lock().await.get_current_state();
 
-                            state
-                                .handle_pot_deltas(&pot_deltas_msg)
-                                .inspect_err(|e| error!("Pots handling error: {e:#}"))
-                                .ok();
+                state
+                    .handle_pot_deltas(&pot_deltas_msg)
+                    .inspect_err(|e| error!("Pots handling error: {e:#}"))
+                    .ok();
 
-                            history.lock().await.commit(block_info.number, state);
-                            break;
-                        }
-                        RollbackWrapper::Rollback(_) => {}
-                    }
-                }
+                history.lock().await.commit(block_info.number, state);
             }
         }
 
@@ -305,8 +298,9 @@ impl AccountsState {
 
             let epoch = primary.epoch();
 
-            // Protocol parameters publish on any new epoch, including epoch 0.
-            if primary.should_read_epoch_messages() {
+            // Init drains the epoch-0 bootstrap messages, so the main loop only
+            // synchronizes these side readers on rollbacks and real transitions.
+            if primary.should_read_epoch_transition_messages() {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {
@@ -323,10 +317,6 @@ impl AccountsState {
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
-            }
-
-            // Transition-only side streams publish on real epoch boundaries (>0) and rollbacks.
-            if primary.should_read_epoch_transition_messages() {
                 let mut stake_reward_deltas = if epoch.is_some() {
                     let block_info = primary.block_info();
                     // Applies rewards from previous epoch
