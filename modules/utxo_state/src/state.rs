@@ -505,7 +505,7 @@ impl State {
     ) -> Result<()> {
         // get current reference scripts state
         let mut current_reference_scripts_state =
-            self.reference_scripts_history.get_rolled_back_state(block.number);
+            self.reference_scripts_history.get_or_init_with(ReferenceScriptsState::default);
 
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
@@ -842,7 +842,14 @@ impl State {
         Ok(spent_reference_scripts)
     }
 
-    pub async fn handle_rollback(&mut self, message: Arc<Message>) -> Result<()> {
+    pub async fn handle_rollback(
+        &mut self,
+        block_info: &BlockInfo,
+        message: Arc<Message>,
+    ) -> Result<()> {
+        self.reference_scripts_history.get_rolled_back_state(block_info.number);
+        self.protocol_parameters_history.get_rolled_back_state(block_info.number);
+
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.rollback(message.clone()).await;
         }

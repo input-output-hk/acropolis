@@ -10,7 +10,8 @@ use acropolis_common::{
         SnapshotMessage, SnapshotStateMessage, StakeRegistrationUpdatesMessage, StateQuery,
         StateQueryResponse, StateTransitionMessage, UTXODeltasMessage,
     },
-    queries::utxos::{DEFAULT_UTXOS_QUERY_TOPIC, UTxOStateQuery, UTxOStateQueryResponse}, state_history::DEFAULT_DUMP_INDEX,
+    queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+    state_history::DEFAULT_DUMP_INDEX,
 };
 use caryatid_sdk::{module, Context, Subscription};
 
@@ -133,13 +134,13 @@ impl UTXOState {
                 utxo_deltas_reader.read_with_rollbacks().await,
             )? {
                 RollbackWrapper::Normal((block_info, deltas)) => Some((block_info, deltas)),
-                RollbackWrapper::Rollback((_, message)) => {
+                RollbackWrapper::Rollback((block_info, message)) => {
                     // TODO: Actually rollback utxo_state's volatile history
 
                     // Publish rollbacks downstream
                     let mut state = state.lock().await;
                     state
-                        .handle_rollback(message)
+                        .handle_rollback(&block_info, message)
                         .await
                         .inspect_err(|e| error!("Rollback handling error: {e}"))
                         .ok();
