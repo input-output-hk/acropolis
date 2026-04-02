@@ -209,36 +209,35 @@ impl BlockVrfValidator {
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
+            }
 
-                if primary.should_read_epoch_transition_messages() {
-                    // Read readers that publish new-epoch snapshots or rollback markers.
-                    match ctx
-                        .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
-                    {
-                        RollbackWrapper::Normal((_, params)) => {
-                            state.handle_protocol_parameters(&params);
-                        }
-                        RollbackWrapper::Rollback(_) => {}
+            if primary.should_read_epoch_transition_messages() {
+                // Read readers that publish new-epoch snapshots or rollback markers.
+                match ctx
+                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
+                {
+                    RollbackWrapper::Normal((_, params)) => {
+                        state.handle_protocol_parameters(&params);
                     }
+                    RollbackWrapper::Rollback(_) => {}
+                }
 
-                    let spo_state_msg = match ctx
-                        .consume_sync("spo_reader", spo_reader.read_with_rollbacks().await)?
-                    {
+                let spo_state_msg =
+                    match ctx.consume_sync("spo_reader", spo_reader.read_with_rollbacks().await)? {
                         RollbackWrapper::Normal((_, spo_state)) => Some(spo_state),
                         RollbackWrapper::Rollback(_) => None,
                     };
 
-                    let spdd_msg = match ctx
-                        .consume_sync("spdd_reader", spdd_reader.read_with_rollbacks().await)?
-                    {
-                        RollbackWrapper::Normal((_, spdd_msg)) => Some(spdd_msg),
-                        RollbackWrapper::Rollback(_) => None,
-                    };
+                let spdd_msg = match ctx
+                    .consume_sync("spdd_reader", spdd_reader.read_with_rollbacks().await)?
+                {
+                    RollbackWrapper::Normal((_, spdd_msg)) => Some(spdd_msg),
+                    RollbackWrapper::Rollback(_) => None,
+                };
 
-                    if let Some(spo_state_msg) = spo_state_msg {
-                        if let Some(spdd_msg) = spdd_msg {
-                            state.handle_new_snapshot(&spo_state_msg, &spdd_msg);
-                        }
+                if let Some(spo_state_msg) = spo_state_msg {
+                    if let Some(spdd_msg) = spdd_msg {
+                        state.handle_new_snapshot(&spo_state_msg, &spdd_msg);
                     }
                 }
             }

@@ -1,9 +1,10 @@
 //! Acropolis historical accounts state module for Caryatid
 //! Manages optional state data needed for Blockfrost alignment
 
-use acropolis_common::caryatid::RollbackWrapper;
+use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper};
 use acropolis_common::configuration::StartupMode;
 use acropolis_common::declare_cardano_reader;
+use acropolis_common::messages::{CardanoMessage, Message, StateQuery, StateQueryResponse};
 use acropolis_common::messages::{
     ProtocolParamsMessage, StakeAddressDeltasMessage, StakeRewardDeltasMessage,
     StateTransitionMessage, TxCertificatesMessage, WithdrawalsMessage,
@@ -12,10 +13,6 @@ use acropolis_common::queries::accounts::{
     AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
 };
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::{
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    BlockStatus,
-};
 use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
@@ -100,21 +97,19 @@ impl HistoricalAccountsState {
     ) -> Result<()> {
         if !is_snapshot_mode {
             match params_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {
-                    debug!("Consumed initial genesis params from params_subscription");
-                }
+                RollbackWrapper::Normal(_) => {}
                 RollbackWrapper::Rollback(_) => {
                     bail!("Unexpected rollback while reading initial params");
                 }
-            };
+            }
+            debug!("Consumed initial genesis params from params_subscription");
             match stake_deltas_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {
-                    debug!("Consumed initial stake deltas from stake_address_deltas_subscription");
-                }
+                RollbackWrapper::Normal(_) => {}
                 RollbackWrapper::Rollback(_) => {
                     bail!("Unexpected rollback while reading initial stake deltas");
                 }
-            };
+            }
+            debug!("Consumed initial stake deltas from stake_address_deltas_subscription");
         }
 
         // Background task to persist epochs sequentially
@@ -134,20 +129,17 @@ impl HistoricalAccountsState {
         // Main loop of synchronised messages
         loop {
             // Use certs_message as the synchroniser
-            let certs_msg = match certs_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, certs_msg)) => {
-                    let mut state = state_mutex.lock().await;
-                    if block_info.status == BlockStatus::RolledBack {
-                        state.volatile.rollback_before(block_info.number);
-                        state.volatile.next_block();
-                    }
-                    Some((block_info, certs_msg))
-                }
-                RollbackWrapper::Rollback(_) => None,
-            };
+            let primary = PrimaryRead::from_read(certs_reader.read_with_rollbacks().await?);
 
-            // Read from epoch-boundary messages only when it's a new epoch
-            if certs_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+            if primary.is_rollback() {
+                let mut state = state_mutex.lock().await;
+                state.volatile.rollback_before(primary.block_info().number);
+                state.volatile.next_block();
+            }
+
+            // Init drains the epoch-0 bootstrap messages, so the main loop only
+            // synchronizes these readers on rollbacks and real transitions.
+            if primary.should_read_epoch_transition_messages() {
                 match params_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((block_info, params)) => {
                         let mut state = state_mutex.lock().await;
@@ -158,7 +150,10 @@ impl HistoricalAccountsState {
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
+            }
 
+            // Rewards publish on real epoch transitions (>0) and rollbacks.
+            if primary.should_read_epoch_transition_messages() {
                 match rewards_reader.read_with_rollbacks().await? {
                     RollbackWrapper::Normal((block_info, rewards_msg)) => {
                         let mut state = state_mutex.lock().await;
@@ -169,7 +164,8 @@ impl HistoricalAccountsState {
             }
 
             // Now handle the certs_message properly
-            if let Some((block_info, tx_certs_msg)) = &certs_msg {
+            if let Some(tx_certs_msg) = primary.message() {
+                let block_info = primary.block_info().clone();
                 let mut state = state_mutex.lock().await;
                 state.handle_tx_certificates(tx_certs_msg, block_info.epoch as u32);
             }
@@ -193,7 +189,8 @@ impl HistoricalAccountsState {
             }
 
             // Prune volatile and persist if needed
-            if let Some((current_block, _)) = certs_msg {
+            if primary.message().is_some() {
+                let current_block = primary.block_info().clone();
                 let should_prune = {
                     let state = state_mutex.lock().await;
                     state.ready_to_prune(&current_block)

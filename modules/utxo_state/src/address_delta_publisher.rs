@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use crate::address_delta_mode::AddressDeltaPublishMode;
+use crate::publish_observer_message;
 use crate::state::{AddressDeltaObserver, ObservedAddressDelta};
 
 enum AddressDeltaAccumulator {
@@ -91,54 +92,49 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
     }
 
     async fn finalise_block(&self, block: &BlockInfo) {
-        if let Some(publisher) = &self.publisher {
-            let message = match &self.deltas {
-                AddressDeltaAccumulator::Compact(deltas) => {
-                    let compact_deltas = std::mem::take(&mut *deltas.lock().await);
-                    debug!(
-                        block_number = block.number,
-                        mode = "compact",
-                        delta_count = compact_deltas.len(),
-                        "utxo-state finalising address deltas"
-                    );
-                    Message::Cardano((
-                        block.clone(),
-                        CardanoMessage::AddressDeltas(AddressDeltasMessage::Deltas(compact_deltas)),
-                    ))
-                }
-                AddressDeltaAccumulator::Extended(deltas) => {
-                    let extended_deltas = std::mem::take(&mut *deltas.lock().await);
-                    debug!(
-                        block_number = block.number,
-                        mode = "extended",
-                        delta_count = extended_deltas.len(),
-                        "utxo-state finalising address deltas"
-                    );
-                    Message::Cardano((
-                        block.clone(),
-                        CardanoMessage::AddressDeltas(AddressDeltasMessage::ExtendedDeltas(
-                            extended_deltas,
-                        )),
-                    ))
-                }
-            };
-            publisher
-                .lock()
-                .await
-                .publish(Arc::new(message))
-                .await
-                .unwrap_or_else(|e| error!("Failed to publish address deltas: {e}"));
+        if self.publisher.is_none() {
+            return;
         }
+
+        let message = match &self.deltas {
+            AddressDeltaAccumulator::Compact(deltas) => {
+                let compact_deltas = std::mem::take(&mut *deltas.lock().await);
+                debug!(
+                    block_number = block.number,
+                    mode = "compact",
+                    delta_count = compact_deltas.len(),
+                    "utxo-state finalising address deltas"
+                );
+                Message::Cardano((
+                    block.clone(),
+                    CardanoMessage::AddressDeltas(AddressDeltasMessage::Deltas(compact_deltas)),
+                ))
+            }
+            AddressDeltaAccumulator::Extended(deltas) => {
+                let extended_deltas = std::mem::take(&mut *deltas.lock().await);
+                debug!(
+                    block_number = block.number,
+                    mode = "extended",
+                    delta_count = extended_deltas.len(),
+                    "utxo-state finalising address deltas"
+                );
+                Message::Cardano((
+                    block.clone(),
+                    CardanoMessage::AddressDeltas(AddressDeltasMessage::ExtendedDeltas(
+                        extended_deltas,
+                    )),
+                ))
+            }
+        };
+        publish_observer_message(
+            &self.publisher,
+            Arc::new(message),
+            "Failed to publish address deltas",
+        )
+        .await;
     }
 
     async fn rollback(&self, message: Arc<Message>) {
-        if let Some(publisher) = &self.publisher {
-            publisher
-                .lock()
-                .await
-                .publish_rollback(message)
-                .await
-                .unwrap_or_else(|e| error!("Failed to publish rollback: {e}"));
-        }
+        publish_observer_message(&self.publisher, message, "Failed to publish rollback").await;
     }
 }

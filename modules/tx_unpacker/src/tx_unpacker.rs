@@ -315,7 +315,7 @@ impl TxUnpacker {
                 _ => error!("Unexpected message type: {raw_message:?}"),
             }
 
-            if primary.should_read_epoch_messages() {
+            if primary.should_read_epoch_transition_messages() {
                 if let Some(ref mut sub) = protocol_params_sub {
                     let protocol_parameters_msg =
                         Self::read_synced_protocol_params(sub, primary.block_info()).await?;
