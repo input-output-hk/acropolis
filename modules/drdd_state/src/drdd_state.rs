@@ -76,6 +76,8 @@ impl DRDDState {
             let history = Arc::new(Mutex::new(StateHistory::<State>::new(
                 "drdd_state",
                 StateHistoryStore::Unbounded,
+                None,
+                None,
             )));
 
             // Subscribe for drdd messages from accounts_state

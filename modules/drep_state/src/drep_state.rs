@@ -349,6 +349,8 @@ impl DRepState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "DRepState",
             StateHistoryStore::default_block_store(),
+            None,
+            None,
         )));
         let history_run = history.clone();
         let query_history = history.clone();

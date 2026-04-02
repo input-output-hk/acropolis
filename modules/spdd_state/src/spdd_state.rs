@@ -90,6 +90,8 @@ impl SPDDState {
             let history = Arc::new(Mutex::new(StateHistory::<State>::new(
                 "spdd_state",
                 StateHistoryStore::Unbounded,
+                None,
+                None,
             )));
 
             // Register /spdd REST endpoint

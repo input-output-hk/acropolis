@@ -144,6 +144,8 @@ impl State {
             reference_scripts_history: StateHistory::new(
                 "utxo_state.reference_scripts_history",
                 StateHistoryStore::default_block_store(),
+                None,
+                None,
             ),
             volatile_created: VolatileIndex::new(),
             volatile_spent: VolatileIndex::new(),
@@ -154,6 +156,8 @@ impl State {
             protocol_parameters_history: StateHistory::new(
                 "utxo_state.protocol_parameters_history",
                 StateHistoryStore::default_block_store(),
+                None,
+                None,
             ),
             avvm_cancelled_value: None,
             pointer_address_values: None,

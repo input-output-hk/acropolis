@@ -660,6 +660,8 @@ impl AccountsState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AccountsState",
             StateHistoryStore::default_block_store(),
+            None,
+            None,
         )));
         let history_query = history.clone();
         let history_tick = history.clone();

@@ -470,6 +470,8 @@ impl TxUnpacker {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "tx_unpacker",
             StateHistoryStore::default_block_store(),
+            None,
+            None,
         )));
 
         let context_run = context.clone();

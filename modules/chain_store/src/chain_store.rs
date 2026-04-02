@@ -81,6 +81,8 @@ impl ChainStore {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "chain_store",
             StateHistoryStore::default_epoch_store(),
+            None,
+            None,
         )));
         history.lock().await.commit_forced(State::new());
 

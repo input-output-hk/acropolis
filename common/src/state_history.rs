@@ -2,7 +2,8 @@
 //! Keeps per-block state for rollbacks or per-epoch state for historical lookups
 //! Use imbl collections in the state to avoid memory explosion!
 
-use std::collections::VecDeque;
+use serde::Serialize;
+use std::{collections::VecDeque, fs::File, io::Write};
 use tracing::info;
 
 use crate::params::SECURITY_PARAMETER_K;
@@ -35,15 +36,26 @@ pub struct StateHistory<S> {
     module: String,
 
     store: StateHistoryStore,
+
+    dump_index: Option<u64>,
+
+    dump_path: Option<String>,
 }
 
-impl<S: Clone + Default> StateHistory<S> {
+impl<S: Clone + Default + Serialize> StateHistory<S> {
     /// Construct
-    pub fn new(module: &str, store: StateHistoryStore) -> Self {
+    pub fn new(
+        module: &str,
+        store: StateHistoryStore,
+        dump_index: Option<u64>,
+        dump_path: Option<String>,
+    ) -> Self {
         Self {
             history: VecDeque::new(),
             module: module.to_string(),
             store,
+            dump_index,
+            dump_path,
         }
     }
 
@@ -131,6 +143,54 @@ impl<S: Clone + Default> StateHistory<S> {
             StateHistoryStore::Unbounded => {
                 self.history.push_back(HistoryEntry { index, state });
             }
+        }
+
+        if let Some(dump_index) = self.dump_index {
+            if index == dump_index {
+                self.dump_to_file();
+            }
+        }
+    }
+
+    fn dump_to_file(&self) {
+        if let Some(entry) = self.history.back() {
+            let bytes = match bincode::serialize(&entry.state) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    tracing::error!("{}", e);
+                    return;
+                }
+            };
+
+            if let Some(path) = &self.dump_path {
+                let mut file = match File::create(path) {
+                    Ok(file) => file,
+                    Err(e) => {
+                        tracing::error!("{}", e);
+                        return;
+                    }
+                };
+
+                match file.write_all(&bytes) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!("{}", e);
+                        return;
+                    }
+                }
+
+                info!(
+                    "{} dumped state at index {} to {} ({} bytes)",
+                    self.module,
+                    entry.index,
+                    path,
+                    bytes.len()
+                );
+            } else {
+                info!("Dump path not set")
+            }
+        } else {
+            info!("{} no state to dump", self.module);
         }
     }
 }

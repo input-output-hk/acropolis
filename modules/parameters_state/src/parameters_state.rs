@@ -176,11 +176,15 @@ impl ParametersState {
             Arc::new(Mutex::new(StateHistory::<State>::new(
                 "ParameterState",
                 StateHistoryStore::Unbounded,
+                None,
+                None,
             )))
         } else {
             Arc::new(Mutex::new(StateHistory::new(
                 "ParameterState",
                 StateHistoryStore::default_epoch_store(),
+                None,
+                None,
             )))
         };
 

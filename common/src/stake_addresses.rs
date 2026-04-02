@@ -46,7 +46,7 @@ pub struct AccountState {
     pub address_state: StakeAddressState,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, serde::Serialize)]
 pub struct StakeAddressMap {
     inner: HashMap<StakeAddress, StakeAddressState>,
 

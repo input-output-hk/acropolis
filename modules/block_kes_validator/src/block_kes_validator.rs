@@ -254,6 +254,8 @@ impl BlockKesValidator {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "block_kes_validator",
             StateHistoryStore::default_block_store(),
+            None,
+            None,
         )));
 
         // Start run task

@@ -26,7 +26,7 @@ use tracing::{debug, info};
 
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct State {
     store_config: StoreConfig,
 
@@ -905,6 +905,8 @@ mod tests {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "spo_state",
             StateHistoryStore::default_block_store(),
+            None,
+            None,
         )));
         let mut state = history.lock().await.get_current_state();
         let mut block = new_block(0);
@@ -991,6 +993,8 @@ mod tests {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "spo_state",
             StateHistoryStore::default_block_store(),
+            None,
+            None,
         )));
         let mut state = history.lock().await.get_current_state();
         let mut block = new_block(0);
