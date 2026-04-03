@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::{
     collections::{
         hash_map::{Entry, Iter, Values},
-        BTreeMap, HashMap,
+        BTreeMap, BTreeSet, HashMap,
     },
     sync::atomic::AtomicU64,
 };
@@ -46,12 +46,44 @@ pub struct AccountState {
     pub address_state: StakeAddressState,
 }
 
-#[derive(Default, Debug, serde::Serialize)]
+#[derive(Default, Debug, Clone)]
 pub struct StakeAddressMap {
     inner: HashMap<StakeAddress, StakeAddressState>,
 
     /// Reverse indexing for tracking which stake addresses delegate to a given DRep credential.
     drep_delegates: HashMap<DRepCredential, HashSet<StakeAddress>>,
+}
+
+#[derive(serde::Serialize)]
+struct StableStakeAddressMap {
+    inner: BTreeMap<StakeAddress, StakeAddressState>,
+    drep_delegates: BTreeMap<DRepCredential, BTreeSet<StakeAddress>>,
+}
+
+impl serde::Serialize for StakeAddressMap {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StableStakeAddressMap {
+            inner: self
+                .inner
+                .iter()
+                .map(|(stake_address, state)| (stake_address.clone(), state.clone()))
+                .collect(),
+            drep_delegates: self
+                .drep_delegates
+                .iter()
+                .map(|(drep_credential, stake_addresses)| {
+                    (
+                        drep_credential.clone(),
+                        stake_addresses.iter().cloned().collect::<BTreeSet<_>>(),
+                    )
+                })
+                .collect(),
+        }
+        .serialize(serializer)
+    }
 }
 
 impl StakeAddressMap {

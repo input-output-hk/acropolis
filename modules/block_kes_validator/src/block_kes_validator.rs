@@ -161,7 +161,7 @@ impl BlockKesValidator {
                 block_reader.read_with_rollbacks().await,
             )?;
 
-            if primary.is_rollback() {
+            if primary.should_restore_history() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
             }
 
@@ -252,11 +252,14 @@ impl BlockKesValidator {
 
         // state history
         let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "block_kes_validator",
-            StateHistoryStore::default_block_store(),
-            dump_index,
-        )));
+        let history = Arc::new(Mutex::new(
+            StateHistory::<State>::new(
+                "block_kes_validator",
+                StateHistoryStore::default_block_store(),
+                dump_index,
+            )
+            .with_summary(State::rollback_debug_summary),
+        ));
 
         // Start run task
         let context_run = context.clone();

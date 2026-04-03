@@ -3,12 +3,13 @@ use acropolis_common::{
 };
 use imbl::{HashSet, OrdMap, Vector};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 use crate::store_config::StoreConfig;
 
 // Historical SPO State
 // each field can be optional (according to configurations)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct HistoricalSPOState {
     pub registration: Option<PoolRegistration>,
     pub updates: Option<Vec<PoolUpdateEvent>>,
@@ -21,6 +22,34 @@ pub struct HistoricalSPOState {
     // blocks
     // <Epoch Number, Block Heights>
     pub blocks: Option<OrdMap<u64, Vector<u64>>>,
+}
+
+#[derive(Serialize)]
+struct StableHistoricalSPOState {
+    registration: Option<PoolRegistration>,
+    updates: Option<Vec<PoolUpdateEvent>>,
+    delegators: Option<BTreeSet<StakeAddress>>,
+    votes: Option<Vec<VoteRecord>>,
+    blocks: Option<OrdMap<u64, Vector<u64>>>,
+}
+
+impl Serialize for HistoricalSPOState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StableHistoricalSPOState {
+            registration: self.registration.clone(),
+            updates: self.updates.clone(),
+            delegators: self
+                .delegators
+                .as_ref()
+                .map(|delegators| delegators.iter().cloned().collect()),
+            votes: self.votes.clone(),
+            blocks: self.blocks.clone(),
+        }
+        .serialize(serializer)
+    }
 }
 
 impl HistoricalSPOState {

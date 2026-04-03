@@ -98,10 +98,7 @@ impl TxUnpacker {
                 }
             };
 
-            if primary.is_rollback()
-                || (!primary.is_rollback()
-                    && primary.block_info().status == BlockStatus::RolledBack)
-            {
+            if primary.should_restore_history() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
             }
 

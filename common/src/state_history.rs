@@ -3,16 +3,30 @@
 //! Use imbl collections in the state to avoid memory explosion!
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::{
     collections::VecDeque,
     fs::{self, File},
     io::Write,
+    path::Path,
 };
 use tracing::info;
 
 use crate::params::SECURITY_PARAMETER_K;
 
 pub const DEFAULT_DUMP_INDEX: &str = "startup.dump-state-block";
+
+pub fn debug_fingerprint<T: Serialize>(value: &T) -> String {
+    match bincode::serialize(value) {
+        Ok(bytes) => {
+            let mut hasher = Sha256::new();
+            hasher.update(&bytes);
+            let digest = hasher.finalize();
+            format!("len={} sha256={}", bytes.len(), hex::encode(digest))
+        }
+        Err(e) => format!("serialize_error={e}"),
+    }
+}
 
 pub enum StateHistoryStore {
     Bounded(u64), // Used for rollbacks, bounded at k
@@ -46,6 +60,8 @@ pub struct StateHistory<S> {
     dump_index: Option<u64>,
 
     rolled_back: bool,
+
+    summary_fn: Option<fn(&S) -> String>,
 }
 
 impl<S: Clone + Default + Serialize> StateHistory<S> {
@@ -57,7 +73,13 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
             store,
             dump_index,
             rolled_back: false,
+            summary_fn: None,
         }
+    }
+
+    pub fn with_summary(mut self, summary_fn: fn(&S) -> String) -> Self {
+        self.summary_fn = Some(summary_fn);
+        self
     }
 
     /// Get the current state (if any), direct ref
@@ -149,17 +171,32 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
 
         if let Some(dump_index) = self.dump_index {
             if index == dump_index {
-                if self.rolled_back {
+                if self.rolled_back && self.dump_exists() {
                     if self.compare_states() {
                         tracing::info!("{} rollback validation success", self.module);
                     } else {
                         tracing::error!("{} rollback validation failed", self.module);
                     };
                 } else {
+                    if self.rolled_back {
+                        tracing::warn!(
+                            "{} no rollback baseline found at index {}, dumping current state instead",
+                            self.module,
+                            dump_index
+                        );
+                    }
                     self.dump_to_file();
                 }
             }
         }
+    }
+
+    fn dump_exists(&self) -> bool {
+        Path::new(&self.module).exists()
+    }
+
+    fn summary_path(&self) -> Option<String> {
+        self.summary_fn.map(|_| format!("{}.summary", self.module))
     }
 
     fn dump_to_file(&self) {
@@ -172,7 +209,7 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
                 }
             };
 
-            let mut file = match File::create(self.module.clone()) {
+            let mut file = match File::create(&self.module) {
                 Ok(file) => file,
                 Err(e) => {
                     tracing::error!("{}", e);
@@ -195,13 +232,26 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
                 self.module,
                 bytes.len()
             );
+
+            self.dump_summary_to_file(&entry.state);
         } else {
             info!("{} no state to dump", self.module);
         }
     }
 
+    fn dump_summary_to_file(&self, state: &S) {
+        let (Some(summary_fn), Some(summary_path)) = (self.summary_fn, self.summary_path()) else {
+            return;
+        };
+
+        let summary = summary_fn(state);
+        if let Err(e) = fs::write(&summary_path, summary) {
+            tracing::error!("failed to write {} summary: {}", self.module, e);
+        }
+    }
+
     fn compare_states(&mut self) -> bool {
-        let bytes_pre = match fs::read(self.module.clone()) {
+        let bytes_pre = match fs::read(&self.module) {
             Ok(b) => b,
             Err(e) => {
                 tracing::error!("failed to read {}: {}", self.module, e);
@@ -222,7 +272,38 @@ impl<S: Clone + Default + Serialize> StateHistory<S> {
             }
         };
 
-        bytes_pre == bytes_after
+        let matches = bytes_pre == bytes_after;
+        if !matches {
+            self.log_summary_diff(after_state);
+        }
+
+        matches
+    }
+
+    fn log_summary_diff(&self, after_state: &S) {
+        let (Some(summary_fn), Some(summary_path)) = (self.summary_fn, self.summary_path()) else {
+            return;
+        };
+
+        let current_summary = summary_fn(after_state);
+        match fs::read_to_string(&summary_path) {
+            Ok(baseline_summary) => {
+                tracing::error!(
+                    module = %self.module,
+                    baseline_summary = %baseline_summary,
+                    "rollback baseline summary"
+                );
+            }
+            Err(e) => {
+                tracing::error!("failed to read {} summary: {}", self.module, e);
+            }
+        }
+
+        tracing::error!(
+            module = %self.module,
+            current_summary = %current_summary,
+            "rollback current summary"
+        );
     }
 }
 
@@ -242,5 +323,48 @@ impl<S: Clone> StateHistory<S> {
     /// Clear the history
     pub fn clear(&mut self) {
         self.history.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn unique_dump_path(test_name: &str) -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "acropolis-{test_name}-{}-{nanos}.bin",
+            std::process::id()
+        ));
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn rollback_without_existing_dump_creates_baseline() {
+        let dump_path = unique_dump_path("state-history-baseline");
+        let dump_file = PathBuf::from(&dump_path);
+        let _ = fs::remove_file(&dump_file);
+
+        let mut history =
+            StateHistory::<u64>::new(&dump_path, StateHistoryStore::Bounded(10), Some(5));
+
+        history.get_rolled_back_state(4);
+        history.commit(5, 42u64);
+
+        let bytes = fs::read(&dump_file).expect("missing dump file after rollback baseline write");
+        assert_eq!(
+            bytes,
+            bincode::serialize(&42u64).expect("serialize should succeed")
+        );
+
+        let _ = fs::remove_file(&dump_file);
     }
 }

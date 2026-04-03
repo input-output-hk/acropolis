@@ -11,6 +11,7 @@ use acropolis_common::{
     },
     protocol_params::Nonce,
     rational_number::RationalNumber,
+    state_history::debug_fingerprint,
     validation::{ValidationError, VrfValidationError},
     BlockInfo, Era,
 };
@@ -53,6 +54,26 @@ impl State {
             epoch_nonce: None,
             epoch_snapshots: EpochSnapshots::default(),
         }
+    }
+
+    pub fn rollback_debug_summary(&self) -> String {
+        let mark = self.epoch_snapshots.mark.as_ref();
+        let set = self.epoch_snapshots.set.as_ref();
+
+        format!(
+            "decentralisation_param={:?} active_slots_coeff={:?} epoch_nonce={} mark_spos_len={} mark_stakes_len={} mark_total_active_stakes={} mark={} set_spos_len={} set_stakes_len={} set_total_active_stakes={} set={}",
+            self.decentralisation_param,
+            self.active_slots_coeff,
+            debug_fingerprint(&self.epoch_nonce),
+            mark.active_spos.len(),
+            mark.active_stakes.len(),
+            mark.total_active_stakes,
+            debug_fingerprint(mark),
+            set.active_spos.len(),
+            set.active_stakes.len(),
+            set.total_active_stakes,
+            debug_fingerprint(set),
+        )
     }
 
     pub fn handle_genesis(&mut self, genesis: &GenesisValues, block_info: &BlockInfo) {

@@ -114,6 +114,52 @@ impl FeedbackReceiver for FeedbackLogger {
     }
 }
 
+#[derive(Clone, Debug)]
+struct RollbackReplayBoundary {
+    replay_from: BlockInfo,
+    rollback_to: Option<BlockInfo>,
+}
+
+impl RollbackReplayBoundary {
+    fn new(replay_from: &BlockInfo, rollback_to: Option<&BlockInfo>) -> Self {
+        Self {
+            replay_from: replay_from.clone(),
+            rollback_to: rollback_to.cloned(),
+        }
+    }
+
+    fn replay_point(&self) -> hardano::immutable::Point {
+        hardano::immutable::Point::Specific(self.replay_from.slot, self.replay_from.hash.to_vec())
+    }
+
+    fn rollback_point(&self) -> Point {
+        self.rollback_to.as_ref().map(BlockInfo::to_point).unwrap_or(Point::Origin)
+    }
+
+    fn rollback_marker_block_info(&self) -> BlockInfo {
+        self.replay_from.with_status(BlockStatus::RolledBack)
+    }
+
+    fn restore_runtime_state(
+        &self,
+        last_block_number: &mut u64,
+        last_epoch: &mut Option<u64>,
+        last_era: &mut Option<Era>,
+        last_block_info: &mut Option<BlockInfo>,
+    ) {
+        *last_block_number = self.rollback_to.as_ref().map(|info| info.number).unwrap_or(0);
+        *last_epoch = self.rollback_to.as_ref().map(|info| info.epoch);
+        *last_era = self.rollback_to.as_ref().map(|info| info.era);
+        *last_block_info = self.rollback_to.clone();
+    }
+
+    fn mark_replayed_block(&self, block_info: &mut BlockInfo) {
+        block_info.new_epoch = self.replay_from.new_epoch;
+        block_info.is_new_era = self.replay_from.is_new_era;
+        block_info.status = BlockStatus::RolledBack;
+    }
+}
+
 /// Mithril snapshot fetcher module
 #[module(
     message_type(Message),
@@ -301,7 +347,7 @@ impl MithrilSnapshotFetcher {
         let mut last_block_number: u64 = 0;
         let mut last_epoch: Option<u64> = None;
         let mut last_era: Option<Era> = None;
-        let mut was_new_epoch: Option<bool> = None;
+        let mut rollback_replay_boundary: Option<RollbackReplayBoundary> = None;
 
         let mut current_point = point;
         let publish_rollback_block = rollback_block;
@@ -410,11 +456,12 @@ impl MithrilSnapshotFetcher {
 
                             if let Some(block_number) = rollback_block {
                                 if block_number - blocks_to_rollback as u64 == block_info.number {
-                                    current_point = pallas::network::miniprotocols::Point::Specific(
-                                        block.slot(),
-                                        vec![],
+                                    let boundary = RollbackReplayBoundary::new(
+                                        &block_info,
+                                        last_block_info.as_ref(),
                                     );
-                                    was_new_epoch = Some(block_info.new_epoch);
+                                    current_point = boundary.replay_point();
+                                    rollback_replay_boundary = Some(boundary);
                                 }
                             }
 
@@ -424,13 +471,19 @@ impl MithrilSnapshotFetcher {
                                 stop = true;
                             } else if let Some(block_number) = rollback_block {
                                 if block_number == block_info.number {
+                                    let boundary =
+                                        rollback_replay_boundary.clone().ok_or_else(|| {
+                                            anyhow!(
+                                                "rollback replay boundary missing for block {}",
+                                                block_info.number
+                                            )
+                                        })?;
                                     let message_enum = Message::Cardano((
-                                        block_info.clone(),
+                                        boundary.rollback_marker_block_info(),
                                         CardanoMessage::StateTransition(
-                                            StateTransitionMessage::Rollback(Point::Specific {
-                                                hash: block_info.hash,
-                                                slot: block_info.slot,
-                                            }),
+                                            StateTransitionMessage::Rollback(
+                                                boundary.rollback_point(),
+                                            ),
                                         ),
                                     ));
 
@@ -443,9 +496,12 @@ impl MithrilSnapshotFetcher {
                                         });
 
                                     rollback_block = None;
-
-                                    last_block_number =
-                                        block_info.number - blocks_to_rollback as u64 - 1;
+                                    boundary.restore_runtime_state(
+                                        &mut last_block_number,
+                                        &mut last_epoch,
+                                        &mut last_era,
+                                        &mut last_block_info,
+                                    );
                                     restarted = true;
                                 } else {
                                     // Send the block message
@@ -456,13 +512,9 @@ impl MithrilSnapshotFetcher {
 
                                     if publish_rollback_block.is_some() && rollback_block.is_none()
                                     {
-                                        if let Some(rollback_block) = publish_rollback_block {
-                                            if block_info.number
-                                                == rollback_block - blocks_to_rollback as u64
-                                            {
-                                                block_info.new_epoch =
-                                                    was_new_epoch.expect("No new epoch set");
-                                                block_info.status = BlockStatus::RolledBack;
+                                        if let Some(boundary) = rollback_replay_boundary.as_ref() {
+                                            if block_info.number == boundary.replay_from.number {
+                                                boundary.mark_replayed_block(&mut block_info);
                                                 tracing::error!("Publishing rolled back block");
                                             }
                                         }
@@ -491,13 +543,9 @@ impl MithrilSnapshotFetcher {
                                 };
 
                                 if publish_rollback_block.is_some() && rollback_block.is_none() {
-                                    if let Some(rollback_block) = publish_rollback_block {
-                                        if block_info.number
-                                            == rollback_block - blocks_to_rollback as u64
-                                        {
-                                            block_info.new_epoch =
-                                                was_new_epoch.expect("No new epoch set");
-                                            block_info.status = BlockStatus::RolledBack;
+                                    if let Some(boundary) = rollback_replay_boundary.as_ref() {
+                                        if block_info.number == boundary.replay_from.number {
+                                            boundary.mark_replayed_block(&mut block_info);
                                             tracing::error!("Publishing rolledback block");
                                         }
                                     }
@@ -669,6 +717,29 @@ mod tests {
     use super::*;
     use mithril_common::test::double::Dummy;
 
+    fn test_block(
+        number: u64,
+        slot: u64,
+        epoch: u64,
+        new_epoch: bool,
+        is_new_era: bool,
+    ) -> BlockInfo {
+        BlockInfo {
+            status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
+            slot,
+            number,
+            hash: BlockHash::from([number as u8; 32]),
+            epoch,
+            epoch_slot: 0,
+            new_epoch,
+            is_new_era,
+            timestamp: 0,
+            tip_slot: None,
+            era: Era::Conway,
+        }
+    }
+
     #[test]
     fn can_save_and_load_snapshot_metadata() {
         let snapshot = Snapshot::dummy();
@@ -755,5 +826,39 @@ mod tests {
             &latest_snapshot_metadata,
             &config
         ));
+    }
+
+    #[test]
+    fn rollback_replay_boundary_uses_previous_block_as_rollback_point() {
+        let previous = test_block(99, 900, 4, false, false);
+        let replay_from = test_block(100, 1000, 5, true, true);
+
+        let boundary = RollbackReplayBoundary::new(&replay_from, Some(&previous));
+
+        assert_eq!(boundary.rollback_point(), previous.to_point());
+        assert_eq!(
+            boundary.replay_point(),
+            hardano::immutable::Point::Specific(replay_from.slot, replay_from.hash.to_vec())
+        );
+        assert_eq!(
+            boundary.rollback_marker_block_info().status,
+            BlockStatus::RolledBack
+        );
+    }
+
+    #[test]
+    fn rollback_replay_boundary_marks_replayed_block_with_boundary_flags() {
+        let replay_from = test_block(100, 1000, 5, true, true);
+        let boundary = RollbackReplayBoundary::new(&replay_from, None);
+
+        let mut replayed = replay_from.with_status(BlockStatus::Immutable);
+        replayed.new_epoch = false;
+        replayed.is_new_era = false;
+
+        boundary.mark_replayed_block(&mut replayed);
+
+        assert_eq!(replayed.status, BlockStatus::RolledBack);
+        assert!(replayed.new_epoch);
+        assert!(replayed.is_new_era);
     }
 }

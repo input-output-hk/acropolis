@@ -17,7 +17,7 @@ use acropolis_common::{
             DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
         },
     },
-    state_history::{DEFAULT_DUMP_INDEX, StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -192,9 +192,11 @@ impl DRepState {
                 subs.certs_reader.read_with_rollbacks().await,
             )?;
 
-            if primary.is_rollback() {
+            if primary.should_restore_history() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
 
+            if primary.is_rollback() {
                 let rollback_message = primary
                     .rollback_message()
                     .cloned()

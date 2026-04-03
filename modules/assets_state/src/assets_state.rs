@@ -8,13 +8,17 @@ use crate::{
     state::{AssetsStorageConfig, State, StoreTransactions},
 };
 use acropolis_common::{
-    BlockStatus, caryatid::{PrimaryRead, RollbackWrapper}, declare_cardano_reader, messages::{
+    caryatid::{PrimaryRead, RollbackWrapper},
+    declare_cardano_reader,
+    messages::{
         AddressDeltasMessage, AssetDeltasMessage, CardanoMessage, Message, StateQuery,
         StateQueryResponse, StateTransitionMessage, UTXODeltasMessage,
-    }, queries::{
+    },
+    queries::{
         assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
         errors::QueryError,
-    }, state_history::{DEFAULT_DUMP_INDEX, StateHistory, StateHistoryStore}
+    },
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -104,7 +108,7 @@ impl AssetsState {
             // Asset deltas are the synchroniser
             let primary = PrimaryRead::from_read(asset_deltas_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+            if primary.should_restore_history() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
             }
 

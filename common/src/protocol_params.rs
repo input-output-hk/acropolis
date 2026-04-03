@@ -11,7 +11,10 @@ use chrono::{DateTime, Utc};
 use serde_with::serde_as;
 use std::fmt::Formatter;
 use std::ops::Deref;
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Display,
+};
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParams {
@@ -74,7 +77,7 @@ impl ProtocolParams {
 //
 
 #[serde_as]
-#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Deserialize)]
 pub struct ByronParams {
     pub block_version_data: BlockVersionData,
     pub fts_seed: Option<Vec<u8>>,
@@ -83,6 +86,35 @@ pub struct ByronParams {
 
     #[serde_as(as = "Vec<(_, _)>")]
     pub heavy_delegation: HashMap<PoolId, HeavyDelegate>,
+}
+
+#[derive(serde::Serialize)]
+struct StableByronParams {
+    block_version_data: BlockVersionData,
+    fts_seed: Option<Vec<u8>>,
+    protocol_consts: ProtocolConsts,
+    start_time: u64,
+    heavy_delegation: BTreeMap<PoolId, HeavyDelegate>,
+}
+
+impl serde::Serialize for ByronParams {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StableByronParams {
+            block_version_data: self.block_version_data.clone(),
+            fts_seed: self.fts_seed.clone(),
+            protocol_consts: self.protocol_consts.clone(),
+            start_time: self.start_time,
+            heavy_delegation: self
+                .heavy_delegation
+                .iter()
+                .map(|(pool_id, delegate)| (*pool_id, delegate.clone()))
+                .collect(),
+        }
+        .serialize(serializer)
+    }
 }
 
 //

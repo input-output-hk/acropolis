@@ -80,11 +80,14 @@ impl ChainStore {
         };
 
         let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "chain_store",
-            StateHistoryStore::default_epoch_store(),
-            dump_index,
-        )));
+        let history = Arc::new(Mutex::new(
+            StateHistory::<State>::new(
+                "chain_store",
+                StateHistoryStore::default_block_store(),
+                dump_index,
+            )
+            .with_summary(State::rollback_debug_summary),
+        ));
         history.lock().await.commit_forced(State::new());
 
         let query_store = store.clone();
@@ -171,9 +174,12 @@ impl ChainStore {
                     blocks_reader.read_with_rollbacks().await,
                 )?;
 
-                if primary.is_rollback() {
+                if primary.should_restore_history() {
                     let mut history = history.lock().await;
                     state = history.get_rolled_back_state(primary.block_info().number);
+                }
+
+                if primary.is_rollback() {
                     store.rollback(primary.block_info())?;
                 }
 

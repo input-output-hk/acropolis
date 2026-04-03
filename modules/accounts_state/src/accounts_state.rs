@@ -285,9 +285,11 @@ impl AccountsState {
                 certs_reader.read_with_rollbacks().await,
             )?;
 
-            if primary.is_rollback() {
+            if primary.should_restore_history() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
 
+            if primary.is_rollback() {
                 let rollback_message = primary
                     .rollback_message()
                     .cloned()
@@ -301,8 +303,6 @@ impl AccountsState {
                 // Notify the state of the block (used to schedule reward calculations)
                 state.notify_block(primary.block_info());
             }
-
-            let epoch = primary.epoch();
 
             // Init drains the epoch-0 bootstrap messages, so the main loop only
             // synchronizes these side readers on rollbacks and real transitions.
@@ -323,7 +323,7 @@ impl AccountsState {
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
-                let mut stake_reward_deltas = if epoch.is_some() {
+                let mut stake_reward_deltas = if primary.message().is_some() {
                     let block_info = primary.block_info();
                     // Applies rewards from previous epoch
                     match state
@@ -658,11 +658,14 @@ impl AccountsState {
 
         // History
         let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "AccountsState",
-            StateHistoryStore::default_block_store(),
-            dump_index,
-        )));
+        let history = Arc::new(Mutex::new(
+            StateHistory::<State>::new(
+                "AccountsState",
+                StateHistoryStore::default_block_store(),
+                dump_index,
+            )
+            .with_summary(State::rollback_debug_summary),
+        ));
         let history_query = history.clone();
         let history_tick = history.clone();
 

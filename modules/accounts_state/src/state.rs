@@ -25,6 +25,7 @@ use acropolis_common::{
         utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
     },
     stake_addresses::{StakeAddressMap, StakeAddressState},
+    state_history::debug_fingerprint,
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
     InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
     PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind,
@@ -45,7 +46,7 @@ const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 
 /// State for rewards calculation
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct EpochSnapshots {
     /// Latest snapshot (epoch i)
     pub mark: Arc<EpochSnapshot>,
@@ -55,6 +56,27 @@ pub struct EpochSnapshots {
 
     /// One before that (epoch i-2)
     pub go: Arc<EpochSnapshot>,
+}
+
+#[derive(serde::Serialize)]
+struct StableEpochSnapshots {
+    mark: EpochSnapshot,
+    set: EpochSnapshot,
+    go: EpochSnapshot,
+}
+
+impl serde::Serialize for EpochSnapshots {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StableEpochSnapshots {
+            mark: (*self.mark).clone(),
+            set: (*self.set).clone(),
+            go: (*self.go).clone(),
+        }
+        .serialize(serializer)
+    }
 }
 
 impl EpochSnapshots {
@@ -67,7 +89,7 @@ impl EpochSnapshots {
 }
 
 /// Overall state - stored per block
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone)]
 pub struct State {
     /// Map of active SPOs by pool ID
     spos: OrdMap<PoolId, PoolRegistration>,
@@ -107,7 +129,6 @@ pub struct State {
     current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
 
     /// Task for rewards calculation if necessary
-    #[serde(skip)]
     epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
 
     /// DReps mapped to all accounts that have ever delegated to them
@@ -117,7 +138,6 @@ pub struct State {
     drep_delegators: OrdMap<DRepCredential, OrdSet<StakeAddress>>,
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
-    #[serde(skip)]
     start_rewards_tx: Option<mpsc::Sender<()>>,
 
     /// Randomness stabilization window (4k/f slots), computed from protocol params.
@@ -142,7 +162,125 @@ pub struct State {
     pending_mir_treasury: ImHashMap<StakeAddress, i64>,
 }
 
+#[derive(serde::Serialize)]
+struct StableState {
+    spos: OrdMap<PoolId, PoolRegistration>,
+    retiring_spos: Vec<PoolId>,
+    stake_addresses: StakeAddressMap,
+    epoch_snapshots: EpochSnapshots,
+    pots: Pots,
+    dreps: OrdMap<DRepCredential, Lovelace>,
+    protocol_parameters: Option<ProtocolParams>,
+    previous_protocol_parameters: Option<ProtocolParams>,
+    pool_refunds: Vec<(PoolId, StakeAddress)>,
+    proposal_deposits: BTreeMap<StakeAddress, Lovelace>,
+    proposal_refunds: Vec<(StakeAddress, Lovelace)>,
+    current_epoch_registration_changes: Vec<RegistrationChange>,
+    drep_delegators: OrdMap<DRepCredential, OrdSet<StakeAddress>>,
+    stability_window_slot: u64,
+    pending_mir_reserves: BTreeMap<StakeAddress, i64>,
+    pending_mir_treasury: BTreeMap<StakeAddress, i64>,
+}
+
+impl serde::Serialize for State {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StableState {
+            spos: self.spos.clone(),
+            retiring_spos: self.retiring_spos.clone(),
+            stake_addresses: self.stake_addresses.lock().unwrap().clone(),
+            epoch_snapshots: self.epoch_snapshots.clone(),
+            pots: self.pots.clone(),
+            dreps: self.dreps.clone(),
+            protocol_parameters: self.protocol_parameters.clone(),
+            previous_protocol_parameters: self.previous_protocol_parameters.clone(),
+            pool_refunds: self.pool_refunds.clone(),
+            proposal_deposits: self
+                .proposal_deposits
+                .iter()
+                .map(|(stake_address, value)| (stake_address.clone(), *value))
+                .collect(),
+            proposal_refunds: self.proposal_refunds.clone(),
+            current_epoch_registration_changes: self
+                .current_epoch_registration_changes
+                .lock()
+                .unwrap()
+                .clone(),
+            drep_delegators: self.drep_delegators.clone(),
+            stability_window_slot: self.stability_window_slot,
+            pending_mir_reserves: self
+                .pending_mir_reserves
+                .iter()
+                .map(|(stake_address, value)| (stake_address.clone(), *value))
+                .collect(),
+            pending_mir_treasury: self
+                .pending_mir_treasury
+                .iter()
+                .map(|(stake_address, value)| (stake_address.clone(), *value))
+                .collect(),
+        }
+        .serialize(serializer)
+    }
+}
+
 impl State {
+    pub fn rollback_debug_summary(&self) -> String {
+        let stake_addresses = self.stake_addresses.lock().unwrap();
+        let current_epoch_registration_changes =
+            self.current_epoch_registration_changes.lock().unwrap();
+        let proposal_deposits: BTreeMap<StakeAddress, Lovelace> = self
+            .proposal_deposits
+            .iter()
+            .map(|(stake_address, value)| (stake_address.clone(), *value))
+            .collect();
+        let pending_mir_reserves: BTreeMap<StakeAddress, i64> = self
+            .pending_mir_reserves
+            .iter()
+            .map(|(stake_address, value)| (stake_address.clone(), *value))
+            .collect();
+        let pending_mir_treasury: BTreeMap<StakeAddress, i64> = self
+            .pending_mir_treasury
+            .iter()
+            .map(|(stake_address, value)| (stake_address.clone(), *value))
+            .collect();
+
+        format!(
+            "spos_len={} spos={} retiring_spos_len={} retiring_spos={} stake_addresses_len={} stake_addresses={} epoch_snapshots_mark_epoch={} epoch_snapshots_set_epoch={} epoch_snapshots_go_epoch={} epoch_snapshots={} pots={} dreps_len={} dreps={} protocol_parameters={} previous_protocol_parameters={} pool_refunds_len={} pool_refunds={} proposal_deposits_len={} proposal_deposits={} proposal_refunds_len={} proposal_refunds={} registration_changes_len={} registration_changes={} drep_delegators_len={} drep_delegators={} stability_window_slot={} pending_mir_reserves_len={} pending_mir_reserves={} pending_mir_treasury_len={} pending_mir_treasury={}",
+            self.spos.len(),
+            debug_fingerprint(&self.spos),
+            self.retiring_spos.len(),
+            debug_fingerprint(&self.retiring_spos),
+            stake_addresses.len(),
+            debug_fingerprint(&*stake_addresses),
+            self.epoch_snapshots.mark.epoch,
+            self.epoch_snapshots.set.epoch,
+            self.epoch_snapshots.go.epoch,
+            debug_fingerprint(&self.epoch_snapshots),
+            debug_fingerprint(&self.pots),
+            self.dreps.len(),
+            debug_fingerprint(&self.dreps),
+            debug_fingerprint(&self.protocol_parameters),
+            debug_fingerprint(&self.previous_protocol_parameters),
+            self.pool_refunds.len(),
+            debug_fingerprint(&self.pool_refunds),
+            proposal_deposits.len(),
+            debug_fingerprint(&proposal_deposits),
+            self.proposal_refunds.len(),
+            debug_fingerprint(&self.proposal_refunds),
+            current_epoch_registration_changes.len(),
+            debug_fingerprint(&*current_epoch_registration_changes),
+            self.drep_delegators.len(),
+            debug_fingerprint(&self.drep_delegators),
+            self.stability_window_slot,
+            pending_mir_reserves.len(),
+            debug_fingerprint(&pending_mir_reserves),
+            pending_mir_treasury.len(),
+            debug_fingerprint(&pending_mir_treasury),
+        )
+    }
+
     /// Bootstrap state from snapshot data (consumes the message to avoid cloning)
     pub fn bootstrap(&mut self, bootstrap_msg: AccountsBootstrapMessage) -> Result<()> {
         let num_accounts = bootstrap_msg.accounts.len();

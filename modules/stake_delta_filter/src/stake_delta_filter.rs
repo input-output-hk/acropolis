@@ -2,15 +2,21 @@
 //! Reads address deltas and filters out only stake addresses from it; also resolves pointer addresses.
 
 use acropolis_common::{
-    NetworkId, caryatid::{PrimaryRead, RollbackWrapper, ValidationContext}, configuration::StartupMode, declare_cardano_reader, messages::{
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
+    configuration::StartupMode,
+    declare_cardano_reader,
+    messages::{
         AddressDeltasMessage, CardanoMessage, Message, StateQuery, StateQueryResponse,
         StateTransitionMessage, TxCertificatesMessage,
-    }, queries::{
+    },
+    queries::{
         errors::QueryError,
         stake_deltas::{
-            DEFAULT_STAKE_DELTAS_QUERY_TOPIC, StakeDeltaQuery, StakeDeltaQueryResponse
+            StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
         },
-    }, state_history::{DEFAULT_DUMP_INDEX, StateHistory, StateHistoryStore}
+    },
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
+    NetworkId,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -450,6 +456,10 @@ impl StakeDeltaFilter {
                 certs_reader.read_with_rollbacks().await,
             )?;
 
+            if primary.should_restore_history() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
+
             if let Some(tx_cert_msg) = primary.message() {
                 state
                     .handle_certs(primary.block_info(), tx_cert_msg)
@@ -457,9 +467,6 @@ impl StakeDeltaFilter {
                     .inspect_err(|e| error!("Messaging handling error: {e}"))
                     .ok();
             } else if let Some(message) = primary.rollback_message() {
-                // Handle rollbacks on this topic only
-                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
-
                 // Publish rollbacks downstream
                 publisher.publish_message(message.clone()).await?;
             }
