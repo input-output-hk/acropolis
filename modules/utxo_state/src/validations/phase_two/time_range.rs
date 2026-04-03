@@ -9,6 +9,7 @@ use super::to_plutus_data::*;
 ///
 /// Constructed from slot-based validity intervals using GenesisValues
 /// for slot-to-timestamp conversion.
+#[derive(Debug)]
 pub struct TimeRange {
     pub lower_bound: Option<SystemTime>,
     pub upper_bound: Option<SystemTime>,
@@ -34,56 +35,48 @@ impl TimeRange {
     }
 }
 
+fn system_time_to_posix_milliseconds(time: &SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .expect("SystemTime before UNIX_EPOCH!")
+        .as_millis()
+        .try_into()
+        .expect("POSIX time in milliseconds exceeds u64 range!")
+}
+
+fn encode_bound<'a>(
+    bound: Option<&SystemTime>,
+    is_lower: bool,
+    arena: &'a Arena,
+    version: PlutusVersion,
+) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+    let (extended, closure) = match bound {
+        Some(time) => {
+            let millis = system_time_to_posix_milliseconds(time);
+            (
+                // Finite
+                constr(arena, 1, vec![millis.to_plutus_data(arena, version)?]),
+                // lower finite is inclusive (true), upper finite is exclusive (false)
+                is_lower.to_plutus_data(arena, version)?,
+            )
+        }
+        None => (
+            // NegInf for lower bound, PosInf for upper bound
+            constr(arena, if is_lower { 0 } else { 2 }, vec![]),
+            // Infinite is always exclusive by convention: true
+            true.to_plutus_data(arena, version)?,
+        ),
+    };
+    Ok(constr(arena, 0, vec![extended, closure]))
+}
+
 impl ToPlutusData for TimeRange {
     fn to_plutus_data<'a>(
         &self,
         arena: &'a Arena,
         version: PlutusVersion,
     ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-        let lower = {
-            let (extended, closure) = match &self.lower_bound {
-                Some(time) => {
-                    let millis =
-                        time.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_millis();
-                    (
-                        // Finite
-                        constr(arena, 1, vec![millis.to_plutus_data(arena, version)?]),
-                        // lower finite is inclusive: true
-                        true.to_plutus_data(arena, version)?,
-                    )
-                }
-                None => (
-                    // NegInf
-                    constr(arena, 0, vec![]),
-                    // Infinite is always exclusive by convention: true
-                    true.to_plutus_data(arena, version)?,
-                ),
-            };
-            constr(arena, 0, vec![extended, closure])
-        };
-
-        let upper = {
-            let (extended, closure) = match &self.upper_bound {
-                Some(time) => {
-                    let millis =
-                        time.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_millis();
-                    (
-                        // Finite
-                        constr(arena, 1, vec![millis.to_plutus_data(arena, version)?]),
-                        // upper finite is exclusive: False,
-                        false.to_plutus_data(arena, version)?,
-                    )
-                }
-                None => (
-                    // PosInf
-                    constr(arena, 2, vec![]),
-                    // Infinite is always exclusive by convention: true
-                    true.to_plutus_data(arena, version)?,
-                ),
-            };
-            constr(arena, 0, vec![extended, closure])
-        };
-
+        let lower = encode_bound(self.lower_bound.as_ref(), true, arena, version)?;
+        let upper = encode_bound(self.upper_bound.as_ref(), false, arena, version)?;
         Ok(constr(arena, 0, vec![lower, upper]))
     }
 }
