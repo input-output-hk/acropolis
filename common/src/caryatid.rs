@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::messages::{CardanoMessage, Message, StateTransitionMessage};
-use crate::types::BlockInfo;
+use crate::types::{BlockInfo, BlockStatus};
 use crate::validation::ValidationOutcomes;
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{Context, MessageBounds};
@@ -96,6 +96,17 @@ impl<T> PrimaryRead<T> {
 
     pub fn is_rollback(&self) -> bool {
         matches!(self, Self::Rollback { .. })
+    }
+
+    pub fn is_rolled_back_block(&self) -> bool {
+        matches!(
+            self,
+            Self::Normal { block_info, .. } if block_info.status == BlockStatus::RolledBack
+        )
+    }
+
+    pub fn should_restore_history(&self) -> bool {
+        self.is_rollback() || self.is_rolled_back_block()
     }
 
     pub fn do_validation(&self) -> bool {
