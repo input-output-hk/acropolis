@@ -1,7 +1,7 @@
 //! Acropolis Midnight state module for Caryatid
 //! Indexes data required by `midnight-node`
 use acropolis_common::{
-    caryatid::RollbackWrapper,
+    caryatid::{PrimaryRead, RollbackWrapper},
     declare_cardano_reader,
     messages::{
         AddressDeltasMessage, CardanoMessage, Message, ProtocolParamsMessage,
@@ -9,7 +9,6 @@ use acropolis_common::{
     },
     protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -75,48 +74,40 @@ impl MidnightState {
                 h.get_or_init_with(|| State::new(config.clone()))
             };
 
-            match address_deltas_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((blk_info, deltas)) => {
-                    if blk_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(blk_info.number);
-                        warn!(
-                            block_number = blk_info.number,
-                            block_hash = %blk_info.hash,
-                            "applying rollback"
+            let primary =
+                PrimaryRead::from_read(address_deltas_reader.read_with_rollbacks().await?);
+
+            if primary.is_rollback() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+                warn!(
+                    block_number = primary.block_info().number,
+                    block_hash = %primary.block_info().hash,
+                    "applying rollback"
+                );
+            }
+
+            if primary.should_read_epoch_messages() {
+                match protocol_params_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((_, protocol_params)) => {
+                        state.update_stable_block_window_bounds(&protocol_params.params)?;
+                    }
+                    RollbackWrapper::Rollback(_) => {}
+                }
+                match epoch_nonce_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((_, nonce)) => {
+                        state.handle_new_epoch(
+                            primary.block_info().as_ref(),
+                            nonce.as_ref().clone(),
                         );
                     }
-
-                    if blk_info.new_epoch && blk_info.epoch > 0 {
-                        match protocol_params_reader.read_with_rollbacks().await? {
-                            RollbackWrapper::Normal((_, protocol_params)) => {
-                                state.update_stable_block_window_bounds(&protocol_params.params)?;
-                            }
-                            RollbackWrapper::Rollback(_) => {}
-                        }
-
-                        let (nonce, is_rollback) = match epoch_nonce_reader
-                            .read_with_rollbacks()
-                            .await?
-                        {
-                            RollbackWrapper::Normal((_, nonce)) => (nonce.as_ref().clone(), false),
-                            RollbackWrapper::Rollback(_) => (None, true),
-                        };
-                        if !is_rollback {
-                            state.handle_new_epoch(blk_info.as_ref(), nonce);
-                        }
-                    }
-
-                    state.handle_address_deltas(&blk_info, deltas.as_ref())?;
-
-                    history.lock().await.commit(blk_info.number, state);
+                    RollbackWrapper::Rollback(_) => {}
                 }
-                RollbackWrapper::Rollback(point) => {
-                    warn!(
-                        rollback_point = ?point,
-                        "received rollback wrapper message"
-                    );
-                }
-            };
+            }
+
+            if let Some(deltas) = primary.message() {
+                state.handle_address_deltas(primary.block_info(), deltas.as_ref())?;
+                history.lock().await.commit(primary.block_info().number, state);
+            }
         }
     }
 

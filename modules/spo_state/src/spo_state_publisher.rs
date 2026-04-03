@@ -15,9 +15,4 @@ impl SPOStatePublisher {
     pub async fn publish(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
         self.0.publish(message).await
     }
-
-    /// Publish a rollback message, if we have anything to roll back
-    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
-        self.0.publish(message).await
-    }
 }

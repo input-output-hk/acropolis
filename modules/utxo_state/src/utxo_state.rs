@@ -2,19 +2,20 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use acropolis_common::{
+    caryatid::{RollbackAwarePublisher, RollbackWrapper, ValidationContext},
     configuration::StartupMode,
+    declare_cardano_reader,
     messages::{
-        CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage, StateQuery,
-        StateQueryResponse, StateTransitionMessage,
+        CardanoMessage, Message, PoolRegistrationUpdatesMessage, ProtocolParamsMessage,
+        SnapshotMessage, SnapshotStateMessage, StakeRegistrationUpdatesMessage, StateQuery,
+        StateQueryResponse, StateTransitionMessage, UTXODeltasMessage,
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
-    validation::ValidationOutcomes,
-    BlockInfo,
 };
 use caryatid_sdk::{module, Context, Subscription};
 
 use acropolis_common::queries::errors::QueryError;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -49,11 +50,33 @@ use crate::reference_scripts_state::ReferenceScriptsState;
 mod utils;
 mod validations;
 
-const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
-const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
+declare_cardano_reader!(
+    UTxODeltasReader,
+    "utxo-deltas-subscribe-topic",
+    "cardano.utxo.deltas",
+    UTXODeltas,
+    UTXODeltasMessage
+);
+declare_cardano_reader!(
+    ParamsReader,
     "protocol-parameters-subscribe-topic",
     "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
+);
+declare_cardano_reader!(
+    StakeUpdatesReader,
+    "stake-registration-updates-subscribe-topic",
+    "cardano.stake.registration.updates",
+    StakeRegistrationUpdates,
+    StakeRegistrationUpdatesMessage
+);
+declare_cardano_reader!(
+    PoolUpdatesReader,
+    "pool-registration-updates-subscribe-topic",
+    "cardano.pool.registration.updates",
+    PoolRegistrationUpdates,
+    PoolRegistrationUpdatesMessage
 );
 
 const DEFAULT_STORE: &str = "memory";
@@ -62,6 +85,21 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_UTXO_VALIDATION_TOPIC: (&str, &str) =
     ("utxo-validation-publish-topic", "cardano.validation.utxo");
 const DEFAULT_ADDRESS_DELTA_PUBLISH_MODE: &str = "compact";
+
+pub(crate) async fn publish_observer_message(
+    publisher: &Option<Mutex<RollbackAwarePublisher<Message>>>,
+    message: Arc<Message>,
+    error_context: &str,
+) {
+    if let Some(publisher) = publisher {
+        publisher
+            .lock()
+            .await
+            .publish(message)
+            .await
+            .unwrap_or_else(|e| error!("{error_context}: {e}"));
+    }
+}
 
 /// UTXO state module
 #[module(
@@ -77,59 +115,64 @@ impl UTXOState {
     async fn run(
         context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,
-        mut utxo_deltas_subscription: Box<dyn Subscription<Message>>,
-        mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
-        mut pool_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut stake_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut utxo_deltas_reader: UTxODeltasReader,
+        mut params_reader: ParamsReader,
+        mut pool_updates_reader: Option<PoolUpdatesReader>,
+        mut stake_updates_reader: Option<StakeUpdatesReader>,
         publish_tx_validation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
         let mut bootstrap_block_processed = false;
 
         loop {
-            let mut current_block_info: Option<BlockInfo> = None;
-            let Ok((_, message)) = utxo_deltas_subscription.read().await else {
-                return Err(anyhow!("Failed to read UTxO deltas subscription error"));
-            };
+            let mut ctx =
+                ValidationContext::new(&context, &publish_tx_validation_topic, "utxo_state");
 
-            let new_epoch = match message.as_ref() {
-                Message::Cardano((block_info, _)) => {
-                    current_block_info = Some(block_info.clone());
-                    block_info.new_epoch
+            let deltas_msg = match ctx.consume_sync(
+                "utxo_deltas_reader",
+                utxo_deltas_reader.read_with_rollbacks().await,
+            )? {
+                RollbackWrapper::Normal((block_info, deltas)) => Some((block_info, deltas)),
+                RollbackWrapper::Rollback((_, message)) => {
+                    // TODO: Actually rollback utxo_state's volatile history
+
+                    // Publish rollbacks downstream
+                    let mut state = state.lock().await;
+                    state
+                        .handle_rollback(message)
+                        .await
+                        .inspect_err(|e| error!("Rollback handling error: {e}"))
+                        .ok();
+
+                    None
                 }
-
-                _ => false,
             };
 
             let mut current_protocol_params = state.lock().await.get_or_init_protocol_parameters();
 
             // Read protocol parameters if new epoch
-            if new_epoch {
-                let (_, protocol_parameters_message) =
-                    protocol_parameters_subscription.read().await?;
-
-                if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) =
-                    protocol_parameters_message.as_ref()
+            if deltas_msg.as_ref().map(|(b, _)| b.new_epoch).unwrap_or(true) {
+                match ctx
+                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {
-                    current_protocol_params = params.params.clone();
+                    RollbackWrapper::Normal((_, params)) => {
+                        current_protocol_params = params.params.clone();
+                    }
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 
             // Read from pool registration updates subscription if available
             let mut pool_registration_updates = vec![];
             if is_snapshot_mode || bootstrap_block_processed {
-                if let Some(subscription) = pool_registration_updates_subscription.as_mut() {
-                    let Ok((_, message)) = subscription.read().await else {
-                        error!("Failed to read pool registration updates subscription error");
-                        continue;
-                    };
-                    if let Message::Cardano((
-                        block_info,
-                        CardanoMessage::PoolRegistrationUpdates(updates_msg),
-                    )) = message.as_ref()
+                if let Some(reader) = pool_updates_reader.as_mut() {
+                    match ctx
+                        .consume_sync("pool_updates_reader", reader.read_with_rollbacks().await)?
                     {
-                        Self::check_sync(&current_block_info, block_info);
-                        pool_registration_updates = updates_msg.updates.clone();
+                        RollbackWrapper::Normal((_, updates_msg)) => {
+                            pool_registration_updates = updates_msg.updates.clone();
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
             }
@@ -137,32 +180,29 @@ impl UTXOState {
             // Read from stake registration updates subscription if available
             let mut stake_registration_updates = vec![];
             if is_snapshot_mode || bootstrap_block_processed {
-                if let Some(subscription) = stake_registration_updates_subscription.as_mut() {
-                    let Ok((_, message)) = subscription.read().await else {
-                        error!("Failed to read stake registration updates subscription error");
-                        continue;
-                    };
-                    if let Message::Cardano((
-                        block_info,
-                        CardanoMessage::StakeRegistrationUpdates(updates_msg),
-                    )) = message.as_ref()
+                if let Some(reader) = stake_updates_reader.as_mut() {
+                    match ctx
+                        .consume_sync("stake_updates_reader", reader.read_with_rollbacks().await)?
                     {
-                        Self::check_sync(&current_block_info, block_info);
-                        stake_registration_updates = updates_msg.updates.clone();
+                        RollbackWrapper::Normal((_, updates_msg)) => {
+                            stake_registration_updates = updates_msg.updates.clone();
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
             }
 
             // Validate UTxODeltas
             // before applying them
-            match message.as_ref() {
-                Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
-                    let span = info_span!("utxo_state.validate", block = block.number);
-                    if block.intent.do_validation() {
-                        async {
-                            let mut state = state.lock().await;
-                            let mut validation_outcomes = ValidationOutcomes::new();
-                            if let Err(e) = state
+            if let Some((block, deltas_msg)) = deltas_msg.as_ref() {
+                let span = info_span!("utxo_state.validate", block = block.number);
+                if block.intent.do_validation() {
+                    async {
+                        let mut state = state.lock().await;
+
+                        ctx.handle(
+                            "validate",
+                            state
                                 .validate(
                                     block,
                                     deltas_msg,
@@ -171,60 +211,34 @@ impl UTXOState {
                                     &current_protocol_params,
                                 )
                                 .await
-                            {
-                                validation_outcomes.push(*e);
-                            }
+                                .map_err(|e| e.into()),
+                        );
 
-                            validation_outcomes
-                                .publish(
-                                    &context,
-                                    "utxo_state",
-                                    &publish_tx_validation_topic,
-                                    block,
-                                )
-                                .await
-                                .unwrap_or_else(|e| {
-                                    error!("Failed to publish UTxO validation: {e}")
-                                });
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    let span = info_span!("utxo_state.handle", block = block.number);
-                    async {
-                        let mut state = state.lock().await;
-                        state
-                            .handle_utxo_deltas(block, deltas_msg)
-                            .await
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
+                        ctx.publish().await;
                     }
                     .instrument(span)
                     .await;
-
-                    if !bootstrap_block_processed {
-                        bootstrap_block_processed = true;
-                    }
                 }
 
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
+                let span = info_span!("utxo_state.handle", block = block.number);
+                async {
                     let mut state = state.lock().await;
                     state
-                        .handle_rollback(message)
+                        .handle_utxo_deltas(block, deltas_msg)
                         .await
-                        .inspect_err(|e| error!("Rollback handling error: {e}"))
+                        .inspect_err(|e| error!("Messaging handling error: {e}"))
                         .ok();
                 }
+                .instrument(span)
+                .await;
 
-                _ => error!("Unexpected message type: {message:?}"),
+                if !bootstrap_block_processed {
+                    bootstrap_block_processed = true;
+                }
             }
 
             // Commit protocol paramemters
-            if let Some(block_info) = current_block_info {
+            if let Some((block_info, _)) = deltas_msg {
                 state
                     .lock()
                     .await
@@ -235,17 +249,6 @@ impl UTXOState {
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        // Get configuration
-        let utxo_deltas_subscribe_topic = config
-            .get_string(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber on '{utxo_deltas_subscribe_topic}'");
-
-        let protocol_parameters_subscribe_topic = config
-            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating protocol parameters subscriber on '{protocol_parameters_subscribe_topic}'");
-
         // These registration updates subscriptions are only needed for validation
         let pool_registration_updates_subscribe_topic =
             config.get_string("pool-registration-updates-subscribe-topic").ok();
@@ -257,6 +260,20 @@ impl UTXOState {
         if let Some(ref topic) = stake_registration_updates_subscribe_topic {
             info!("Creating stake registration updates subscriber on '{topic}'");
         }
+
+        // Subscribers
+        let pool_updates_reader = if pool_registration_updates_subscribe_topic.is_some() {
+            Some(PoolUpdatesReader::new(&context, &config).await?)
+        } else {
+            None
+        };
+        let stake_updates_reader = if stake_registration_updates_subscribe_topic.is_some() {
+            Some(StakeUpdatesReader::new(&context, &config).await?)
+        } else {
+            None
+        };
+        let utxo_deltas_reader = UTxODeltasReader::new(&context, &config).await?;
+        let params_reader = ParamsReader::new(&context, &config).await?;
 
         let snapshot_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
@@ -307,33 +324,16 @@ impl UTXOState {
 
         let state = Arc::new(Mutex::new(state));
 
-        // Subscribers
-        let utxo_deltas_subscription = context.subscribe(&utxo_deltas_subscribe_topic).await?;
-        let protocol_parameters_subscription =
-            context.subscribe(&protocol_parameters_subscribe_topic).await?;
-        let pool_registration_updates_subscription =
-            if let Some(topic) = pool_registration_updates_subscribe_topic {
-                Some(context.subscribe(&topic).await?)
-            } else {
-                None
-            };
-        let stake_registration_updates_subscription =
-            if let Some(topic) = stake_registration_updates_subscribe_topic {
-                Some(context.subscribe(&topic).await?)
-            } else {
-                None
-            };
-
         let state_run = state.clone();
         let context_run = context.clone();
         context.run(async move {
             Self::run(
                 context_run,
                 state_run,
-                utxo_deltas_subscription,
-                protocol_parameters_subscription,
-                pool_registration_updates_subscription,
-                stake_registration_updates_subscription,
+                utxo_deltas_reader,
+                params_reader,
+                pool_updates_reader,
+                stake_updates_reader,
                 utxo_validation_publish_topic,
                 is_snapshot_mode,
             )
@@ -509,18 +509,5 @@ impl UTXOState {
         });
 
         Ok(())
-    }
-
-    /// Check for synchronisation
-    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
-        if let Some(ref block) = expected {
-            if block.number != actual.number {
-                error!(
-                    expected = block.number,
-                    actual = actual.number,
-                    "Messages out of sync"
-                );
-            }
-        }
     }
 }

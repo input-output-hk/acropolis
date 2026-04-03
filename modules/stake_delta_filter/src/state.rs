@@ -48,7 +48,7 @@ impl DeltaPublisher {
         self.0.publish(packed_message).await
     }
 
-    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> Result<()> {
+    pub async fn publish_message(&mut self, message: Arc<Message>) -> Result<()> {
         self.0.publish(message).await
     }
 }

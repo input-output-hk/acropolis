@@ -7,7 +7,7 @@
         "assets": []
       },
       "datum": null,
-      "reference_script": null
+      "script_ref": null
     },
     "d45bb1f9c2a159de8d9b38876f056559e5a48e165bd39bdf8517ca0c12f9230c#3": {
       "address": "addr1vxk5cxgnfqkgzh25ztf6zj5p3h9pnk2mxp3xwe2pzh72rtg0nf5cs",
@@ -16,7 +16,7 @@
         "assets": []
       },
       "datum": null,
-      "reference_script": null
+      "script_ref": null
     },
     "e72133d7ece8b1313242a3cae9fb5802657acdadc7637e120bcd41d31befc2fd#0": {
       "address": "addr1qy3hzwy22mg3wwanpdg42j4jswwzck53mpgff4tl7ujryx78glqeskyf5gy0qm6zc2rt2khmqgvmtkru7p6rdw743tjqq5kmq8",
@@ -25,7 +25,7 @@
         "assets": []
       },
       "datum": null,
-      "reference_script": null
+      "script_ref": null
     }
   }
 }

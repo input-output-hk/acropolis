@@ -2,7 +2,7 @@
 //! Reads address deltas and filters out only stake addresses from it; also resolves pointer addresses.
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -16,7 +16,7 @@ use acropolis_common::{
         },
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus, NetworkId,
+    NetworkId,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -289,25 +289,25 @@ impl StakeDeltaFilter {
             match address_delta_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal(_) => {}
                 RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial deltas message")
+                    bail!("Unexpected rollback while reading initial deltas message");
                 }
             }
         }
         loop {
-            match address_delta_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, address_deltas)) => {
-                    let msg = process_message(&cache, &address_deltas, &block_info, None);
-                    publisher
-                        .publish(&block_info, msg)
-                        .await
-                        .unwrap_or_else(|e| error!("Publish error: {e}"))
-                }
-                RollbackWrapper::Rollback(message) => {
-                    publisher
-                        .publish_rollback(message)
-                        .await
-                        .unwrap_or_else(|e| error!("Publish error: {e}"));
-                }
+            let primary = PrimaryRead::from_read(address_delta_reader.read_with_rollbacks().await?);
+
+            if let Some(address_deltas) = primary.message() {
+                let msg = process_message(&cache, address_deltas, primary.block_info(), None);
+                publisher
+                    .publish(primary.block_info(), msg)
+                    .await
+                    .unwrap_or_else(|e| error!("Publish error: {e}"))
+            } else if let Some(message) = primary.rollback_message() {
+                // Publish rollbacks downstream
+                publisher
+                    .publish_message(message.clone())
+                    .await
+                    .unwrap_or_else(|e| error!("Publish error: {e}"));
             }
         }
     }
@@ -438,7 +438,7 @@ impl StakeDeltaFilter {
             match address_deltas_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal(_) => {}
                 RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial deltas message")
+                    bail!("Unexpected rollback while reading initial deltas message");
                 }
             }
         }
@@ -448,26 +448,25 @@ impl StakeDeltaFilter {
 
             let mut state = history.lock().await.get_or_init_with(|| State::new(params.clone()));
 
-            let block_info =
-                match ctx.consume_sync("certs", certs_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, tx_cert_msg)) => {
-                        if block_info.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(block_info.number);
-                        }
+            let primary = PrimaryRead::from_sync(
+                &mut ctx,
+                "certs",
+                certs_reader.read_with_rollbacks().await,
+            )?;
 
-                        state
-                            .handle_certs(&block_info, &tx_cert_msg)
-                            .await
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
+            if let Some(tx_cert_msg) = primary.message() {
+                state
+                    .handle_certs(primary.block_info(), tx_cert_msg)
+                    .await
+                    .inspect_err(|e| error!("Messaging handling error: {e}"))
+                    .ok();
+            } else if let Some(message) = primary.rollback_message() {
+                // Handle rollbacks on this topic only
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
 
-                        Some(block_info)
-                    }
-                    RollbackWrapper::Rollback(message) => {
-                        publisher.publish_rollback(message).await?;
-                        None
-                    }
-                };
+                // Publish rollbacks downstream
+                publisher.publish_message(message.clone()).await?;
+            }
 
             match ctx.consume_sync(
                 "address deltas",
@@ -480,9 +479,14 @@ impl StakeDeltaFilter {
                 RollbackWrapper::Rollback(_) => {}
             }
 
-            if let Some(block_info) = block_info {
+            if primary.message().is_some() {
+                let block_info = primary.block_info();
                 state.save()?;
                 history.lock().await.commit(block_info.number, state);
+
+                if primary.do_validation() {
+                    ctx.publish().await;
+                }
             }
         }
     }
