@@ -2,7 +2,7 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use acropolis_common::{
-    caryatid::{RollbackWrapper, ValidationContext},
+    caryatid::{RollbackAwarePublisher, RollbackWrapper, ValidationContext},
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
@@ -85,6 +85,21 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_UTXO_VALIDATION_TOPIC: (&str, &str) =
     ("utxo-validation-publish-topic", "cardano.validation.utxo");
 const DEFAULT_ADDRESS_DELTA_PUBLISH_MODE: &str = "compact";
+
+pub(crate) async fn publish_observer_message(
+    publisher: &Option<Mutex<RollbackAwarePublisher<Message>>>,
+    message: Arc<Message>,
+    error_context: &str,
+) {
+    if let Some(publisher) = publisher {
+        publisher
+            .lock()
+            .await
+            .publish(message)
+            .await
+            .unwrap_or_else(|e| error!("{error_context}: {e}"));
+    }
+}
 
 /// UTXO state module
 #[module(

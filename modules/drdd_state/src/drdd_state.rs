@@ -1,12 +1,11 @@
 //! Acropolis DRDD state module for Caryatid
 //! Stores historical DRep delegation distributions
 use acropolis_common::{
-    caryatid::RollbackWrapper,
+    caryatid::{PrimaryRead, RollbackWrapper},
     declare_cardano_reader,
     messages::{CardanoMessage, DRepStakeDistributionMessage, Message, StateTransitionMessage},
     rest_helper::handle_rest_with_query_parameters,
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -47,20 +46,19 @@ impl DRDDState {
         loop {
             let mut state = history.lock().await.get_or_init_with(State::new);
 
-            match drdd_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, msg)) => {
-                    if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(block_info.epoch);
-                    }
+            let primary = PrimaryRead::from_read(drdd_reader.read_with_rollbacks().await?);
 
-                    state.apply_drdd_snapshot(
-                        msg.drdd.dreps.iter().map(|(k, v)| (k.clone(), *v)),
-                        msg.drdd.abstain,
-                        msg.drdd.no_confidence,
-                    );
-                    history.lock().await.commit(block_info.epoch, state);
-                }
-                RollbackWrapper::Rollback(_) => {}
+            if primary.is_rollback() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().epoch);
+            }
+
+            if let Some(msg) = primary.message() {
+                state.apply_drdd_snapshot(
+                    msg.drdd.dreps.iter().map(|(k, v)| (k.clone(), *v)),
+                    msg.drdd.abstain,
+                    msg.drdd.no_confidence,
+                );
+                history.lock().await.commit(primary.block_info().epoch, state);
             }
         }
     }

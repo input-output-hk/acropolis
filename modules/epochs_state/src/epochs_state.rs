@@ -166,23 +166,23 @@ impl EpochsState {
         // Without consuming them here, they desync the readers in the main loop
         // (epoch N boundary reads epoch N-1 params instead of epoch N params).
         if !is_snapshot_mode {
-            let initial_params = match params_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((_, params)) => params,
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((_, initial_params)) => {
+                    let mut history_guard = history.lock().await;
+                    let mut state = history_guard.get_or_init_with(|| State::new(&genesis.values));
+
+                    state.handle_protocol_parameters(&initial_params);
+                    history_guard.commit(0, state);
+                }
                 RollbackWrapper::Rollback(_) => {
                     bail!("Unexpected rollback while reading initial params");
                 }
-            };
-
-            let mut history_guard = history.lock().await;
-            let mut state = history_guard.get_or_init_with(|| State::new(&genesis.values));
-
-            state.handle_protocol_parameters(&initial_params);
-            history_guard.commit(0, state);
+            }
 
             match txs_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal(_) => {}
                 RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading txs");
+                    bail!("Unexpected rollback while reading initial txs");
                 }
             }
         }
@@ -207,8 +207,8 @@ impl EpochsState {
                     .cloned()
                     .expect("rollback primary read should include rollback message");
                 ctx.handle(
-                    "publish_rollback",
-                    epoch_activity_publisher.publish_rollback(rollback_message.clone()).await,
+                    "publish_message",
+                    epoch_activity_publisher.publish_message(rollback_message.clone()).await,
                 );
                 ctx.handle(
                     "publish_rollback",
@@ -216,6 +216,7 @@ impl EpochsState {
                 )
             }
 
+            let epoch = primary.epoch();
             if primary.should_read_epoch_transition_messages() {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
@@ -226,7 +227,7 @@ impl EpochsState {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                if !primary.is_rollback() {
+                if epoch.is_some() {
                     let blk_info = primary.block_info().clone();
                     let ea = state.end_epoch(&blk_info);
                     // publish epoch activity message
@@ -257,7 +258,7 @@ impl EpochsState {
                     }
                 });
 
-                if primary.should_read_epoch_messages() && !primary.is_rollback() {
+                if primary.block_info().new_epoch {
                     let active_nonce = state.get_active_nonce();
                     ctx.handle(
                         "publish",

@@ -1,10 +1,10 @@
 //! Acropolis SPDD state module for Caryatid
 //! Stores historical stake pool delegation distributions
-use acropolis_common::caryatid::RollbackWrapper;
+use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper};
+use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::SPOStakeDistributionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::state_history::{StateHistory, StateHistoryStore};
-use acropolis_common::{declare_cardano_reader, BlockStatus};
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
     queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse, DEFAULT_SPDD_QUERY_TOPIC},
@@ -50,22 +50,21 @@ impl SPDDState {
         loop {
             let mut state = history.lock().await.get_or_init_with(State::new);
 
-            match spdd_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, msg)) => {
-                    if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(block_info.epoch);
-                    }
+            let primary = PrimaryRead::from_read(spdd_reader.read_with_rollbacks().await?);
 
-                    let span = info_span!("spdd_state.handle", epoch = msg.epoch);
-                    async {
-                        state.apply_spdd_snapshot(msg.spos.iter().map(|(k, v)| (*k, *v)));
-                    }
-                    .instrument(span)
-                    .await;
+            if primary.is_rollback() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().epoch);
+            }
 
-                    history.lock().await.commit(block_info.epoch, state);
+            if let Some(msg) = primary.message() {
+                let span = info_span!("spdd_state.handle", epoch = msg.epoch);
+                async {
+                    state.apply_spdd_snapshot(msg.spos.iter().map(|(k, v)| (*k, *v)));
                 }
-                RollbackWrapper::Rollback(_) => {}
+                .instrument(span)
+                .await;
+
+                history.lock().await.commit(primary.block_info().epoch, state);
             }
         }
     }
