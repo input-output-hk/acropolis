@@ -33,7 +33,7 @@ target-peer-count = 15
 # Minimum number of active hot peer connections to maintain
 min-hot-peers = 3
 # Enable/disable peer-sharing discovery
-peer-sharing-enabled = false
+peer-sharing-enabled = true
 # Seconds between random hot-peer churn events
 churn-interval-secs = 600
 # Timeout in seconds for a full peer-sharing exchange
