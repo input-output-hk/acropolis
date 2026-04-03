@@ -18,8 +18,7 @@ use acropolis_common::{
         assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
         errors::QueryError,
     },
-    state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -109,7 +108,7 @@ impl AssetsState {
             // Asset deltas are the synchroniser
             let primary = PrimaryRead::from_read(asset_deltas_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+            if primary.should_restore_history() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
             }
 
@@ -251,9 +250,11 @@ impl AssetsState {
         info!("Creating asset query handler on '{assets_query_topic}'");
 
         // Initialize state history
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AssetsState",
             StateHistoryStore::default_block_store(),
+            dump_index,
         )));
         let address_state = if storage_config.store_addresses {
             Some(Arc::new(Mutex::new(AddressState::new())))

@@ -15,13 +15,17 @@ use acropolis_common::{
     params::TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH,
     queries::governance::VoteRecord,
     stake_addresses::StakeAddressMap,
+    state_history::debug_fingerprint,
     BlockInfo, PoolId, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
     StakeAddress, TxCertificate, TxHash, TxIdentifier, Voter, VotingProcedures,
 };
 use acropolis_common::{PoolRegistrationOutcome, PoolRegistrationUpdate};
 use anyhow::{anyhow, Result};
 use imbl::HashMap;
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
 use tracing::{debug, info};
 
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
@@ -56,6 +60,67 @@ pub struct State {
     stake_addresses: Option<Arc<Mutex<StakeAddressMap>>>,
 }
 
+#[derive(serde::Serialize)]
+struct StableState {
+    store_config: StoreConfig,
+    block: u64,
+    epoch: u64,
+    spos: BTreeMap<PoolId, PoolRegistration>,
+    pending_updates: BTreeMap<PoolId, PoolRegistration>,
+    pending_deregistrations: BTreeMap<u64, Vec<PoolId>>,
+    protocol_parameters: Option<ProtocolParams>,
+    total_blocks_minted: BTreeMap<PoolId, u64>,
+    historical_spos: Option<BTreeMap<PoolId, HistoricalSPOState>>,
+    stake_addresses: Option<StakeAddressMap>,
+}
+
+impl serde::Serialize for State {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let stake_addresses = self
+            .stake_addresses
+            .as_ref()
+            .map(|stake_addresses| stake_addresses.lock().unwrap().clone());
+
+        StableState {
+            store_config: self.store_config.clone(),
+            block: self.block,
+            epoch: self.epoch,
+            spos: self
+                .spos
+                .iter()
+                .map(|(pool_id, registration)| (*pool_id, registration.clone()))
+                .collect(),
+            pending_updates: self
+                .pending_updates
+                .iter()
+                .map(|(pool_id, registration)| (*pool_id, registration.clone()))
+                .collect(),
+            pending_deregistrations: self
+                .pending_deregistrations
+                .iter()
+                .map(|(epoch, pool_ids)| (*epoch, pool_ids.clone()))
+                .collect(),
+            protocol_parameters: self.protocol_parameters.clone(),
+            total_blocks_minted: self
+                .total_blocks_minted
+                .iter()
+                .map(|(pool_id, block_count)| (*pool_id, *block_count))
+                .collect(),
+            historical_spos: self.historical_spos.as_ref().map(|historical_spos| {
+                historical_spos
+                    .iter()
+                    .map(|(pool_id, historical_spo_state)| (*pool_id, historical_spo_state.clone()))
+                    .collect()
+            }),
+            stake_addresses,
+        }
+        .serialize(serializer)
+    }
+}
+
 impl State {
     pub fn new(config: &StoreConfig) -> Self {
         Self {
@@ -78,6 +143,59 @@ impl State {
                 None
             },
         }
+    }
+
+    pub fn rollback_debug_summary(&self) -> String {
+        let spos: BTreeMap<PoolId, PoolRegistration> = self
+            .spos
+            .iter()
+            .map(|(pool_id, registration)| (*pool_id, registration.clone()))
+            .collect();
+        let pending_updates: BTreeMap<PoolId, PoolRegistration> = self
+            .pending_updates
+            .iter()
+            .map(|(pool_id, registration)| (*pool_id, registration.clone()))
+            .collect();
+        let pending_deregistrations: BTreeMap<u64, Vec<PoolId>> = self
+            .pending_deregistrations
+            .iter()
+            .map(|(epoch, pool_ids)| (*epoch, pool_ids.clone()))
+            .collect();
+        let total_blocks_minted: BTreeMap<PoolId, u64> =
+            self.total_blocks_minted.iter().map(|(pool_id, blocks)| (*pool_id, *blocks)).collect();
+        let historical_spos = self.historical_spos.as_ref().map(|historical_spos| {
+            historical_spos
+                .iter()
+                .map(|(pool_id, historical_spo_state)| (*pool_id, historical_spo_state.clone()))
+                .collect::<BTreeMap<_, _>>()
+        });
+        let stake_addresses_summary = self.stake_addresses.as_ref().map(|stake_addresses| {
+            let stake_addresses = stake_addresses.lock().unwrap();
+            format!(
+                "len={} {}",
+                stake_addresses.len(),
+                debug_fingerprint(&*stake_addresses)
+            )
+        });
+
+        format!(
+            "block={} epoch={} spos_len={} spos={} pending_updates_len={} pending_updates={} pending_deregistration_epochs={} pending_deregistration_pools={} pending_deregistrations={} protocol_parameters={} total_blocks_minted_len={} total_blocks_minted={} historical_spos_len={} historical_spos={} stake_addresses={}",
+            self.block,
+            self.epoch,
+            spos.len(),
+            debug_fingerprint(&spos),
+            pending_updates.len(),
+            debug_fingerprint(&pending_updates),
+            pending_deregistrations.len(),
+            pending_deregistrations.values().map(Vec::len).sum::<usize>(),
+            debug_fingerprint(&pending_deregistrations),
+            debug_fingerprint(&self.protocol_parameters),
+            total_blocks_minted.len(),
+            debug_fingerprint(&total_blocks_minted),
+            historical_spos.as_ref().map(BTreeMap::len).unwrap_or(0),
+            debug_fingerprint(&historical_spos),
+            stake_addresses_summary.unwrap_or_else(|| "none".to_string()),
+        )
     }
 
     pub fn is_historical_state_enabled(&self) -> bool {
@@ -905,6 +1023,7 @@ mod tests {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "spo_state",
             StateHistoryStore::default_block_store(),
+            None,
         )));
         let mut state = history.lock().await.get_current_state();
         let mut block = new_block(0);
@@ -991,6 +1110,7 @@ mod tests {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "spo_state",
             StateHistoryStore::default_block_store(),
+            None,
         )));
         let mut state = history.lock().await.get_current_state();
         let mut block = new_block(0);

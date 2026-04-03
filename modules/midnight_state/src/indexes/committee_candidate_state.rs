@@ -7,7 +7,7 @@ use crate::{
     types::{DeregistrationEvent, RegistrationEvent},
 };
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 pub struct CommitteeCandidateState {
     // Registration lookup retained for deregistration detection and epoch snapshots.
     pub registration_index: HashMap<UTxOIdentifier, RegistrationEvent>,

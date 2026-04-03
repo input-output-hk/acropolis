@@ -97,7 +97,7 @@ impl AddressState {
             let primary =
                 PrimaryRead::from_read(address_deltas_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() {
+            if primary.should_restore_history() {
                 let mut state = state_mutex.lock().await;
                 state.volatile.rollback_before(primary.block_info().number);
                 state.volatile.next_block();

@@ -1,8 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{ProtocolParamsMessage, SPOStateMessage},
+    state_history::debug_fingerprint,
     validation::{KesValidationError, ValidationError},
     BlockInfo, PoolId,
 };
@@ -24,6 +25,33 @@ pub struct State {
     pub active_spos: HashSet<PoolId>,
 }
 
+#[derive(serde::Serialize)]
+struct StableState {
+    ocert_counters: BTreeMap<PoolId, u64>,
+    slots_per_kes_period: Option<u64>,
+    max_kes_evolutions: Option<u64>,
+    active_spos: BTreeSet<PoolId>,
+}
+
+impl serde::Serialize for State {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StableState {
+            ocert_counters: self
+                .ocert_counters
+                .iter()
+                .map(|(pool_id, counter)| (*pool_id, *counter))
+                .collect(),
+            slots_per_kes_period: self.slots_per_kes_period,
+            max_kes_evolutions: self.max_kes_evolutions,
+            active_spos: self.active_spos.iter().copied().collect(),
+        }
+        .serialize(serializer)
+    }
+}
+
 impl State {
     pub fn new() -> Self {
         Self {
@@ -32,6 +60,22 @@ impl State {
             max_kes_evolutions: None,
             active_spos: HashSet::new(),
         }
+    }
+
+    pub fn rollback_debug_summary(&self) -> String {
+        let ocert_counters: BTreeMap<PoolId, u64> =
+            self.ocert_counters.iter().map(|(pool_id, counter)| (*pool_id, *counter)).collect();
+        let active_spos: BTreeSet<PoolId> = self.active_spos.iter().copied().collect();
+
+        format!(
+            "slots_per_kes_period={:?} max_kes_evolutions={:?} ocert_counters_len={} ocert_counters={} active_spos_len={} active_spos={}",
+            self.slots_per_kes_period,
+            self.max_kes_evolutions,
+            ocert_counters.len(),
+            debug_fingerprint(&ocert_counters),
+            active_spos.len(),
+            debug_fingerprint(&active_spos),
+        )
     }
 
     pub fn bootstrap(&mut self, ocert_counters: HashMap<PoolId, u64>) {

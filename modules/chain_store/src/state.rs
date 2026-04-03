@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use acropolis_common::{
     messages::{ProtocolParamsMessage, RawBlockMessage},
+    state_history::debug_fingerprint,
     BlockInfo, GenesisDelegates, HeavyDelegate, PoolId,
 };
 use anyhow::Result;
@@ -15,12 +16,50 @@ pub struct State {
     pub shelley_genesis_delegates: GenesisDelegates,
 }
 
+#[derive(serde::Serialize)]
+struct StableState {
+    byron_heavy_delegates: BTreeMap<PoolId, HeavyDelegate>,
+    shelley_genesis_delegates: GenesisDelegates,
+}
+
+impl serde::Serialize for State {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StableState {
+            byron_heavy_delegates: self
+                .byron_heavy_delegates
+                .iter()
+                .map(|(pool_id, delegate)| (*pool_id, delegate.clone()))
+                .collect(),
+            shelley_genesis_delegates: self.shelley_genesis_delegates.clone(),
+        }
+        .serialize(serializer)
+    }
+}
+
 impl State {
     pub fn new() -> Self {
         Self {
             byron_heavy_delegates: HashMap::new(),
             shelley_genesis_delegates: GenesisDelegates::default(),
         }
+    }
+
+    pub fn rollback_debug_summary(&self) -> String {
+        let byron_heavy_delegates: BTreeMap<PoolId, HeavyDelegate> = self
+            .byron_heavy_delegates
+            .iter()
+            .map(|(pool_id, delegate)| (*pool_id, delegate.clone()))
+            .collect();
+
+        format!(
+            "byron_heavy_delegates_len={} byron_heavy_delegates={} shelley_genesis_delegates={}",
+            byron_heavy_delegates.len(),
+            debug_fingerprint(&byron_heavy_delegates),
+            debug_fingerprint(&self.shelley_genesis_delegates),
+        )
     }
 }
 

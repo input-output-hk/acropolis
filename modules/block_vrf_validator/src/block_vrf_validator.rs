@@ -11,7 +11,7 @@ use acropolis_common::{
         StateTransitionMessage,
     },
     protocol_params::Nonce,
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -198,7 +198,7 @@ impl BlockVrfValidator {
                 block_reader.read_with_rollbacks().await,
             )?;
 
-            if primary.is_rollback() {
+            if primary.should_restore_history() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
             }
 
@@ -302,10 +302,15 @@ impl BlockVrfValidator {
         let spdd_reader = SPDDReader::new(&context, &config).await?;
 
         // state history
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "block_vrf_validator",
-            StateHistoryStore::default_block_store(),
-        )));
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
+        let history = Arc::new(Mutex::new(
+            StateHistory::<State>::new(
+                "block_vrf_validator",
+                StateHistoryStore::default_block_store(),
+                dump_index,
+            )
+            .with_summary(State::rollback_debug_summary),
+        ));
 
         // Start run task
         let context_run = context.clone();

@@ -16,7 +16,7 @@ use acropolis_common::{
         },
         errors::QueryError,
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -199,9 +199,11 @@ impl EpochsState {
                 block_reader.read_with_rollbacks().await,
             )?;
 
-            if primary.is_rollback() {
+            if primary.should_restore_history() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
 
+            if primary.is_rollback() {
                 let rollback_message = primary
                     .rollback_message()
                     .cloned()
@@ -216,7 +218,6 @@ impl EpochsState {
                 )
             }
 
-            let epoch = primary.epoch();
             if primary.should_read_epoch_transition_messages() {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
@@ -227,7 +228,7 @@ impl EpochsState {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                if epoch.is_some() {
+                if primary.message().is_some() {
                     let blk_info = primary.block_info().clone();
                     let ea = state.end_epoch(&blk_info);
                     // publish epoch activity message
@@ -333,10 +334,15 @@ impl EpochsState {
         info!("Creating query handler on '{}'", epochs_query_topic);
 
         // state history
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "epochs_state",
-            StateHistoryStore::default_block_store(),
-        )));
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
+        let history = Arc::new(Mutex::new(
+            StateHistory::<State>::new(
+                "epochs_state",
+                StateHistoryStore::default_block_store(),
+                dump_index,
+            )
+            .with_summary(State::rollback_debug_summary),
+        ));
         let history_query = history.clone();
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up

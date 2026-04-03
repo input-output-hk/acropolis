@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::messages::{CardanoMessage, Message, StateTransitionMessage};
-use crate::types::BlockInfo;
+use crate::types::{BlockInfo, BlockStatus};
 use crate::validation::ValidationOutcomes;
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{Context, MessageBounds};
@@ -96,6 +96,22 @@ impl<T> PrimaryRead<T> {
 
     pub fn is_rollback(&self) -> bool {
         matches!(self, Self::Rollback { .. })
+    }
+
+    /// Returns true when the message is a normal replayed block that marks the
+    /// first block after a rollback restart.
+    pub fn is_rolled_back_block(&self) -> bool {
+        matches!(
+            self,
+            Self::Normal { block_info, .. } if block_info.status == BlockStatus::RolledBack
+        )
+    }
+
+    /// Returns true when local state history should be restored before handling
+    /// the current message. This covers both explicit rollback wrappers and the
+    /// replayed boundary block published by Mithril with `status=RolledBack`.
+    pub fn should_restore_history(&self) -> bool {
+        self.is_rollback() || self.is_rolled_back_block()
     }
 
     pub fn do_validation(&self) -> bool {
@@ -656,5 +672,18 @@ mod tests {
             block.number
         );
         assert_clean_validation(&mut ctx);
+    }
+
+    #[test]
+    fn rolled_back_block_requires_history_restore() {
+        let mut block = test_block(88);
+        block.status = crate::BlockStatus::RolledBack;
+
+        let primary =
+            PrimaryRead::from_read(RollbackWrapper::Normal((Arc::new(block), Arc::new(1u8))));
+
+        assert!(primary.is_rolled_back_block());
+        assert!(primary.should_restore_history());
+        assert!(!primary.is_rollback());
     }
 }

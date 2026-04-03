@@ -5,7 +5,7 @@ use acropolis_common::{
     declare_cardano_reader,
     messages::{CardanoMessage, DRepStakeDistributionMessage, Message, StateTransitionMessage},
     rest_helper::handle_rest_with_query_parameters,
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -48,7 +48,7 @@ impl DRDDState {
 
             let primary = PrimaryRead::from_read(drdd_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() {
+            if primary.should_restore_history() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().epoch);
             }
 
@@ -73,9 +73,12 @@ impl DRDDState {
         let store_drdd = config.get_bool(DEFAULT_STORE_DRDD.0).unwrap_or(DEFAULT_STORE_DRDD.1);
 
         let history_opt = if store_drdd {
+            let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
+
             let history = Arc::new(Mutex::new(StateHistory::<State>::new(
                 "drdd_state",
                 StateHistoryStore::Unbounded,
+                dump_index,
             )));
 
             // Subscribe for drdd messages from accounts_state

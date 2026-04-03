@@ -98,7 +98,7 @@ impl HistoricalEpochsState {
             // Use blocks_message as the synchroniser
             let primary = PrimaryRead::from_read(blocks_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() {
+            if primary.should_restore_history() {
                 let mut state = state_mutex.lock().await;
                 state.volatile.rollback_before(primary.block_info().number);
             }

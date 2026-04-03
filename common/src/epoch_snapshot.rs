@@ -4,11 +4,11 @@ use crate::{
     StakeCredential,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Display;
 
 /// SPO data captured in a stake snapshot
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct SnapshotSPO {
     /// List of delegator stake addresses and their stake amounts
     pub delegators: Vec<(StakeAddress, Lovelace)>,
@@ -40,6 +40,47 @@ pub struct SnapshotSPO {
     pub two_previous_reward_account_is_registered: bool,
 }
 
+#[derive(Serialize)]
+struct StableSnapshotSPO {
+    delegators: Vec<(StakeAddress, Lovelace)>,
+    total_stake: Lovelace,
+    pledge: Lovelace,
+    fixed_cost: Lovelace,
+    margin: Ratio,
+    blocks_produced: usize,
+    reward_account: StakeAddress,
+    pool_owners: Vec<StakeAddress>,
+    two_previous_reward_account_is_registered: bool,
+}
+
+impl Serialize for SnapshotSPO {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut delegators = self.delegators.clone();
+        delegators.sort_by(
+            |(left_address, left_amount), (right_address, right_amount)| {
+                left_address.cmp(right_address).then(left_amount.cmp(right_amount))
+            },
+        );
+
+        StableSnapshotSPO {
+            delegators,
+            total_stake: self.total_stake,
+            pledge: self.pledge,
+            fixed_cost: self.fixed_cost,
+            margin: self.margin.clone(),
+            blocks_produced: self.blocks_produced,
+            reward_account: self.reward_account.clone(),
+            pool_owners: self.pool_owners.clone(),
+            two_previous_reward_account_is_registered: self
+                .two_previous_reward_account_is_registered,
+        }
+        .serialize(serializer)
+    }
+}
+
 fn default_false() -> bool {
     false
 }
@@ -48,7 +89,7 @@ fn default_false() -> bool {
 /// stake distribution, blocks produced, pots, and registration changes.
 /// Used for rewards calculations. The mark/set/go pattern refers to the timing
 /// of when these snapshots are taken, not what they contain.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct EpochSnapshot {
     /// Epoch this snapshot is for (the one that has just ended)
     pub epoch: u64,
@@ -65,6 +106,35 @@ pub struct EpochSnapshot {
     /// Ordered registration changes that occurred during this epoch
     #[serde(default)]
     pub registration_changes: Vec<RegistrationChange>,
+}
+
+#[derive(Serialize)]
+struct StableEpochSnapshot {
+    epoch: u64,
+    spos: BTreeMap<PoolId, SnapshotSPO>,
+    blocks: usize,
+    pots: Pots,
+    registration_changes: Vec<RegistrationChange>,
+}
+
+impl Serialize for EpochSnapshot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StableEpochSnapshot {
+            epoch: self.epoch,
+            spos: self
+                .spos
+                .iter()
+                .map(|(pool_id, snapshot_spo)| (*pool_id, snapshot_spo.clone()))
+                .collect(),
+            blocks: self.blocks,
+            pots: self.pots.clone(),
+            registration_changes: self.registration_changes.clone(),
+        }
+        .serialize(serializer)
+    }
 }
 
 impl EpochSnapshot {

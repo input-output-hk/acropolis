@@ -2,12 +2,12 @@ use acropolis_common::DRepCredential;
 use imbl::{OrdMap, OrdSet};
 use tracing::info;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 pub struct State {
     drdd_history: DRepDistribution,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 pub struct DRepDistribution {
     pub dreps: OrdMap<DRepCredential, u64>,
     pub abstain: u64,

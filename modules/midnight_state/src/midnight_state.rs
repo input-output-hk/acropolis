@@ -8,7 +8,7 @@ use acropolis_common::{
         StateTransitionMessage,
     },
     protocol_params::Nonce,
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -77,8 +77,11 @@ impl MidnightState {
             let primary =
                 PrimaryRead::from_read(address_deltas_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() {
+            if primary.should_restore_history() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
+
+            if primary.is_rollback() {
                 warn!(
                     block_number = primary.block_info().number,
                     block_hash = %primary.block_info().hash,
@@ -122,9 +125,11 @@ impl MidnightState {
         let protocol_params_reader = ProtocolParamsReader::new(&context, &config).await?;
 
         // Initialize unbounded state history for rollback-safe replay.
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "midnight_state",
             StateHistoryStore::Unbounded,
+            dump_index,
         )));
         let grpc_history = history.clone();
         let grpc_context = context.clone();

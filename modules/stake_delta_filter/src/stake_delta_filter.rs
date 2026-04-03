@@ -15,7 +15,7 @@ use acropolis_common::{
             StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
         },
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
     NetworkId,
 };
 use anyhow::{anyhow, bail, Result};
@@ -81,7 +81,7 @@ mod utils;
 use state::{DeltaPublisher, State};
 use utils::{process_message, CacheMode, PointerCache, Tracker};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 struct StakeDeltaFilterParams {
     stake_address_delta_topic: String,
     validation_topic: String,
@@ -379,9 +379,11 @@ impl StakeDeltaFilter {
         info!("Stateful init: creating stake pointer cache");
 
         // State
+        let dump_index = context.config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "stake_delta_filter",
             StateHistoryStore::default_block_store(),
+            dump_index,
         )));
         let history_tick = history.clone();
 
@@ -454,6 +456,10 @@ impl StakeDeltaFilter {
                 certs_reader.read_with_rollbacks().await,
             )?;
 
+            if primary.should_restore_history() {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
+
             if let Some(tx_cert_msg) = primary.message() {
                 state
                     .handle_certs(primary.block_info(), tx_cert_msg)
@@ -461,9 +467,6 @@ impl StakeDeltaFilter {
                     .inspect_err(|e| error!("Messaging handling error: {e}"))
                     .ok();
             } else if let Some(message) = primary.rollback_message() {
-                // Handle rollbacks on this topic only
-                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
-
                 // Publish rollbacks downstream
                 publisher.publish_message(message.clone()).await?;
             }

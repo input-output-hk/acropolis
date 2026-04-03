@@ -5,7 +5,7 @@ use imbl::{HashMap, OrdMap};
 
 use crate::types::{AssetCreate, AssetSpend, CNightCreation, CNightSpend, UTxOMeta};
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 pub struct CNightUTxOState {
     // Created UTxOs receiving CNight indexed by block
     created_utxos: OrdMap<BlockNumber, Vec<UTxOIdentifier>>,

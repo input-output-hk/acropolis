@@ -2,6 +2,7 @@ use acropolis_common::{
     messages::{AccountsBootstrapMessage, SPOStakeDistributionMessage, SPOStateMessage},
     PoolId, VrfKeyHash,
 };
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
@@ -15,6 +16,35 @@ pub struct Snapshot {
     pub active_stakes: HashMap<PoolId, u64>,
 
     pub total_active_stakes: u64,
+}
+
+#[derive(serde::Serialize)]
+struct StableSnapshot {
+    active_spos: BTreeMap<PoolId, VrfKeyHash>,
+    active_stakes: BTreeMap<PoolId, u64>,
+    total_active_stakes: u64,
+}
+
+impl serde::Serialize for Snapshot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StableSnapshot {
+            active_spos: self
+                .active_spos
+                .iter()
+                .map(|(pool_id, vrf_key_hash)| (*pool_id, *vrf_key_hash))
+                .collect(),
+            active_stakes: self
+                .active_stakes
+                .iter()
+                .map(|(pool_id, stake)| (*pool_id, *stake))
+                .collect(),
+            total_active_stakes: self.total_active_stakes,
+        }
+        .serialize(serializer)
+    }
 }
 
 impl Display for Snapshot {
