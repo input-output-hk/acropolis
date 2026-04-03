@@ -1,10 +1,9 @@
 //! Phase 1 (native script / ledger rules) validation errors
 
 use crate::{
-    hash::Hash,
-    Address, DataHash, DatumHash, Era, KeyHash, Lovelace, NetworkId, RedeemerPointer, ScriptHash,
-    ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, ValidityInterval,
-    ValueMap,
+    hash::Hash, Address, DataHash, DatumHash, Era, KeyHash, Lovelace, NetworkId, RedeemerPointer,
+    ScriptHash, ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness,
+    ValidityInterval, ValueMap,
 };
 use std::collections::HashSet;
 use thiserror::Error;
