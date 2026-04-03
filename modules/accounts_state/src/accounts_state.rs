@@ -19,6 +19,7 @@ use acropolis_common::{
         },
         errors::QueryError,
     },
+    stake_addresses::BlockStakeAddressDeltas,
     state_history::{StateHistory, StateHistoryStore},
     Era,
 };
@@ -50,7 +51,7 @@ use verifier::Verifier;
 
 use crate::{
     spo_distribution_store::{SPDDStore, SPDDStoreConfig},
-    stake_address_journal::{BlockStakeAddressDeltas, StakeAddressJournal},
+    stake_address_journal::StakeAddressJournal,
 };
 mod spo_distribution_store;
 
@@ -281,7 +282,7 @@ impl AccountsState {
 
             // Get a mutable state
             let mut state = history.lock().await.get_current_state();
-            let block_deltas = BlockStakeAddressDeltas::default();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             // Use certs_message as the synchroniser, but we have to handle it after the
             // epoch things, because they apply to the new epoch, not the last
@@ -439,6 +440,7 @@ impl AccountsState {
                                 Ok(refund_deltas) => {
                                     // publish stake reward deltas
                                     stake_reward_deltas.extend(refund_deltas);
+                                    block_deltas.record_reward_deltas(&stake_reward_deltas);
                                     ctx.handle(
                                         "publish_stake_reward_deltas",
                                         stake_reward_deltas_publisher
@@ -502,6 +504,7 @@ impl AccountsState {
                         block_info.epoch_slot,
                         block_info.era,
                         &mut ctx,
+                        &mut block_deltas,
                     ) {
                         Ok(updates) => ctx.handle(
                             "stake_registration_updates_publisher.publish",
@@ -546,7 +549,7 @@ impl AccountsState {
                         block = block_info.number
                     );
                     async {
-                        state.handle_stake_deltas(&deltas_msg, &mut ctx);
+                        state.handle_stake_deltas(&deltas_msg, &mut ctx, &mut block_deltas);
                     }
                     .instrument(span)
                     .await;

@@ -8,6 +8,7 @@ use acropolis_common::messages::{
     GovernanceProceduresMessage, Message, StateQuery, StateQueryResponse,
 };
 use acropolis_common::queries::accounts::OptimalPoolSizing;
+use acropolis_common::stake_addresses::BlockStakeAddressDeltas;
 use acropolis_common::{
     certificate::TxCertificateIdentifier,
     math::update_value_with_delta,
@@ -1343,11 +1344,14 @@ impl State {
         deposit: Option<Lovelace>,
         epoch_slot: u64,
         ctx: &mut ValidationContext,
+        block_deltas: &mut BlockStakeAddressDeltas,
     ) -> Option<StakeRegistrationOutcome> {
         debug!("Register stake address {stake_address}");
         // Stake addresses can be registered after being used in UTXOs
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         if stake_addresses.register_stake_address(stake_address) {
+            block_deltas.record_registration(stake_address);
+
             // Account for the deposit
             let deposit = match deposit {
                 Some(deposit) => deposit,
@@ -1389,12 +1393,14 @@ impl State {
         refund: Option<Lovelace>,
         epoch_slot: u64,
         ctx: &mut ValidationContext,
+        block_deltas: &mut BlockStakeAddressDeltas,
     ) -> Option<StakeRegistrationOutcome> {
         debug!("Deregister stake address {stake_address}");
 
         // Check if it existed
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         if stake_addresses.deregister_stake_address(stake_address) {
+            block_deltas.record_deregistration(stake_address);
             // Account for the deposit, if registered before
             // TODO:
             // Need to store deposit amount per stake address
@@ -1434,10 +1440,15 @@ impl State {
     }
 
     /// Record a stake delegation
-    fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId) {
+    fn record_stake_delegation(
+        &mut self,
+        stake_address: &StakeAddress,
+        spo: &PoolId,
+        block_deltas: &mut BlockStakeAddressDeltas,
+    ) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         debug!("Delegation of {} to {}", stake_address, spo);
-        stake_addresses.record_stake_delegation(stake_address, spo);
+        stake_addresses.record_stake_delegation(stake_address, spo, block_deltas);
     }
 
     /// Record a DRep registration
@@ -1450,6 +1461,7 @@ impl State {
         &mut self,
         stake_address: &StakeAddress,
         drep: &DRepChoice,
+        block_deltas: &mut BlockStakeAddressDeltas,
     ) -> Result<()> {
         let previous_drep = {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -1469,12 +1481,13 @@ impl State {
                     self.drep_delegators.entry(drep).or_default().insert(stake_address.clone());
                 }
                 None => {
-                    if let Some(drep) = previous_drep {
-                        self.remove_account_from_drep_delegation_map(stake_address, &drep);
+                    if let Some(drep) = &previous_drep {
+                        self.remove_account_from_drep_delegation_map(stake_address, drep);
                     }
                 }
             }
         }
+        block_deltas.record_drep_delegation(stake_address, previous_drep);
 
         Ok(())
     }
@@ -1511,6 +1524,7 @@ impl State {
         epoch_slot: u64,
         era: Era,
         ctx: &mut ValidationContext,
+        block_deltas: &mut BlockStakeAddressDeltas,
     ) -> Result<Vec<StakeRegistrationUpdate>> {
         let mut stake_registration_updates: Vec<StakeRegistrationUpdate> = Vec::new();
 
@@ -1523,7 +1537,9 @@ impl State {
 
             match &tx_cert.cert {
                 TxCertificate::StakeRegistration(reg) => {
-                    if let Some(outcome) = self.register_stake_address(reg, None, epoch_slot, ctx) {
+                    if let Some(outcome) =
+                        self.register_stake_address(reg, None, epoch_slot, ctx, block_deltas)
+                    {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
@@ -1533,7 +1549,7 @@ impl State {
 
                 TxCertificate::StakeDeregistration(dreg) => {
                     if let Some(outcome) =
-                        self.deregister_stake_address(dreg, None, epoch_slot, ctx)
+                        self.deregister_stake_address(dreg, None, epoch_slot, ctx, block_deltas)
                     {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1552,6 +1568,7 @@ impl State {
                         Some(reg.deposit),
                         epoch_slot,
                         ctx,
+                        block_deltas,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1566,6 +1583,7 @@ impl State {
                         Some(dreg.refund),
                         epoch_slot,
                         ctx,
+                        block_deltas,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1575,16 +1593,32 @@ impl State {
                 }
 
                 TxCertificate::StakeDelegation(delegation) => {
-                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
+                    self.record_stake_delegation(
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        block_deltas,
+                    );
                 }
 
                 TxCertificate::VoteDelegation(delegation) => {
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
+                    self.record_drep_delegation(
+                        &delegation.stake_address,
+                        &delegation.drep,
+                        block_deltas,
+                    )?;
                 }
 
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
-                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
+                    self.record_stake_delegation(
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        block_deltas,
+                    );
+                    self.record_drep_delegation(
+                        &delegation.stake_address,
+                        &delegation.drep,
+                        block_deltas,
+                    )?;
                 }
 
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
@@ -1593,13 +1627,18 @@ impl State {
                         Some(delegation.deposit),
                         epoch_slot,
                         ctx,
+                        block_deltas,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
                         });
                     }
-                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
+                    self.record_stake_delegation(
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        block_deltas,
+                    );
                 }
 
                 TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
@@ -1608,13 +1647,18 @@ impl State {
                         Some(delegation.deposit),
                         epoch_slot,
                         ctx,
+                        block_deltas,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
                         });
                     }
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
+                    self.record_drep_delegation(
+                        &delegation.stake_address,
+                        &delegation.drep,
+                        block_deltas,
+                    )?;
                 }
 
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
@@ -1623,6 +1667,7 @@ impl State {
                         Some(delegation.deposit),
                         epoch_slot,
                         ctx,
+                        block_deltas,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1630,8 +1675,16 @@ impl State {
                         });
                     }
 
-                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
+                    self.record_stake_delegation(
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        block_deltas,
+                    );
+                    self.record_drep_delegation(
+                        &delegation.stake_address,
+                        &delegation.drep,
+                        block_deltas,
+                    )?;
                 }
 
                 TxCertificate::DRepRegistration(reg) => {
@@ -1673,10 +1726,12 @@ impl State {
         &mut self,
         deltas_msg: &StakeAddressDeltasMessage,
         ctx: &mut ValidationContext,
+        block_deltas: &mut BlockStakeAddressDeltas,
     ) {
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            block_deltas.record_stake_delta(&delta.stake_address, delta.delta);
             ctx.handle(
                 "process_stake_delta",
                 stake_addresses.process_stake_delta(delta),
@@ -1912,9 +1967,10 @@ mod tests {
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         let mut ctx = create_validation_context();
+        let mut block_deltas = BlockStakeAddressDeltas::default();
 
         // Register first
-        state.register_stake_address(&stake_address, None, 0, &mut ctx);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut block_deltas);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1931,14 +1987,14 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg, &mut ctx);
+        state.handle_stake_deltas(&msg, &mut ctx, &mut block_deltas);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 42);
         }
 
-        state.handle_stake_deltas(&msg, &mut ctx);
+        state.handle_stake_deltas(&msg, &mut ctx, &mut block_deltas);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1962,6 +2018,7 @@ mod tests {
     fn spdd_from_delegation_with_utxo_values_and_pledge() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
+        let mut block_deltas = BlockStakeAddressDeltas::default();
 
         let spo1 = test_keyhash(0x01).into();
         let spo2 = test_keyhash(0x02).into();
@@ -2009,12 +2066,12 @@ mod tests {
 
         // Delegate
         let addr1 = create_address(&[0x11]);
-        state.register_stake_address(&addr1, None, 0, &mut ctx);
-        state.record_stake_delegation(&addr1, &spo1);
+        state.register_stake_address(&addr1, None, 0, &mut ctx, &mut block_deltas);
+        state.record_stake_delegation(&addr1, &spo1, &mut block_deltas);
 
         let addr2 = create_address(&[0x12]);
-        state.register_stake_address(&addr2, None, 0, &mut ctx);
-        state.record_stake_delegation(&addr2, &spo2);
+        state.register_stake_address(&addr2, None, 0, &mut ctx, &mut block_deltas);
+        state.record_stake_delegation(&addr2, &spo2, &mut block_deltas);
 
         // Put some value in
         let msg1 = StakeAddressDeltasMessage {
@@ -2026,7 +2083,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg1, &mut ctx);
+        state.handle_stake_deltas(&msg1, &mut ctx, &mut block_deltas);
 
         let msg2 = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -2037,7 +2094,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg2, &mut ctx);
+        state.handle_stake_deltas(&msg2, &mut ctx, &mut block_deltas);
 
         // Get the SPDD
         let spdd = state.generate_spdd();
@@ -2110,13 +2167,14 @@ mod tests {
     fn mir_transfers_to_stake_addresses() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
+        let mut block_deltas = BlockStakeAddressDeltas::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         // Bootstrap with some in reserves
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(&stake_address, None, 0, &mut ctx);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut block_deltas);
 
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -2126,7 +2184,7 @@ mod tests {
                 delta: 99,
             }],
         };
-        state.handle_stake_deltas(&msg, &mut ctx);
+        state.handle_stake_deltas(&msg, &mut ctx, &mut block_deltas);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -2162,13 +2220,14 @@ mod tests {
     fn withdrawal_transfers_from_stake_addresses() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
+        let mut block_deltas = BlockStakeAddressDeltas::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         // Bootstrap with some in reserves
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(&stake_address, None, 0, &mut ctx);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut block_deltas);
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
                 stake_address: stake_address.clone(),
@@ -2178,7 +2237,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg, &mut ctx);
+        state.handle_stake_deltas(&msg, &mut ctx, &mut block_deltas);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -2226,13 +2285,14 @@ mod tests {
     fn mir_not_applied_to_deregistered_account() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
+        let mut block_deltas = BlockStakeAddressDeltas::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         // Bootstrap with some in reserves
         state.pots.reserves = 100;
 
         // Register stake address
-        state.register_stake_address(&stake_address, None, 0, &mut ctx);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut block_deltas);
 
         // Queue a MIR for this account
         let mir = MoveInstantaneousReward {
@@ -2242,7 +2302,7 @@ mod tests {
         state.pay_mir(&mir, Era::Shelley);
 
         // Deregister the account BEFORE applying instant rewards (simulates deregistration during epoch)
-        state.deregister_stake_address(&stake_address, None, 100, &mut ctx);
+        state.deregister_stake_address(&stake_address, None, 100, &mut ctx, &mut block_deltas);
 
         // Now apply instant rewards at "epoch boundary"
         state.apply_pending_mirs();
@@ -2268,6 +2328,7 @@ mod tests {
     fn drdd_respects_different_delegations() -> Result<()> {
         let mut state = State::default();
         let mut ctx = create_validation_context();
+        let mut block_deltas = BlockStakeAddressDeltas::default();
 
         let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
         state.dreps.insert(drep_addr_cred.clone(), 1_000_000);
@@ -2351,6 +2412,7 @@ mod tests {
             0,
             Era::Shelley,
             &mut ctx,
+            &mut block_deltas,
         )?;
 
         let deltas = vec![
@@ -2379,7 +2441,11 @@ mod tests {
                 delta: 100_000,
             },
         ];
-        state.handle_stake_deltas(&StakeAddressDeltasMessage { deltas }, &mut ctx);
+        state.handle_stake_deltas(
+            &StakeAddressDeltasMessage { deltas },
+            &mut ctx,
+            &mut block_deltas,
+        );
 
         let drdd = state.generate_drdd();
         assert_eq!(

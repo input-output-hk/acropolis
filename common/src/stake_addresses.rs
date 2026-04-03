@@ -3,6 +3,7 @@ use crate::{
     DRepCredential, DelegatedStake, Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress,
     StakeAddressDelta, Withdrawal,
 };
+use crate::{LovelaceDelta, StakeRewardDelta};
 use anyhow::{anyhow, bail, Result};
 use dashmap::DashMap;
 use imbl::{OrdMap, OrdSet};
@@ -456,9 +457,15 @@ impl StakeAddressMap {
     }
 
     /// Record a stake delegation
-    pub fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId) -> bool {
+    pub fn record_stake_delegation(
+        &mut self,
+        stake_address: &StakeAddress,
+        spo: &PoolId,
+        block_deltas: &mut BlockStakeAddressDeltas,
+    ) -> bool {
         if let Some(sas) = self.get_mut(stake_address) {
             if sas.registered {
+                block_deltas.record_pool_delegation(stake_address, sas.delegated_spo);
                 sas.delegated_spo = Some(*spo);
                 true
             } else {
@@ -623,6 +630,78 @@ impl StakeAddressMap {
     }
 }
 
+#[derive(Default, Clone)]
+pub struct StakeAddressStateDelta {
+    pub registered: Option<bool>,
+    pub utxo_value: Option<LovelaceDelta>,
+    pub rewards: Option<Lovelace>,
+    pub delegated_spo: Option<Option<PoolId>>,
+    pub delegated_drep: Option<Option<DRepChoice>>,
+}
+
+#[derive(Default)]
+pub struct BlockStakeAddressDeltas(HashMap<StakeAddress, StakeAddressStateDelta>);
+
+impl BlockStakeAddressDeltas {
+    fn entry(&mut self, addr: &StakeAddress) -> &mut StakeAddressStateDelta {
+        self.0.entry(addr.clone()).or_default()
+    }
+
+    pub fn into_vec(self) -> Vec<(StakeAddress, StakeAddressStateDelta)> {
+        self.0.into_iter().collect()
+    }
+
+    pub fn record_registration(&mut self, stake_address: &StakeAddress) {
+        let delta = self.entry(stake_address);
+        if delta.registered.is_none() {
+            delta.registered = Some(false);
+        }
+    }
+
+    pub fn record_deregistration(&mut self, addr: &StakeAddress) {
+        let delta = self.entry(addr);
+
+        if delta.registered.is_none() {
+            delta.registered = Some(true);
+        }
+    }
+
+    pub fn record_stake_delta(&mut self, addr: &StakeAddress, delta_val: LovelaceDelta) {
+        let delta = self.entry(addr);
+
+        match delta.utxo_value {
+            Some(current) => delta.utxo_value = Some(current + delta_val),
+            None => delta.utxo_value = Some(delta_val),
+        }
+    }
+
+    pub fn record_reward_deltas(&mut self, deltas: &Vec<StakeRewardDelta>) {
+        for delta in deltas {
+            let entry = self.entry(&delta.stake_address);
+            match entry.rewards {
+                Some(current) => entry.rewards = Some(current + delta.delta),
+                None => entry.rewards = Some(delta.delta),
+            }
+        }
+    }
+
+    pub fn record_pool_delegation(&mut self, addr: &StakeAddress, prior: Option<PoolId>) {
+        let delta = self.entry(addr);
+
+        if delta.delegated_spo.is_none() {
+            delta.delegated_spo = Some(prior);
+        }
+    }
+
+    pub fn record_drep_delegation(&mut self, addr: &StakeAddress, prior: Option<DRepChoice>) {
+        let delta = self.entry(addr);
+
+        if delta.delegated_drep.is_none() {
+            delta.delegated_drep = Some(prior);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -705,12 +784,13 @@ mod tests {
         fn test_stake_address_lifecycle() {
             let mut stake_addresses = StakeAddressMap::new();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             // Register
             assert!(stake_addresses.register_stake_address(&stake_address));
 
             // Delegate
-            stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH);
+            stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH, &mut block_deltas);
             let drep_choice = DRepChoice::Key(DREP_HASH);
             stake_addresses.record_drep_delegation(&stake_address, &drep_choice).unwrap();
 
@@ -727,9 +807,14 @@ mod tests {
         fn test_spo_delegation_success() {
             let mut stake_addresses = StakeAddressMap::new();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             stake_addresses.register_stake_address(&stake_address);
-            assert!(stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH));
+            assert!(stake_addresses.record_stake_delegation(
+                &stake_address,
+                &SPO_HASH,
+                &mut block_deltas
+            ));
             assert_eq!(
                 stake_addresses.get(&stake_address).unwrap().delegated_spo,
                 Some(SPO_HASH)
@@ -740,9 +825,14 @@ mod tests {
         fn test_spo_delegation_and_retirement() {
             let mut stake_addresses = StakeAddressMap::new();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             stake_addresses.register_stake_address(&stake_address);
-            assert!(stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH));
+            assert!(stake_addresses.record_stake_delegation(
+                &stake_address,
+                &SPO_HASH,
+                &mut block_deltas
+            ));
             assert_eq!(
                 stake_addresses.get(&stake_address).unwrap().delegated_spo,
                 Some(SPO_HASH)
@@ -776,9 +866,14 @@ mod tests {
         fn test_delegation_requires_registration() {
             let mut stake_addresses = StakeAddressMap::new();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             // Test unknown address
-            assert!(!stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH));
+            assert!(!stake_addresses.record_stake_delegation(
+                &stake_address,
+                &SPO_HASH,
+                &mut block_deltas
+            ));
             assert!(stake_addresses
                 .record_drep_delegation(&stake_address, &DRepChoice::Key(DREP_HASH))
                 .is_err());
@@ -794,7 +889,11 @@ mod tests {
                 .unwrap();
 
             // Delegation should still fail for unregistered address
-            assert!(!stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH));
+            assert!(!stake_addresses.record_stake_delegation(
+                &stake_address,
+                &SPO_HASH,
+                &mut block_deltas
+            ));
             assert!(stake_addresses
                 .record_drep_delegation(&stake_address, &DRepChoice::Key(DREP_HASH))
                 .is_err());
@@ -804,18 +903,19 @@ mod tests {
         fn test_re_delegation() {
             let mut stake_addresses = StakeAddressMap::new();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             stake_addresses.register_stake_address(&stake_address);
 
             // First SPO delegation
-            stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH);
+            stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH, &mut block_deltas);
             assert_eq!(
                 stake_addresses.get(&stake_address).unwrap().delegated_spo,
                 Some(SPO_HASH)
             );
 
             // Re-delegate to different pool
-            stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH_2);
+            stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH_2, &mut block_deltas);
             assert_eq!(
                 stake_addresses.get(&stake_address).unwrap().delegated_spo,
                 Some(SPO_HASH_2)
@@ -1179,14 +1279,15 @@ mod tests {
         #[test]
         fn test_generate_spdd_single_pool() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.register_stake_address(&addr2);
-            stake_addresses.record_stake_delegation(&addr1, &SPO_HASH);
-            stake_addresses.record_stake_delegation(&addr2, &SPO_HASH);
+            stake_addresses.record_stake_delegation(&addr1, &SPO_HASH, &mut block_deltas);
+            stake_addresses.record_stake_delegation(&addr2, &SPO_HASH, &mut block_deltas);
 
             stake_addresses
                 .process_stake_delta(&StakeAddressDelta {
@@ -1218,14 +1319,15 @@ mod tests {
         #[test]
         fn test_generate_spdd_multiple_pools() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.register_stake_address(&addr2);
-            stake_addresses.record_stake_delegation(&addr1, &SPO_HASH);
-            stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2);
+            stake_addresses.record_stake_delegation(&addr1, &SPO_HASH, &mut block_deltas);
+            stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2, &mut block_deltas);
 
             stake_addresses
                 .process_stake_delta(&StakeAddressDelta {
@@ -1340,14 +1442,15 @@ mod tests {
         #[test]
         fn test_get_pool_live_stake_info() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.register_stake_address(&addr2);
-            stake_addresses.record_stake_delegation(&addr1, &SPO_HASH);
-            stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2);
+            stake_addresses.record_stake_delegation(&addr1, &SPO_HASH, &mut block_deltas);
+            stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2, &mut block_deltas);
 
             stake_addresses
                 .process_stake_delta(&StakeAddressDelta {
@@ -1379,14 +1482,15 @@ mod tests {
         #[test]
         fn test_get_pools_live_stakes() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.register_stake_address(&addr2);
-            stake_addresses.record_stake_delegation(&addr1, &SPO_HASH);
-            stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2);
+            stake_addresses.record_stake_delegation(&addr1, &SPO_HASH, &mut block_deltas);
+            stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2, &mut block_deltas);
 
             stake_addresses
                 .process_stake_delta(&StakeAddressDelta {
@@ -1414,14 +1518,15 @@ mod tests {
         #[test]
         fn test_get_pool_delegators() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.register_stake_address(&addr2);
-            stake_addresses.record_stake_delegation(&addr1, &SPO_HASH);
-            stake_addresses.record_stake_delegation(&addr2, &SPO_HASH);
+            stake_addresses.record_stake_delegation(&addr1, &SPO_HASH, &mut block_deltas);
+            stake_addresses.record_stake_delegation(&addr2, &SPO_HASH, &mut block_deltas);
 
             stake_addresses
                 .process_stake_delta(&StakeAddressDelta {

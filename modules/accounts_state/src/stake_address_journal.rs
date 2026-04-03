@@ -1,7 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 
 use acropolis_common::{
-    params::SECURITY_PARAMETER_K, DRepChoice, LovelaceDelta, PoolId, StakeAddress,
+    params::SECURITY_PARAMETER_K,
+    stake_addresses::{BlockStakeAddressDeltas, StakeAddressStateDelta},
+    StakeAddress,
 };
 
 #[derive(Default)]
@@ -26,6 +28,7 @@ impl StakeAddressJournal {
         }
     }
 
+    #[allow(dead_code)]
     pub fn rollback_to(
         &mut self,
         block_number: u64,
@@ -74,76 +77,5 @@ impl StakeAddressJournal {
             blocks_to_pop -= 1;
         }
         aggregated_deltas
-    }
-}
-
-#[derive(Default, Clone)]
-pub struct StakeAddressStateDelta {
-    registered: Option<bool>,
-    utxo_value: Option<LovelaceDelta>,
-    rewards: Option<LovelaceDelta>,
-    delegated_spo: Option<Option<PoolId>>,
-    delegated_drep: Option<Option<DRepChoice>>,
-}
-
-#[derive(Default)]
-pub struct BlockStakeAddressDeltas(HashMap<StakeAddress, StakeAddressStateDelta>);
-
-impl BlockStakeAddressDeltas {
-    fn entry(&mut self, addr: &StakeAddress) -> &mut StakeAddressStateDelta {
-        self.0.entry(addr.clone()).or_default()
-    }
-
-    pub fn into_vec(self) -> Vec<(StakeAddress, StakeAddressStateDelta)> {
-        self.0.into_iter().collect()
-    }
-
-    pub fn record_registration(&mut self, stake_address: &StakeAddress, prior: bool) {
-        let delta = self.entry(stake_address);
-        if delta.registered.is_none() {
-            delta.registered = Some(prior);
-        }
-    }
-
-    pub fn record_deregistration(&mut self, addr: &StakeAddress, prior: bool) {
-        let delta = self.entry(addr);
-
-        if delta.registered.is_none() {
-            delta.registered = Some(prior);
-        }
-    }
-
-    pub fn record_stake_delta(&mut self, addr: &StakeAddress, delta_val: LovelaceDelta) {
-        let delta = self.entry(addr);
-
-        match delta.utxo_value {
-            Some(current) => delta.utxo_value = Some(current + delta_val),
-            None => delta.utxo_value = Some(delta_val),
-        }
-    }
-
-    pub fn record_reward_delta(&mut self, addr: &StakeAddress, delta_val: LovelaceDelta) {
-        let delta = self.entry(addr);
-
-        match delta.rewards {
-            Some(current) => delta.rewards = Some(current + delta_val),
-            None => delta.rewards = Some(delta_val),
-        }
-    }
-
-    pub fn record_pool_delegation(&mut self, addr: &StakeAddress, prior: Option<PoolId>) {
-        let delta = self.entry(addr);
-
-        if delta.delegated_spo.is_none() {
-            delta.delegated_spo = Some(prior);
-        }
-    }
-
-    pub fn record_drep_delegation(&mut self, addr: &StakeAddress, prior: Option<DRepChoice>) {
-        let delta = self.entry(addr);
-
-        if delta.delegated_drep.is_none() {
-            delta.delegated_drep = Some(prior);
-        }
     }
 }
