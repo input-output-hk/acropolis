@@ -27,7 +27,7 @@
 
 use std::sync::OnceLock;
 
-use acropolis_module_tx_unpacker::validations::phase2::evaluate_raw_flat_program;
+use acropolis_module_utxo_state::validations::phase2::evaluate_raw_flat_program;
 
 /// Default number of calibration iterations.
 pub const CALIBRATION_ITERATIONS: usize = 10;

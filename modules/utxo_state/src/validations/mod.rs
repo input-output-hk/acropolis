@@ -11,6 +11,7 @@ use anyhow::Result;
 use crate::utils;
 mod alonzo;
 mod babbage;
+pub mod phase2;
 mod shelley;
 
 pub fn validate_tx(

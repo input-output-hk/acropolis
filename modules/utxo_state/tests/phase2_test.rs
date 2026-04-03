@@ -4,7 +4,7 @@
 
 mod common;
 
-use acropolis_module_tx_unpacker::validations::phase2::{
+use acropolis_module_utxo_state::validations::phase2::{
     evaluate_raw_flat_program, evaluate_raw_flat_programs_parallel, evaluate_script, ExUnits,
     Phase2Error, PlutusVersion,
 };
@@ -1338,7 +1338,7 @@ fn test_sc001_parallel_performance() {
 // =============================================================================
 
 use acropolis_common::{ScriptHash, TxHash, UTxOIdentifier};
-use acropolis_module_tx_unpacker::validations::phase2::{
+use acropolis_module_utxo_state::validations::phase2::{
     validate_transaction_phase2, ScriptInput, ScriptPurpose,
 };
 
@@ -1560,126 +1560,6 @@ fn test_validate_transaction_phase2_empty() {
 }
 
 // =============================================================================
-// Phase 5: Configuration Tests (US3)
-// =============================================================================
-
-use acropolis_common::{
-    messages::RawTxsMessage, BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, GenesisDelegates,
-};
-use acropolis_module_tx_unpacker::state::State;
-
-/// Helper to create a minimal BlockInfo for testing
-fn create_test_block_info() -> BlockInfo {
-    BlockInfo {
-        status: BlockStatus::Volatile,
-        intent: BlockIntent::Apply,
-        slot: 1000,
-        number: 1,
-        hash: BlockHash::default(),
-        epoch: 1,
-        epoch_slot: 1000,
-        new_epoch: false,
-        is_new_era: false,
-        tip_slot: Some(1000),
-        timestamp: 0,
-        era: Era::Conway,
-    }
-}
-
-/// T035: Test that Phase 2 validation is skipped when phase2_enabled = false
-///
-/// This test verifies FR-004: System MUST provide a configuration flag to
-/// enable/disable Phase 2 validation, defaulting to disabled.
-#[test]
-fn test_phase2_disabled_skips_scripts() {
-    // Create a state with Phase 2 disabled (the default)
-    let state = State::new();
-    assert!(
-        !state.phase2_enabled,
-        "Default should be phase2_enabled = false"
-    );
-
-    // Create a state explicitly with Phase 2 disabled
-    let state = State::with_phase2_enabled(false);
-    assert!(
-        !state.phase2_enabled,
-        "Explicit false should be phase2_enabled = false"
-    );
-
-    // Create block info for Conway era
-    let block_info = create_test_block_info();
-
-    // Create an empty transaction list (no scripts to validate)
-    // Even with scripts, Phase 2 would be skipped when disabled
-    let txs_msg = RawTxsMessage { txs: vec![] };
-    let genesis_delegs = GenesisDelegates::default();
-
-    // Validation should succeed (no txs, no errors)
-    let result = state.validate(&block_info, &txs_msg, &genesis_delegs);
-    assert!(
-        result.is_ok(),
-        "Empty tx list should succeed with phase2 disabled"
-    );
-}
-
-/// T037: Test that Phase 2 validation runs when phase2_enabled = true
-///
-/// This test verifies that the configuration flag properly enables Phase 2
-/// validation in the validation flow.
-#[test]
-fn test_phase2_enabled_validates_scripts() {
-    // Create a state with Phase 2 enabled
-    let state = State::with_phase2_enabled(true);
-    assert!(state.phase2_enabled, "Should be phase2_enabled = true");
-
-    // Create block info for Conway era
-    let block_info = create_test_block_info();
-
-    // Create an empty transaction list
-    let txs_msg = RawTxsMessage { txs: vec![] };
-    let genesis_delegs = GenesisDelegates::default();
-
-    // Validation should succeed (no txs means no scripts to validate)
-    let result = state.validate(&block_info, &txs_msg, &genesis_delegs);
-    assert!(
-        result.is_ok(),
-        "Empty tx list should succeed with phase2 enabled"
-    );
-}
-
-/// T035: Test State::new() defaults to phase2_enabled = false
-#[test]
-fn test_state_default_phase2_disabled() {
-    let state = State::new();
-    assert!(
-        !state.phase2_enabled,
-        "State::new() should default to phase2_enabled = false"
-    );
-
-    let state = State::default();
-    assert!(
-        !state.phase2_enabled,
-        "State::default() should default to phase2_enabled = false"
-    );
-}
-
-/// T035: Test State::with_phase2_enabled() constructor
-#[test]
-fn test_state_with_phase2_enabled_constructor() {
-    let state_enabled = State::with_phase2_enabled(true);
-    assert!(
-        state_enabled.phase2_enabled,
-        "with_phase2_enabled(true) should set phase2_enabled = true"
-    );
-
-    let state_disabled = State::with_phase2_enabled(false);
-    assert!(
-        !state_disabled.phase2_enabled,
-        "with_phase2_enabled(false) should set phase2_enabled = false"
-    );
-}
-
-// =============================================================================
 // Real Mainnet Script Tests (from uplc benchmark fixtures)
 // =============================================================================
 // These tests use REAL Plutus scripts from the uplc-turbo benchmark suite.
@@ -1688,7 +1568,7 @@ fn test_state_with_phase2_enabled_constructor() {
 /// Helper to get the path to the plutus_scripts fixtures directory.
 fn get_plutus_scripts_dir() -> std::path::PathBuf {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    // Navigate from modules/tx_unpacker to tests/fixtures/plutus_scripts
+    // Navigate from modules/utxo_state to tests/fixtures/plutus_scripts
     manifest_dir
         .parent() // modules/
         .unwrap()
@@ -1995,7 +1875,7 @@ fn test_all_benchmark_scripts() {
 /// Runs each script 10 times, reports median/mean/stddev/CV for each.
 /// Goal: find a script that runs ~5ms on a developer laptop (~25ms on CI).
 ///
-/// Run with: cargo test -p acropolis_module_tx_unpacker -- test_calibration_candidates --nocapture --ignored
+/// Run with: cargo test -p acropolis_module_utxo_state -- test_calibration_candidates --nocapture --ignored
 #[test]
 #[ignore = "One-time calibration script selection tool — run manually when re-evaluating candidates"]
 fn test_calibration_candidates() {
