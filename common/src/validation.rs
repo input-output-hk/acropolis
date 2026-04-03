@@ -55,10 +55,10 @@ pub enum ValidationError {
     #[error("Unclassified validation error: {0}")]
     Unclassified(String),
 
-    #[error("VRF failure: {0}")]
+    #[error("VRF failure")]
     BadVRF(#[from] VrfValidationError),
 
-    #[error("KES failure: {0}")]
+    #[error("KES failure")]
     BadKES(#[from] KesValidationError),
 
     #[error(
@@ -73,7 +73,7 @@ pub enum ValidationError {
         bad_transactions: Vec<(u16, TransactionValidationError)>,
     },
 
-    #[error("Governance failure: {0}")]
+    #[error("Governance failure")]
     BadGovernance(#[from] GovernanceValidationError),
 
     #[error("CBOR Decoding error")]
@@ -424,32 +424,32 @@ pub enum VrfValidationError {
 
     /// **Cause:** The VRF key hash in the block header doesn't match the VRF key
     /// registered with this stake pool in the ledger state for Overlay slot
-    #[error("{0}")]
+    #[error("Genesis leader VRF key check failed")]
     WrongGenesisLeaderVrfKey(#[from] WrongGenesisLeaderVrfKeyError),
 
     /// **Cause:** The VRF key hash in the block header doesn't match the VRF key
     /// registered with this stake pool in the ledger state
-    #[error("{0}")]
+    #[error("Leader VRF key check failed")]
     WrongLeaderVrfKey(#[from] WrongLeaderVrfKeyError),
 
     /// VRF nonce proof verification failed (TPraos rho - nonce proof)
     /// **Cause:** The (rho - nonce) VRF proof failed verification
-    #[error("{0}")]
+    #[error("TPraos nonce VRF proof check failed")]
     TPraosBadNonceVrfProof(#[from] TPraosBadNonceVrfProofError),
 
     /// VRF leader proof verification failed (TPraos y - leader proof)
     /// **Cause:** The (y - leader) VRF proof failed verification
-    #[error("{0}")]
+    #[error("TPraos leader VRF proof check failed")]
     TPraosBadLeaderVrfProof(#[from] TPraosBadLeaderVrfProofError),
 
     /// VRF proof cryptographic verification failed (Praos single proof)
     /// **Cause:** The cryptographic VRF proof is invalid
-    #[error("{0}")]
+    #[error("Praos VRF proof check failed")]
     PraosBadVrfProof(#[from] PraosBadVrfProofError),
 
     /// **Cause:** The VRF output is too large for this pool's stake.
     /// The pool lost the slot lottery
-    #[error("{0}")]
+    #[error("VRF leader threshold check failed")]
     VrfLeaderValueTooBig(#[from] VrfLeaderValueTooBigError),
 
     /// **Cause:** This slot is in the overlay schedule but marked as non-active.
@@ -625,10 +625,10 @@ impl PartialEq for BadVrfProofError {
 #[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum KesValidationError {
     /// **Cause:** The KES signature on the block header is invalid.
-    #[error("KES Signature Error: {0}")]
+    #[error("KES Signature Error")]
     KesSignatureError(#[from] KesSignatureError),
     /// **Cause:** The operational certificate is invalid.
-    #[error("Operational Certificate Error: {0}")]
+    #[error("Operational Certificate Error")]
     OperationalCertificateError(#[from] OperationalCertificateError),
     /// **Cause:** No OCert counter found for this issuer (not a stake pool or genesis delegate)
     #[error("No OCert Counter For Issuer: Pool ID={}", hex::encode(pool_id))]
