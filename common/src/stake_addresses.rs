@@ -148,6 +148,30 @@ impl StakeAddressMap {
         self.get(stake_address).map(|sas| sas.registered).unwrap_or(false)
     }
 
+    pub fn apply_rollback(&mut self, deltas: HashMap<StakeAddress, StakeAddressStateDelta>) {
+        for (stake_address, delta) in deltas {
+            if let Some(sas) = self.get_mut(&stake_address) {
+                if let Some(previous_drep) = delta.delegated_drep {
+                    sas.delegated_drep = previous_drep;
+                }
+                if let Some(previous_spo) = delta.delegated_spo {
+                    sas.delegated_spo = previous_spo;
+                }
+                if let Some(previous_registration) = delta.registered {
+                    sas.registered = previous_registration;
+                }
+                if let Some(utxo_delta) = delta.utxo_value {
+                    let new_val = (sas.utxo_value as i64) - utxo_delta;
+                    sas.utxo_value =
+                        new_val.try_into().expect("utxo_value went negative during rollback");
+                }
+                if let Some(reward_deltas) = delta.rewards {
+                    sas.rewards -= reward_deltas
+                }
+            }
+        }
+    }
+
     /// Get Pool's Live Stake Info
     pub fn get_pool_live_stake_info(&self, spo: &PoolId) -> PoolLiveStakeInfo {
         let total_live_stakes = AtomicU64::new(0);

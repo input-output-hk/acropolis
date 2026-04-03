@@ -8,7 +8,7 @@ use acropolis_common::messages::{
     GovernanceProceduresMessage, Message, StateQuery, StateQueryResponse,
 };
 use acropolis_common::queries::accounts::OptimalPoolSizing;
-use acropolis_common::stake_addresses::BlockStakeAddressDeltas;
+use acropolis_common::stake_addresses::{BlockStakeAddressDeltas, StakeAddressStateDelta};
 use acropolis_common::{
     certificate::TxCertificateIdentifier,
     math::update_value_with_delta,
@@ -246,6 +246,13 @@ impl State {
     /// Get the current pot balances
     pub fn _get_pots(&self) -> Pots {
         self.pots.clone()
+    }
+
+    pub fn rollback_stake_address_state(
+        &self,
+        deltas: HashMap<StakeAddress, StakeAddressStateDelta>,
+    ) {
+        self.stake_addresses.lock().unwrap().apply_rollback(deltas);
     }
 
     /// Get maximum pool size

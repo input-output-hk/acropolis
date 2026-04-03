@@ -293,7 +293,11 @@ impl AccountsState {
             )?;
 
             if primary.is_rollback() {
-                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+                let rollback_block = primary.block_info().number;
+                state = history.lock().await.get_rolled_back_state(rollback_block);
+                state.rollback_stake_address_state(
+                    stake_address_journal.rollback_to(rollback_block),
+                );
 
                 let rollback_message = primary
                     .rollback_message()

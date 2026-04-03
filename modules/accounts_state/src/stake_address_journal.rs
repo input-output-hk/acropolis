@@ -28,7 +28,6 @@ impl StakeAddressJournal {
         }
     }
 
-    #[allow(dead_code)]
     pub fn rollback_to(
         &mut self,
         block_number: u64,
