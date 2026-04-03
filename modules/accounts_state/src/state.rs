@@ -104,7 +104,7 @@ pub struct State {
     proposal_refunds: Vec<(StakeAddress, Lovelace)>,
 
     /// Addresses registration changes in current epoch
-    current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
+    current_epoch_registration_changes: Vec<RegistrationChange>,
 
     /// Task for rewards calculation if necessary
     epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
@@ -590,7 +590,7 @@ impl State {
             &self.pots,
             total_non_obft_blocks,
             // Take and clear registration changes
-            std::mem::take(&mut *self.current_epoch_registration_changes.lock().unwrap()),
+            std::mem::take(&mut self.current_epoch_registration_changes),
             // Pass in two-previous epoch snapshot for capture of SPO reward accounts
             self.epoch_snapshots.set.clone(),
         );
@@ -662,7 +662,7 @@ impl State {
             // Apply current epoch registration changes up to the stability window.
             // In Cardano, addrsRew is captured at the stability window, not the epoch boundary.
             // Accounts that deregister before the stability window won't receive rewards.
-            let current_changes = current_epoch_registration_changes.lock().unwrap();
+            let current_changes = current_epoch_registration_changes;
             Self::apply_registration_changes_filtered(
                 &current_changes,
                 &mut registrations,
@@ -1364,7 +1364,7 @@ impl State {
             self.pots.deposits += deposit;
 
             // Add to registration changes only on success (consistent with deregister)
-            self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
+            self.current_epoch_registration_changes.push(RegistrationChange {
                 address: stake_address.clone(),
                 kind: RegistrationChangeKind::Registered,
                 epoch_slot,
@@ -1415,7 +1415,7 @@ impl State {
             self.pots.deposits -= refund_amount;
 
             // Add to registration changes with epoch_slot from the block
-            self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
+            self.current_epoch_registration_changes.push(RegistrationChange {
                 address: stake_address.clone(),
                 kind: RegistrationChangeKind::Deregistered,
                 epoch_slot,

@@ -43,11 +43,15 @@ use stake_reward_deltas_publisher::StakeRewardDeltasPublisher;
 use state::State;
 mod monetary;
 mod rewards;
+mod stake_address_journal;
 mod verifier;
 
 use verifier::Verifier;
 
-use crate::spo_distribution_store::{SPDDStore, SPDDStoreConfig};
+use crate::{
+    spo_distribution_store::{SPDDStore, SPDDStoreConfig},
+    stake_address_journal::{BlockStakeAddressDeltas, StakeAddressJournal},
+};
 mod spo_distribution_store;
 
 // Subscriptions
@@ -213,6 +217,7 @@ impl AccountsState {
         mut spo_rewards_publisher: SPORewardsPublisher,
         mut stake_reward_deltas_publisher: StakeRewardDeltasPublisher,
         mut stake_registration_updates_publisher: StakeRegistrationUpdatesPublisher,
+        mut stake_address_journal: StakeAddressJournal,
         validation_outcomes_topic: String,
         mut spos_reader: SPOReader,
         mut ea_reader: EpochActivityReader,
@@ -276,6 +281,7 @@ impl AccountsState {
 
             // Get a mutable state
             let mut state = history.lock().await.get_current_state();
+            let block_deltas = BlockStakeAddressDeltas::default();
 
             // Use certs_message as the synchroniser, but we have to handle it after the
             // epoch things, because they apply to the new epoch, not the last
@@ -571,6 +577,7 @@ impl AccountsState {
                 if primary.do_validation() {
                     ctx.publish().await;
                 }
+                stake_address_journal.commit(block_info.number, block_deltas);
             } else {
                 ctx.get_validation().print_errors("accounts_state", None);
             }
@@ -661,6 +668,8 @@ impl AccountsState {
             "AccountsState",
             StateHistoryStore::default_block_store(),
         )));
+        let stake_address_journal = StakeAddressJournal::default();
+
         let history_query = history.clone();
         let history_tick = history.clone();
 
@@ -914,6 +923,7 @@ impl AccountsState {
                 spo_rewards_publisher,
                 stake_reward_deltas_publisher,
                 stake_registration_updates_publisher,
+                stake_address_journal,
                 validation_outcomes_topic,
                 spos_reader,
                 ea_reader,
