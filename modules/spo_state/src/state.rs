@@ -4,6 +4,7 @@ use crate::{historical_spo_state::HistoricalSPOState, store_config::StoreConfig}
 use acropolis_common::certificate::TxCertificateIdentifier;
 use acropolis_common::messages::{PoolRegistrationUpdatesMessage, ProtocolParamsMessage};
 use acropolis_common::protocol_params::ProtocolParams;
+use acropolis_common::stake_addresses::BlockStakeAddressDeltas;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     crypto::keyhash_224,
@@ -465,7 +466,8 @@ impl State {
             return;
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
-        stake_addresses.register_stake_address(stake_address);
+        stake_addresses
+            .register_stake_address(stake_address, &mut BlockStakeAddressDeltas::default());
     }
 
     fn deregister_stake_address(&mut self, stake_address: &StakeAddress) -> ValidationOutcomes {
@@ -476,7 +478,9 @@ impl State {
         let mut stake_addresses = stake_addresses.lock().unwrap();
         let old_spo = stake_addresses.get(stake_address).and_then(|s| s.delegated_spo);
 
-        if stake_addresses.deregister_stake_address(stake_address) {
+        if stake_addresses
+            .deregister_stake_address(stake_address, &mut BlockStakeAddressDeltas::default())
+        {
             // update historical_spos
             if let Some(historical_spos) = self.historical_spos.as_mut() {
                 if let Some(old_spo) = old_spo.as_ref() {
@@ -512,7 +516,11 @@ impl State {
         let mut stake_addresses = stake_addresses.lock().unwrap();
         let old_spo = stake_addresses.get(stake_address).and_then(|s| s.delegated_spo);
 
-        if stake_addresses.record_stake_delegation(stake_address, spo) {
+        if stake_addresses.record_stake_delegation(
+            stake_address,
+            spo,
+            &mut BlockStakeAddressDeltas::default(),
+        ) {
             // update historical_spos
             if let Some(historical_spos) = self.historical_spos.as_mut() {
                 // Remove old delegator
@@ -705,7 +713,8 @@ impl State {
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
         for withdrawal in withdrawals_msg.withdrawals.iter() {
-            stake_addresses.process_withdrawal(withdrawal)?;
+            stake_addresses
+                .process_withdrawal(withdrawal, &mut BlockStakeAddressDeltas::default())?;
         }
 
         Ok(())
@@ -718,7 +727,7 @@ impl State {
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
         for delta in deltas_msg.deltas.iter() {
-            stake_addresses.process_stake_delta(delta)?;
+            stake_addresses.process_stake_delta(delta, &mut BlockStakeAddressDeltas::default())?;
         }
 
         Ok(())
