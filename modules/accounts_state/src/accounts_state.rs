@@ -341,6 +341,7 @@ impl AccountsState {
                         .complete_previous_epoch_rewards_calculation(
                             verifier,
                             skip_first_epoch_rewards,
+                            &mut block_deltas,
                         )
                         .await
                     {
@@ -371,7 +372,7 @@ impl AccountsState {
                 if primary.message().is_some() {
                     let block_info = primary.block_info();
                     // Apply pending MIRs before generating SPDD so they're included in active stake
-                    state.apply_pending_mirs();
+                    state.apply_pending_mirs(&mut block_deltas);
 
                     // At the Conway hard fork, pointer addresses lose their staking
                     // functionality (Conway spec 9.1.2). Subtract accumulated pointer
@@ -438,13 +439,13 @@ impl AccountsState {
                                     &ea_msg,
                                     &block_info,
                                     verifier,
+                                    &mut block_deltas,
                                 )
                                 .await
                             {
                                 Ok(refund_deltas) => {
                                     // publish stake reward deltas
                                     stake_reward_deltas.extend(refund_deltas);
-                                    block_deltas.record_reward_deltas(&stake_reward_deltas);
                                     ctx.handle(
                                         "publish_stake_reward_deltas",
                                         stake_reward_deltas_publisher
@@ -485,7 +486,7 @@ impl AccountsState {
                         async {
                             ctx.handle(
                                 "handle_governance_outcomes",
-                                state.handle_governance_outcomes(&outcomes_msg),
+                                state.handle_governance_outcomes(&outcomes_msg, &mut block_deltas),
                             );
                         }
                         .instrument(span)
@@ -534,7 +535,7 @@ impl AccountsState {
                         block = block_info.number
                     );
                     async {
-                        state.handle_withdrawals(&withdrawals_msg, &mut ctx);
+                        state.handle_withdrawals(&withdrawals_msg, &mut ctx, &mut block_deltas);
                     }
                     .instrument(span)
                     .await;

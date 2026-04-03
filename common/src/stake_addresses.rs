@@ -1,9 +1,9 @@
+use crate::LovelaceDelta;
 use crate::{
     math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice,
     DRepCredential, DelegatedStake, Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress,
     StakeAddressDelta, Withdrawal,
 };
-use crate::{LovelaceDelta, StakeRewardDelta};
 use anyhow::{anyhow, bail, Result};
 use dashmap::DashMap;
 use imbl::{OrdMap, OrdSet};
@@ -47,7 +47,7 @@ pub struct AccountState {
     pub address_state: StakeAddressState,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub struct StakeAddressMap {
     inner: HashMap<StakeAddress, StakeAddressState>,
 
@@ -166,7 +166,9 @@ impl StakeAddressMap {
                         new_val.try_into().expect("utxo_value went negative during rollback");
                 }
                 if let Some(reward_deltas) = delta.rewards {
-                    sas.rewards -= reward_deltas
+                    let new_val = (sas.rewards as i64) - reward_deltas;
+                    sas.rewards =
+                        new_val.try_into().expect("rewards went negative during rollback");
                 }
             }
         }
@@ -442,7 +444,11 @@ impl StakeAddressMap {
 
     /// Register a stake address
     /// Return True if registered, False if already registered
-    pub fn register_stake_address(&mut self, stake_address: &StakeAddress) -> bool {
+    pub fn register_stake_address(
+        &mut self,
+        stake_address: &StakeAddress,
+        block_deltas: &mut BlockStakeAddressDeltas,
+    ) -> bool {
         // Stake addresses can be registered after being used in UTXOs
         let sas = self.entry(stake_address.clone()).or_default();
         if sas.registered {
@@ -453,19 +459,25 @@ impl StakeAddressMap {
             false
         } else {
             sas.registered = true;
+            block_deltas.record_registration(stake_address);
             true
         }
     }
 
     /// Deregister a stake address
     /// Return True if deregistered, False if unregistered or unknown stake address
-    pub fn deregister_stake_address(&mut self, stake_address: &StakeAddress) -> bool {
+    pub fn deregister_stake_address(
+        &mut self,
+        stake_address: &StakeAddress,
+        block_deltas: &mut BlockStakeAddressDeltas,
+    ) -> bool {
         // Check if it existed
         if let Some(sas) = self.get_mut(stake_address) {
             if sas.registered {
                 sas.registered = false;
                 sas.delegated_spo = None;
                 sas.delegated_drep = None;
+                block_deltas.record_deregistration(stake_address);
                 true
             } else {
                 error!(
@@ -519,7 +531,11 @@ impl StakeAddressMap {
 
     /// Deregister a DRep - clears all delegations to this DRep
     /// Uses 'reverse index' for O(k) clearing, where k = number of delegators.
-    pub fn deregister_drep(&mut self, drep_credential: &DRepCredential) {
+    pub fn deregister_drep(
+        &mut self,
+        drep_credential: &DRepCredential,
+        block_deltas: &mut BlockStakeAddressDeltas,
+    ) {
         let Some(delegators) = self.drep_delegates.remove(drep_credential) else {
             // If there are no delegators, there is nothing to remove from StakeAddressMap::inner
             return;
@@ -530,6 +546,7 @@ impl StakeAddressMap {
                 if sas.delegated_drep.as_ref().and_then(DRepChoice::to_credential).as_ref()
                     == Some(drep_credential)
                 {
+                    block_deltas.record_drep_delegation(&stake_address, sas.delegated_drep.clone());
                     sas.delegated_drep = None;
                 }
             }
@@ -541,6 +558,7 @@ impl StakeAddressMap {
         &mut self,
         stake_address: &StakeAddress,
         drep: &DRepChoice,
+        block_deltas: &mut BlockStakeAddressDeltas,
     ) -> Result<Option<DRepChoice>> {
         let prev_drep = {
             let sas = self
@@ -559,6 +577,7 @@ impl StakeAddressMap {
             // Update the reverse index.
             self.remove_drep_delegate(stake_address, prev_drep.as_ref());
             self.add_drep_delegate(stake_address, Some(drep));
+            block_deltas.record_drep_delegation(stake_address, prev_drep.clone());
         }
 
         let sas = self.inner.get_mut(stake_address).unwrap();
@@ -572,16 +591,26 @@ impl StakeAddressMap {
     /// which requires that we remove the current delegation from all accounts
     /// that have ever delegated to a DRep upon its deregistration, even if the
     /// account is no longer delegating to the DRep.
-    pub fn remove_delegators_from_drep(&mut self, delegators: OrdSet<StakeAddress>) {
+    pub fn remove_delegators_from_drep(
+        &mut self,
+        delegators: OrdSet<StakeAddress>,
+        block_deltas: &mut BlockStakeAddressDeltas,
+    ) {
         for stake_address in delegators {
             if let Some(sas) = self.get_mut(&stake_address) {
-                sas.delegated_drep.take();
+                let previous = sas.delegated_drep.take();
+                block_deltas.record_drep_delegation(&stake_address, previous);
             }
         }
     }
 
     /// Add a reward to a reward account (by stake address)
-    pub fn add_to_reward(&mut self, stake_address: &StakeAddress, amount: Lovelace) {
+    pub fn add_to_reward(
+        &mut self,
+        stake_address: &StakeAddress,
+        amount: Lovelace,
+        block_deltas: &mut BlockStakeAddressDeltas,
+    ) {
         // Get or create account entry, avoiding clone when existing
         let sas = match self.get_mut(stake_address) {
             Some(existing) => existing,
@@ -594,10 +623,15 @@ impl StakeAddressMap {
         if let Err(e) = update_value_with_delta(&mut sas.rewards, amount as i64) {
             error!("Adding to reward account {}: {e}", stake_address);
         }
+        block_deltas.record_reward_delta(stake_address, amount as i64);
     }
 
     /// Stake Delta
-    pub fn process_stake_delta(&mut self, stake_delta: &StakeAddressDelta) -> Result<()> {
+    pub fn process_stake_delta(
+        &mut self,
+        stake_delta: &StakeAddressDelta,
+        block_deltas: &mut BlockStakeAddressDeltas,
+    ) -> Result<()> {
         // Use the full stake address directly - no need to extract hash!
         let stake_address = &stake_delta.stake_address;
 
@@ -607,12 +641,17 @@ impl StakeAddressMap {
         if let Err(e) = update_value_with_delta(&mut sas.utxo_value, stake_delta.delta) {
             bail!("Applying delta to stake address {}: {e}", stake_address);
         }
+        block_deltas.record_stake_delta(stake_address, stake_delta.delta);
 
         Ok(())
     }
 
     /// Withdraw
-    pub fn process_withdrawal(&mut self, withdrawal: &Withdrawal) -> Result<()> {
+    pub fn process_withdrawal(
+        &mut self,
+        withdrawal: &Withdrawal,
+        block_deltas: &mut BlockStakeAddressDeltas,
+    ) -> Result<()> {
         let stake_address = &withdrawal.address;
 
         if let Some(sas) = self.get(stake_address) {
@@ -624,6 +663,7 @@ impl StakeAddressMap {
                 {
                     bail!("Withdrawing from stake address {}: {e}", stake_address);
                 } else {
+                    block_deltas.record_reward_delta(stake_address, -(withdrawal.value as i64));
                     // Update the stake address
                     self.insert(stake_address.clone(), sas);
                 }
@@ -658,7 +698,7 @@ impl StakeAddressMap {
 pub struct StakeAddressStateDelta {
     pub registered: Option<bool>,
     pub utxo_value: Option<LovelaceDelta>,
-    pub rewards: Option<Lovelace>,
+    pub rewards: Option<LovelaceDelta>,
     pub delegated_spo: Option<Option<PoolId>>,
     pub delegated_drep: Option<Option<DRepChoice>>,
 }
@@ -667,8 +707,8 @@ pub struct StakeAddressStateDelta {
 pub struct BlockStakeAddressDeltas(HashMap<StakeAddress, StakeAddressStateDelta>);
 
 impl BlockStakeAddressDeltas {
-    fn entry(&mut self, addr: &StakeAddress) -> &mut StakeAddressStateDelta {
-        self.0.entry(addr.clone()).or_default()
+    fn entry(&mut self, stake_address: &StakeAddress) -> &mut StakeAddressStateDelta {
+        self.0.entry(stake_address.clone()).or_default()
     }
 
     pub fn into_vec(self) -> Vec<(StakeAddress, StakeAddressStateDelta)> {
@@ -676,52 +716,55 @@ impl BlockStakeAddressDeltas {
     }
 
     pub fn record_registration(&mut self, stake_address: &StakeAddress) {
-        let delta = self.entry(stake_address);
-        if delta.registered.is_none() {
-            delta.registered = Some(false);
+        let entry = self.entry(stake_address);
+        if entry.registered.is_none() {
+            entry.registered = Some(false);
         }
     }
 
-    pub fn record_deregistration(&mut self, addr: &StakeAddress) {
-        let delta = self.entry(addr);
+    pub fn record_deregistration(&mut self, stake_address: &StakeAddress) {
+        let entry = self.entry(stake_address);
 
-        if delta.registered.is_none() {
-            delta.registered = Some(true);
+        if entry.registered.is_none() {
+            entry.registered = Some(true);
         }
     }
 
-    pub fn record_stake_delta(&mut self, addr: &StakeAddress, delta_val: LovelaceDelta) {
-        let delta = self.entry(addr);
+    pub fn record_stake_delta(&mut self, stake_address: &StakeAddress, delta_val: LovelaceDelta) {
+        let entry = self.entry(stake_address);
 
-        match delta.utxo_value {
-            Some(current) => delta.utxo_value = Some(current + delta_val),
-            None => delta.utxo_value = Some(delta_val),
+        match entry.utxo_value {
+            Some(current) => entry.utxo_value = Some(current + delta_val),
+            None => entry.utxo_value = Some(delta_val),
         }
     }
 
-    pub fn record_reward_deltas(&mut self, deltas: &Vec<StakeRewardDelta>) {
-        for delta in deltas {
-            let entry = self.entry(&delta.stake_address);
-            match entry.rewards {
-                Some(current) => entry.rewards = Some(current + delta.delta),
-                None => entry.rewards = Some(delta.delta),
-            }
+    pub fn record_reward_delta(&mut self, stake_address: &StakeAddress, delta: LovelaceDelta) {
+        let entry = self.entry(stake_address);
+
+        match entry.rewards {
+            Some(current) => entry.rewards = Some(current + delta),
+            None => entry.rewards = Some(delta),
         }
     }
 
-    pub fn record_pool_delegation(&mut self, addr: &StakeAddress, prior: Option<PoolId>) {
-        let delta = self.entry(addr);
+    pub fn record_pool_delegation(&mut self, stake_address: &StakeAddress, prior: Option<PoolId>) {
+        let entry = self.entry(stake_address);
 
-        if delta.delegated_spo.is_none() {
-            delta.delegated_spo = Some(prior);
+        if entry.delegated_spo.is_none() {
+            entry.delegated_spo = Some(prior);
         }
     }
 
-    pub fn record_drep_delegation(&mut self, addr: &StakeAddress, prior: Option<DRepChoice>) {
-        let delta = self.entry(addr);
+    pub fn record_drep_delegation(
+        &mut self,
+        stake_address: &StakeAddress,
+        prior: Option<DRepChoice>,
+    ) {
+        let entry = self.entry(stake_address);
 
-        if delta.delegated_drep.is_none() {
-            delta.delegated_drep = Some(prior);
+        if entry.delegated_drep.is_none() {
+            entry.delegated_drep = Some(prior);
         }
     }
 }
@@ -751,9 +794,10 @@ mod tests {
         #[test]
         fn test_register_success() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            assert!(stake_addresses.register_stake_address(&stake_address));
+            assert!(stake_addresses.register_stake_address(&stake_address, &mut block_deltas));
             assert_eq!(stake_addresses.len(), 1);
             assert!(stake_addresses.get(&stake_address).unwrap().registered);
         }
@@ -761,47 +805,54 @@ mod tests {
         #[test]
         fn test_double_registration_fails() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            assert!(stake_addresses.register_stake_address(&stake_address));
-            assert!(!stake_addresses.register_stake_address(&stake_address));
+            assert!(stake_addresses.register_stake_address(&stake_address, &mut block_deltas));
+            assert!(!stake_addresses.register_stake_address(&stake_address, &mut block_deltas));
             assert_eq!(stake_addresses.len(), 1);
         }
 
         #[test]
         fn test_deregister_success() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&stake_address);
-            assert!(stake_addresses.deregister_stake_address(&stake_address));
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
+            assert!(stake_addresses.deregister_stake_address(&stake_address, &mut block_deltas));
             assert!(!stake_addresses.get(&stake_address).unwrap().registered);
         }
 
         #[test]
         fn test_deregister_unregistered_fails() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
             // Create an entry but don't register
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: stake_address.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 100,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: stake_address.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 100,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
-            assert!(!stake_addresses.deregister_stake_address(&stake_address));
+            assert!(!stake_addresses.deregister_stake_address(&stake_address, &mut block_deltas));
         }
 
         #[test]
         fn test_deregister_unknown_fails() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            assert!(!stake_addresses.deregister_stake_address(&stake_address));
+            assert!(!stake_addresses.deregister_stake_address(&stake_address, &mut block_deltas));
         }
 
         #[test]
@@ -811,15 +862,17 @@ mod tests {
             let mut block_deltas = BlockStakeAddressDeltas::default();
 
             // Register
-            assert!(stake_addresses.register_stake_address(&stake_address));
+            assert!(stake_addresses.register_stake_address(&stake_address, &mut block_deltas));
 
             // Delegate
             stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH, &mut block_deltas);
             let drep_choice = DRepChoice::Key(DREP_HASH);
-            stake_addresses.record_drep_delegation(&stake_address, &drep_choice).unwrap();
+            stake_addresses
+                .record_drep_delegation(&stake_address, &drep_choice, &mut block_deltas)
+                .unwrap();
 
             // Deregister
-            assert!(stake_addresses.deregister_stake_address(&stake_address));
+            assert!(stake_addresses.deregister_stake_address(&stake_address, &mut block_deltas));
             assert!(!stake_addresses.get(&stake_address).unwrap().registered);
         }
     }
@@ -833,7 +886,7 @@ mod tests {
             let stake_address = create_stake_address(STAKE_KEY_HASH);
             let mut block_deltas = BlockStakeAddressDeltas::default();
 
-            stake_addresses.register_stake_address(&stake_address);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
             assert!(stake_addresses.record_stake_delegation(
                 &stake_address,
                 &SPO_HASH,
@@ -851,7 +904,7 @@ mod tests {
             let stake_address = create_stake_address(STAKE_KEY_HASH);
             let mut block_deltas = BlockStakeAddressDeltas::default();
 
-            stake_addresses.register_stake_address(&stake_address);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
             assert!(stake_addresses.record_stake_delegation(
                 &stake_address,
                 &SPO_HASH,
@@ -873,12 +926,15 @@ mod tests {
         #[test]
         fn test_drep_delegation_success() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
+
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&stake_address);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
             let drep_choice = DRepChoice::Key(DREP_HASH);
-            let prev =
-                stake_addresses.record_drep_delegation(&stake_address, &drep_choice).unwrap();
+            let prev = stake_addresses
+                .record_drep_delegation(&stake_address, &drep_choice, &mut block_deltas)
+                .unwrap();
             assert_eq!(prev, None);
             assert_eq!(
                 stake_addresses.get(&stake_address).unwrap().delegated_drep,
@@ -899,17 +955,24 @@ mod tests {
                 &mut block_deltas
             ));
             assert!(stake_addresses
-                .record_drep_delegation(&stake_address, &DRepChoice::Key(DREP_HASH))
+                .record_drep_delegation(
+                    &stake_address,
+                    &DRepChoice::Key(DREP_HASH),
+                    &mut block_deltas
+                )
                 .is_err());
 
             // Create an unregistered entry with UTXO value
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: stake_address.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 100,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: stake_address.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 100,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             // Delegation should still fail for unregistered address
@@ -919,7 +982,11 @@ mod tests {
                 &mut block_deltas
             ));
             assert!(stake_addresses
-                .record_drep_delegation(&stake_address, &DRepChoice::Key(DREP_HASH))
+                .record_drep_delegation(
+                    &stake_address,
+                    &DRepChoice::Key(DREP_HASH),
+                    &mut block_deltas
+                )
                 .is_err());
         }
 
@@ -929,7 +996,7 @@ mod tests {
             let stake_address = create_stake_address(STAKE_KEY_HASH);
             let mut block_deltas = BlockStakeAddressDeltas::default();
 
-            stake_addresses.register_stake_address(&stake_address);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
 
             // First SPO delegation
             stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH, &mut block_deltas);
@@ -946,7 +1013,9 @@ mod tests {
             );
 
             // First DRep delegation
-            stake_addresses.record_drep_delegation(&stake_address, &DRepChoice::Abstain).unwrap();
+            stake_addresses
+                .record_drep_delegation(&stake_address, &DRepChoice::Abstain, &mut block_deltas)
+                .unwrap();
             assert_eq!(
                 stake_addresses.get(&stake_address).unwrap().delegated_drep,
                 Some(DRepChoice::Abstain)
@@ -954,7 +1023,11 @@ mod tests {
 
             // DRep re-delegation
             stake_addresses
-                .record_drep_delegation(&stake_address, &DRepChoice::NoConfidence)
+                .record_drep_delegation(
+                    &stake_address,
+                    &DRepChoice::NoConfidence,
+                    &mut block_deltas,
+                )
                 .unwrap();
             assert_eq!(
                 stake_addresses.get(&stake_address).unwrap().delegated_drep,
@@ -965,17 +1038,24 @@ mod tests {
         #[test]
         fn test_drep_deregister_clears_delegators() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
+
             let address1 = create_stake_address(STAKE_KEY_HASH);
             let address2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&address1);
-            stake_addresses.register_stake_address(&address2);
+            stake_addresses.register_stake_address(&address1, &mut block_deltas);
+            stake_addresses.register_stake_address(&address2, &mut block_deltas);
 
             let drep_choice = DRepChoice::Key(DREP_HASH);
-            stake_addresses.record_drep_delegation(&address1, &drep_choice).unwrap();
-            stake_addresses.record_drep_delegation(&address2, &drep_choice).unwrap();
+            stake_addresses
+                .record_drep_delegation(&address1, &drep_choice, &mut block_deltas)
+                .unwrap();
+            stake_addresses
+                .record_drep_delegation(&address2, &drep_choice, &mut block_deltas)
+                .unwrap();
 
-            stake_addresses.deregister_drep(&DRepCredential::AddrKeyHash(DREP_HASH));
+            stake_addresses
+                .deregister_drep(&DRepCredential::AddrKeyHash(DREP_HASH), &mut block_deltas);
             assert_eq!(stake_addresses.get(&address1).unwrap().delegated_drep, None);
             assert_eq!(stake_addresses.get(&address2).unwrap().delegated_drep, None);
         }
@@ -983,18 +1063,23 @@ mod tests {
         #[test]
         fn test_drep_deregister_does_not_clear_after_redelegation() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
+
             let address = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&address);
+            stake_addresses.register_stake_address(&address, &mut block_deltas);
 
             // Delegate to one DRep then re-delegate to another.
-            stake_addresses.record_drep_delegation(&address, &DRepChoice::Key(DREP_HASH)).unwrap();
             stake_addresses
-                .record_drep_delegation(&address, &DRepChoice::Key(DREP_HASH_2))
+                .record_drep_delegation(&address, &DRepChoice::Key(DREP_HASH), &mut block_deltas)
+                .unwrap();
+            stake_addresses
+                .record_drep_delegation(&address, &DRepChoice::Key(DREP_HASH_2), &mut block_deltas)
                 .unwrap();
 
             // Deregistering first DRep must not clear the current delegation.
-            stake_addresses.deregister_drep(&DRepCredential::AddrKeyHash(DREP_HASH));
+            stake_addresses
+                .deregister_drep(&DRepCredential::AddrKeyHash(DREP_HASH), &mut block_deltas);
             assert_eq!(
                 stake_addresses.get(&address).unwrap().delegated_drep,
                 Some(DRepChoice::Key(DREP_HASH_2))
@@ -1008,9 +1093,10 @@ mod tests {
         #[test]
         fn test_positive_delta_accumulates() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&stake_address);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
 
             let delta = StakeAddressDelta {
                 stake_address: stake_address.clone(),
@@ -1018,36 +1104,43 @@ mod tests {
                 tx_count: 1,
                 delta: 42,
             };
-            stake_addresses.process_stake_delta(&delta).unwrap();
+            stake_addresses.process_stake_delta(&delta, &mut block_deltas).unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 42);
 
-            stake_addresses.process_stake_delta(&delta).unwrap();
+            stake_addresses.process_stake_delta(&delta, &mut block_deltas).unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 84);
         }
 
         #[test]
         fn test_negative_delta_reduces() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&stake_address);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: stake_address.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 100,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: stake_address.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 100,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: stake_address.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: -30,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: stake_address.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: -30,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 70);
@@ -1056,27 +1149,34 @@ mod tests {
         #[test]
         fn test_negative_delta_underflow_prevented() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&stake_address);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: stake_address.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 50,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: stake_address.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 50,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             // Try to subtract more than available -- should result in error
             assert!(stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: stake_address.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: -100,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: stake_address.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: -100,
+                    },
+                    &mut block_deltas
+                )
                 .is_err());
 
             // Value should remain unchanged after error
@@ -1090,21 +1190,25 @@ mod tests {
         #[test]
         fn test_utxo_and_rewards_tracked_independently() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&stake_address);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: stake_address.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 42,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: stake_address.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 42,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 42);
 
-            stake_addresses.add_to_reward(&stake_address, 12);
+            stake_addresses.add_to_reward(&stake_address, 12, &mut block_deltas);
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 12);
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 42);
         }
@@ -1112,13 +1216,14 @@ mod tests {
         #[test]
         fn test_add_to_reward() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&stake_address);
-            stake_addresses.add_to_reward(&stake_address, 100);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
+            stake_addresses.add_to_reward(&stake_address, 100, &mut block_deltas);
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 100);
 
-            stake_addresses.add_to_reward(&stake_address, 50);
+            stake_addresses.add_to_reward(&stake_address, 50, &mut block_deltas);
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 150);
         }
 
@@ -1172,17 +1277,18 @@ mod tests {
         #[test]
         fn test_withdrawal_success() -> Result<()> {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&stake_address);
-            stake_addresses.add_to_reward(&stake_address, 100);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
+            stake_addresses.add_to_reward(&stake_address, 100, &mut block_deltas);
 
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
                 value: 40,
                 tx_identifier: TxIdentifier::default(),
             };
-            stake_addresses.process_withdrawal(&withdrawal)?;
+            stake_addresses.process_withdrawal(&withdrawal, &mut block_deltas)?;
 
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 60);
             Ok(())
@@ -1191,10 +1297,11 @@ mod tests {
         #[test]
         fn test_withdrawal_prevents_underflow() -> Result<()> {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&stake_address);
-            stake_addresses.add_to_reward(&stake_address, 12);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
+            stake_addresses.add_to_reward(&stake_address, 12, &mut block_deltas);
 
             // Withdraw more than reward (should be prevented)
             let withdrawal = Withdrawal {
@@ -1202,7 +1309,7 @@ mod tests {
                 value: 24,
                 tx_identifier: TxIdentifier::default(),
             };
-            assert!(stake_addresses.process_withdrawal(&withdrawal).is_err());
+            assert!(stake_addresses.process_withdrawal(&withdrawal, &mut block_deltas).is_err());
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 12);
 
             // Withdraw less than reward (should succeed)
@@ -1211,7 +1318,7 @@ mod tests {
                 value: 2,
                 tx_identifier: TxIdentifier::default(),
             };
-            stake_addresses.process_withdrawal(&withdrawal)?;
+            stake_addresses.process_withdrawal(&withdrawal, &mut block_deltas)?;
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 10);
             Ok(())
         }
@@ -1219,10 +1326,11 @@ mod tests {
         #[test]
         fn test_zero_withdrawal() -> Result<()> {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&stake_address);
-            stake_addresses.add_to_reward(&stake_address, 100);
+            stake_addresses.register_stake_address(&stake_address, &mut block_deltas);
+            stake_addresses.add_to_reward(&stake_address, 100, &mut block_deltas);
 
             let withdrawal = Withdrawal {
                 address: stake_address.clone(),
@@ -1230,7 +1338,7 @@ mod tests {
                 tx_identifier: TxIdentifier::default(),
             };
 
-            stake_addresses.process_withdrawal(&withdrawal)?;
+            stake_addresses.process_withdrawal(&withdrawal, &mut block_deltas)?;
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 100);
             Ok(())
         }
@@ -1238,6 +1346,7 @@ mod tests {
         #[test]
         fn test_withdrawal_unknown_address() -> Result<()> {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
             let withdrawal = Withdrawal {
@@ -1247,7 +1356,7 @@ mod tests {
             };
 
             // Should return error, but not panic
-            assert!(stake_addresses.process_withdrawal(&withdrawal).is_err());
+            assert!(stake_addresses.process_withdrawal(&withdrawal, &mut block_deltas).is_err());
             Ok(())
         }
     }
@@ -1308,30 +1417,36 @@ mod tests {
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
             stake_addresses.record_stake_delegation(&addr1, &SPO_HASH, &mut block_deltas);
             stake_addresses.record_stake_delegation(&addr2, &SPO_HASH, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
-            stake_addresses.add_to_reward(&addr1, 50);
+            stake_addresses.add_to_reward(&addr1, 50, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr2.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 2000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr2.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 2000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
-            stake_addresses.add_to_reward(&addr2, 100);
+            stake_addresses.add_to_reward(&addr2, 100, &mut block_deltas);
 
             let spdd = stake_addresses.generate_spdd();
 
@@ -1348,26 +1463,32 @@ mod tests {
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
             stake_addresses.record_stake_delegation(&addr1, &SPO_HASH, &mut block_deltas);
             stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr2.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 2000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr2.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 2000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let spdd = stake_addresses.generate_spdd();
@@ -1380,16 +1501,20 @@ mod tests {
         #[test]
         fn test_generate_spdd_no_delegations() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
             let addr1 = create_stake_address(STAKE_KEY_HASH);
 
-            stake_addresses.register_stake_address(&addr1);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let spdd = stake_addresses.generate_spdd();
@@ -1399,48 +1524,64 @@ mod tests {
         #[test]
         fn test_generate_drdd_with_special_choices() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
             let addr3 = create_stake_address(STAKE_KEY_HASH_3);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
-            stake_addresses.register_stake_address(&addr3);
-
-            stake_addresses.record_drep_delegation(&addr1, &DRepChoice::Abstain).unwrap();
-            stake_addresses.record_drep_delegation(&addr2, &DRepChoice::NoConfidence).unwrap();
-            stake_addresses.record_drep_delegation(&addr3, &DRepChoice::Key(DREP_HASH)).unwrap();
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr3, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .record_drep_delegation(&addr1, &DRepChoice::Abstain, &mut block_deltas)
                 .unwrap();
-            stake_addresses.add_to_reward(&addr1, 50);
+            stake_addresses
+                .record_drep_delegation(&addr2, &DRepChoice::NoConfidence, &mut block_deltas)
+                .unwrap();
+            stake_addresses
+                .record_drep_delegation(&addr3, &DRepChoice::Key(DREP_HASH), &mut block_deltas)
+                .unwrap();
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr2.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 2000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
-            stake_addresses.add_to_reward(&addr2, 100);
+            stake_addresses.add_to_reward(&addr1, 50, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr3.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 3000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr2.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 2000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
-            stake_addresses.add_to_reward(&addr3, 150);
+            stake_addresses.add_to_reward(&addr2, 100, &mut block_deltas);
+
+            stake_addresses
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr3.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 3000,
+                    },
+                    &mut block_deltas,
+                )
+                .unwrap();
+            stake_addresses.add_to_reward(&addr3, 150, &mut block_deltas);
 
             let dreps = OrdMap::from_iter([(DRepCredential::AddrKeyHash(DREP_HASH), 500_u64)]);
             let drdd = stake_addresses.generate_drdd(&dreps, &HashMap::new());
@@ -1471,30 +1612,36 @@ mod tests {
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
             stake_addresses.record_stake_delegation(&addr1, &SPO_HASH, &mut block_deltas);
             stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
-            stake_addresses.add_to_reward(&addr1, 50);
+            stake_addresses.add_to_reward(&addr1, 50, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr2.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 2000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr2.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 2000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
-            stake_addresses.add_to_reward(&addr2, 100);
+            stake_addresses.add_to_reward(&addr2, 100, &mut block_deltas);
 
             let info = stake_addresses.get_pool_live_stake_info(&SPO_HASH);
 
@@ -1511,26 +1658,32 @@ mod tests {
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
             stake_addresses.record_stake_delegation(&addr1, &SPO_HASH, &mut block_deltas);
             stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr2.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 2000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr2.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 2000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let pools = vec![SPO_HASH, SPO_HASH_2];
@@ -1547,28 +1700,34 @@ mod tests {
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
             stake_addresses.record_stake_delegation(&addr1, &SPO_HASH, &mut block_deltas);
             stake_addresses.record_stake_delegation(&addr2, &SPO_HASH, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
-            stake_addresses.add_to_reward(&addr1, 50);
+            stake_addresses.add_to_reward(&addr1, 50, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr2.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 2000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr2.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 2000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let delegators = stake_addresses.get_pool_delegators(&SPO_HASH);
@@ -1585,30 +1744,37 @@ mod tests {
         #[test]
         fn test_get_accounts_utxo_values_map_success() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
-            stake_addresses.add_to_reward(&addr1, 500);
+            stake_addresses.add_to_reward(&addr1, 500, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr2.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 2000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr2.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 2000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let keys = vec![addr1.clone(), addr2.clone()];
@@ -1622,17 +1788,22 @@ mod tests {
         #[test]
         fn test_get_accounts_utxo_values_map_missing_account() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
+
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let keys = vec![addr1, addr2];
@@ -1653,30 +1824,37 @@ mod tests {
         #[test]
         fn test_get_accounts_utxo_values_sum_success() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
-            stake_addresses.add_to_reward(&addr1, 500);
+            stake_addresses.add_to_reward(&addr1, 500, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr2.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 2000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr2.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 2000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let keys = vec![addr1, addr2];
@@ -1688,17 +1866,22 @@ mod tests {
         #[test]
         fn test_get_accounts_utxo_values_sum_missing_account() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
+
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let keys = vec![addr1, addr2];
@@ -1723,30 +1906,37 @@ mod tests {
         #[test]
         fn test_get_accounts_balances_map_includes_rewards() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
-            stake_addresses.add_to_reward(&addr1, 100);
+            stake_addresses.add_to_reward(&addr1, 100, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr2.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 2000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr2.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 2000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let addresses = vec![addr1.clone(), addr2.clone()];
@@ -1760,17 +1950,22 @@ mod tests {
         #[test]
         fn test_get_accounts_balances_map_missing_account() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
+
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let addresses = vec![addr1, addr2];
@@ -1791,30 +1986,37 @@ mod tests {
         #[test]
         fn test_get_account_balances_sum_includes_rewards() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
-            stake_addresses.add_to_reward(&addr1, 100);
+            stake_addresses.add_to_reward(&addr1, 100, &mut block_deltas);
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr2.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 2000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr2.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 2000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let addresses = vec![addr1, addr2];
@@ -1826,17 +2028,22 @@ mod tests {
         #[test]
         fn test_get_account_balances_sum_missing_account() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
+
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let addresses = vec![addr1, addr2];
@@ -1861,17 +2068,22 @@ mod tests {
         #[test]
         fn test_get_drep_delegations_map_various_choices() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
             let addr3 = create_stake_address(STAKE_KEY_HASH_3);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
-            stake_addresses.register_stake_address(&addr3);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr3, &mut block_deltas);
 
-            stake_addresses.record_drep_delegation(&addr1, &DRepChoice::Abstain).unwrap();
-            stake_addresses.record_drep_delegation(&addr2, &DRepChoice::Key(DREP_HASH)).unwrap();
+            stake_addresses
+                .record_drep_delegation(&addr1, &DRepChoice::Abstain, &mut block_deltas)
+                .unwrap();
+            stake_addresses
+                .record_drep_delegation(&addr2, &DRepChoice::Key(DREP_HASH), &mut block_deltas)
+                .unwrap();
 
             let addresses = vec![addr1.clone(), addr2.clone(), addr3.clone()];
             let map = stake_addresses.get_drep_delegations_map(&addresses).unwrap();
@@ -1885,11 +2097,15 @@ mod tests {
         #[test]
         fn test_get_drep_delegations_map_missing_account() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
+
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.record_drep_delegation(&addr1, &DRepChoice::NoConfidence).unwrap();
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses
+                .record_drep_delegation(&addr1, &DRepChoice::NoConfidence, &mut block_deltas)
+                .unwrap();
 
             let addresses = vec![addr1, addr2];
 
@@ -1909,43 +2125,59 @@ mod tests {
         #[test]
         fn test_get_drep_delegators() {
             let mut stake_addresses = StakeAddressMap::new();
+            let mut block_deltas = BlockStakeAddressDeltas::default();
 
             let addr1 = create_stake_address(STAKE_KEY_HASH);
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
             let addr3 = create_stake_address(STAKE_KEY_HASH_3);
 
-            stake_addresses.register_stake_address(&addr1);
-            stake_addresses.register_stake_address(&addr2);
-            stake_addresses.register_stake_address(&addr3);
+            stake_addresses.register_stake_address(&addr1, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr2, &mut block_deltas);
+            stake_addresses.register_stake_address(&addr3, &mut block_deltas);
 
             let drep_choice = DRepChoice::Key(DREP_HASH);
-            stake_addresses.record_drep_delegation(&addr1, &drep_choice).unwrap();
-            stake_addresses.record_drep_delegation(&addr2, &drep_choice).unwrap();
-            stake_addresses.record_drep_delegation(&addr3, &DRepChoice::Abstain).unwrap();
+            stake_addresses
+                .record_drep_delegation(&addr1, &drep_choice, &mut block_deltas)
+                .unwrap();
+            stake_addresses
+                .record_drep_delegation(&addr2, &drep_choice, &mut block_deltas)
+                .unwrap();
+            stake_addresses
+                .record_drep_delegation(&addr3, &DRepChoice::Abstain, &mut block_deltas)
+                .unwrap();
 
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr1.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 1000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr1.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 1000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr2.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 2000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr2.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 2000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
             stake_addresses
-                .process_stake_delta(&StakeAddressDelta {
-                    stake_address: addr3.clone(),
-                    addresses: Vec::new(),
-                    tx_count: 1,
-                    delta: 3000,
-                })
+                .process_stake_delta(
+                    &StakeAddressDelta {
+                        stake_address: addr3.clone(),
+                        addresses: Vec::new(),
+                        tx_count: 1,
+                        delta: 3000,
+                    },
+                    &mut block_deltas,
+                )
                 .unwrap();
 
             let delegators = stake_addresses.get_drep_delegators(&drep_choice);
