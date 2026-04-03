@@ -33,6 +33,13 @@ pub struct ScriptRef {
     pub script_lang: ScriptLang,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum PlutusVersion {
+    PlutusV1,
+    PlutusV2,
+    PlutusV3,
+}
+
 // The full CBOR bytes of a reference script
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
 pub enum ReferenceScript {

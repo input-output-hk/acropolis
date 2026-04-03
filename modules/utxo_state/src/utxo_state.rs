@@ -48,7 +48,7 @@ use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
 use crate::reference_scripts_state::ReferenceScriptsState;
 mod utils;
-mod validations;
+pub mod validations;
 
 declare_cardano_reader!(
     UTxODeltasReader,
@@ -311,7 +311,8 @@ impl UTXOState {
             _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
         let snapshot_store = store.clone();
-        let mut state = State::new(store, address_delta_publish_mode);
+        let phase2_enabled = config.get_bool("phase2-enabled").unwrap_or(false);
+        let mut state = State::new(store, address_delta_publish_mode, phase2_enabled);
 
         // Create address delta publisher and pass it observations
         let deltas_publisher =
