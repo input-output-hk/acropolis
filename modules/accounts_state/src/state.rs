@@ -840,10 +840,18 @@ impl State {
                 .flat_map(|id| stake_addresses.get_pool_delegator_addresses(id))
                 .collect::<Vec<_>>()
         };
-        self.mutate_stake_addresses(undo, retiring_delegators, |stake_addresses| {
+        self.mutate_stake_addresses(undo, retiring_delegators.clone(), |stake_addresses| {
             for id in retiring.iter() {
                 info!(epoch, "SPO {id} has retired");
-                stake_addresses.remove_all_delegations_to(id);
+            }
+
+            for stake_address in &retiring_delegators {
+                if let Some(stake_state) = stake_addresses.get_mut(stake_address) {
+                    if stake_state.delegated_spo.is_some_and(|pool_id| retiring.contains(&pool_id))
+                    {
+                        stake_state.delegated_spo = None;
+                    }
+                }
             }
         });
 
@@ -1335,6 +1343,10 @@ impl State {
 
         // Skip rewards calculation on first epoch after bootstrap
         if skip_rewards {
+            // Snapshot bootstrap already materialized the prior epoch's reward effects,
+            // so any leftover async reward work must be discarded rather than paid later.
+            rewards_runtime.clear_on_rollback();
+            self.pending_rewards_plan = None;
             info!("Skipping rewards calculation on first epoch after bootstrap");
             return Ok((spo_rewards, reward_deltas));
         }
@@ -2801,6 +2813,74 @@ mod tests {
             state.protocol_parameters.unwrap().conway.unwrap().pool_voting_thresholds,
             params.conway.unwrap().pool_voting_thresholds
         );
+    }
+
+    #[tokio::test]
+    async fn skip_rewards_clears_stale_reward_work() {
+        let mut state = State::default();
+        let mut rewards_runtime = RewardRuntime::default();
+        let mut undo = BlockStakeAddressUndoRecorder::default();
+        let verifier = Verifier::new();
+        let stake_address = create_address(&STAKE_KEY_HASH);
+
+        state.stake_addresses.lock().unwrap().insert(
+            stake_address.clone(),
+            StakeAddressState {
+                registered: true,
+                ..StakeAddressState::default()
+            },
+        );
+        state.pending_rewards_plan = Some(PendingRewardsPlan {
+            rewarded_epoch: 1,
+            rewarded_era: Era::Shelley,
+            shelley_params: acropolis_common::protocol_params::ShelleyParams::default(),
+            stake_rewards: 0,
+        });
+
+        let mut rewards = BTreeMap::new();
+        rewards.insert(
+            PoolId::default(),
+            vec![crate::rewards::RewardDetail {
+                account: stake_address.clone(),
+                rtype: RewardType::Member,
+                amount: 7,
+                pool: PoolId::default(),
+                registered: true,
+            }],
+        );
+        rewards_runtime.set_epoch_rewards_task(tokio::spawn(async move {
+            Ok(crate::rewards::RewardsResult {
+                epoch: 1,
+                total_paid: 7,
+                rewards,
+                ..crate::rewards::RewardsResult::default()
+            })
+        }));
+
+        let (spo_rewards, reward_deltas) = state
+            .complete_previous_epoch_rewards_calculation(
+                &verifier,
+                true,
+                &mut rewards_runtime,
+                &mut undo,
+            )
+            .await
+            .unwrap();
+        assert!(spo_rewards.is_empty());
+        assert!(reward_deltas.is_empty());
+        assert!(state.pending_rewards_plan.is_none());
+
+        let (_, reward_deltas) = state
+            .complete_previous_epoch_rewards_calculation(
+                &verifier,
+                false,
+                &mut rewards_runtime,
+                &mut undo,
+            )
+            .await
+            .unwrap();
+        assert!(reward_deltas.is_empty());
+        assert_eq!(state.get_stake_state(&stake_address).unwrap().rewards, 0);
     }
 
     #[test]

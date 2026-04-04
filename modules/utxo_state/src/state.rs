@@ -510,8 +510,11 @@ impl State {
         deltas: &UTXODeltasMessage,
     ) -> Result<()> {
         // get current reference scripts state
-        let mut current_reference_scripts_state =
-            self.reference_scripts_history.get_or_init_with(ReferenceScriptsState::default);
+        let mut current_reference_scripts_state = if block.status == BlockStatus::RolledBack {
+            self.reference_scripts_history.get_rolled_back_state(block.number)
+        } else {
+            self.reference_scripts_history.get_or_init_with(ReferenceScriptsState::default)
+        };
 
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
@@ -1402,6 +1405,78 @@ mod tests {
         }];
         let deltas = UTXODeltasMessage { deltas };
         state.handle_utxo_deltas(&block1, &deltas).await.unwrap();
+        assert_eq!(
+            Some(v2_script.clone()),
+            state.lookup_reference_script(&v2_script.compute_hash())
+        );
+        assert_eq!(
+            None,
+            state.lookup_reference_script(&v1_script.compute_hash())
+        );
+    }
+
+    #[tokio::test]
+    async fn rolled_back_block_rewinds_reference_scripts_before_replay() {
+        let mut state = new_state();
+        let v1_script = create_plutus_v1_reference_script();
+        let v2_script = create_plutus_v2_reference_script();
+
+        let output = TxOutput {
+            utxo_identifier: UTxOIdentifier::new(TxHash::from([1; 32]), 0),
+            address: create_address(99),
+            value: Value::new(42, vec![]),
+            datum: None,
+            script_ref: Some(ScriptRef {
+                script_hash: v1_script.compute_hash(),
+                script_lang: v1_script.get_script_lang(),
+            }),
+        };
+        let block2 = create_block(BlockStatus::Volatile, 2, 2);
+        let deltas = UTXODeltasMessage {
+            deltas: vec![TxUTxODeltas {
+                consumes: vec![],
+                produces: vec![output],
+                fee: 0,
+                is_valid: true,
+                created_reference_scripts: Some(vec![(
+                    v1_script.compute_hash(),
+                    v1_script.clone(),
+                )]),
+                ..TxUTxODeltas::default()
+            }],
+        };
+        state.handle_utxo_deltas(&block2, &deltas).await.unwrap();
+        assert_eq!(
+            Some(v1_script.clone()),
+            state.lookup_reference_script(&v1_script.compute_hash())
+        );
+
+        let replay_output = TxOutput {
+            utxo_identifier: UTxOIdentifier::new(TxHash::from([2; 32]), 0),
+            address: create_address(99),
+            value: Value::new(42, vec![]),
+            datum: None,
+            script_ref: Some(ScriptRef {
+                script_hash: v2_script.compute_hash(),
+                script_lang: v2_script.get_script_lang(),
+            }),
+        };
+        let replay_block = create_block(BlockStatus::RolledBack, 1, 1);
+        let replay_deltas = UTXODeltasMessage {
+            deltas: vec![TxUTxODeltas {
+                consumes: vec![],
+                produces: vec![replay_output],
+                fee: 0,
+                is_valid: true,
+                created_reference_scripts: Some(vec![(
+                    v2_script.compute_hash(),
+                    v2_script.clone(),
+                )]),
+                ..TxUTxODeltas::default()
+            }],
+        };
+        state.handle_utxo_deltas(&replay_block, &replay_deltas).await.unwrap();
+
         assert_eq!(
             Some(v2_script.clone()),
             state.lookup_reference_script(&v2_script.compute_hash())

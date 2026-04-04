@@ -194,7 +194,17 @@ impl StakeAddressUndoDelta {
 fn value_delta(previous: Option<u64>, current: Option<u64>) -> i64 {
     let previous = i128::from(previous.unwrap_or_default());
     let current = i128::from(current.unwrap_or_default());
-    i64::try_from(previous - current).expect("stake address delta should fit in i64")
+    let delta = previous - current;
+    let clamped_delta = delta.clamp(i128::from(i64::MIN), i128::from(i64::MAX));
+
+    if clamped_delta != delta {
+        error!(
+            previous,
+            current, delta, clamped_delta, "Stake address delta exceeded i64 range and was clamped"
+        );
+    }
+
+    clamped_delta as i64
 }
 
 #[derive(Debug, Default)]
@@ -513,6 +523,12 @@ mod tests {
         history.rollback_to(14, &mut stake_addresses);
 
         assert_eq!(stake_addresses.get(&stake_address), Some(previous));
+    }
+
+    #[test]
+    fn value_delta_clamps_large_ranges() {
+        assert_eq!(value_delta(Some(u64::MAX), Some(0)), i64::MAX);
+        assert_eq!(value_delta(Some(0), Some(u64::MAX)), i64::MIN);
     }
 
     #[tokio::test]
