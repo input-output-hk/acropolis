@@ -18,6 +18,7 @@ config = { workspace = true }
 hex = { workspace = true }
 imbl = { workspace = true }
 pallas = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 

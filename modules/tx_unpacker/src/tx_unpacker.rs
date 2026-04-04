@@ -10,7 +10,10 @@ use acropolis_common::{
         AssetDeltasMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{
+        serialize_with_bincode, summary_with_fingerprint, StateHistory, StateHistoryStore,
+        DEFAULT_DUMP_INDEX,
+    },
     validation::ValidationOutcomes,
     *,
 };
@@ -102,7 +105,7 @@ impl TxUnpacker {
                 || (!primary.is_rollback()
                     && primary.block_info().status == BlockStatus::RolledBack)
             {
-                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+                state = history.lock().await.get_rolled_back_state(primary.restore_from_index());
             }
 
             let raw_message = primary
@@ -467,10 +470,13 @@ impl TxUnpacker {
         }
 
         // Initialize State
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "tx_unpacker",
-            StateHistoryStore::default_block_store(),
-        )));
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
+        let history = Arc::new(Mutex::new(
+            StateHistory::<State>::new("tx_unpacker", StateHistoryStore::default_block_store())
+                .with_dump_index(dump_index)
+                .with_serializer(serialize_with_bincode::<State>)
+                .with_summary(summary_with_fingerprint::<State>),
+        ));
 
         let context_run = context.clone();
         context.run(async move {

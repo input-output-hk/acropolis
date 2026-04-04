@@ -11,6 +11,7 @@ use acropolis_common::{
         StateQueryResponse, StateTransitionMessage, UTXODeltasMessage,
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+    state_history::DEFAULT_DUMP_INDEX,
 };
 use caryatid_sdk::{module, Context, Subscription};
 
@@ -133,13 +134,11 @@ impl UTXOState {
                 utxo_deltas_reader.read_with_rollbacks().await,
             )? {
                 RollbackWrapper::Normal((block_info, deltas)) => Some((block_info, deltas)),
-                RollbackWrapper::Rollback((_, message)) => {
-                    // TODO: Actually rollback utxo_state's volatile history
-
+                RollbackWrapper::Rollback((block_info, message)) => {
                     // Publish rollbacks downstream
                     let mut state = state.lock().await;
                     state
-                        .handle_rollback(message)
+                        .handle_rollback(&block_info, message)
                         .await
                         .inspect_err(|e| error!("Rollback handling error: {e}"))
                         .ok();
@@ -311,7 +310,8 @@ impl UTXOState {
             _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
         let snapshot_store = store.clone();
-        let mut state = State::new(store, address_delta_publish_mode);
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
+        let mut state = State::new(store, address_delta_publish_mode, dump_index);
 
         // Create address delta publisher and pass it observations
         let deltas_publisher =

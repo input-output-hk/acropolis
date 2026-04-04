@@ -7,11 +7,13 @@ use acropolis_common::{
     messages::{BlockTxsMessage, EpochActivityMessage, ProtocolParamsMessage},
     params::EPOCH_LENGTH,
     protocol_params::{Nonce, Nonces, PraosParams},
+    state_history::debug_fingerprint,
     BlockHash, BlockInfo, Era, PoolId,
 };
 use anyhow::{bail, Result};
 use imbl::HashMap;
 use pallas::ledger::traverse::MultiEraHeader;
+use std::collections::BTreeMap;
 use tracing::info;
 
 #[derive(Default, Debug, Clone)]
@@ -62,6 +64,53 @@ pub struct State {
     praos_params: Option<PraosParams>,
 }
 
+#[derive(serde::Serialize)]
+struct StableState {
+    block: u64,
+    epoch: u64,
+    epoch_start_time: u64,
+    first_block_time: u64,
+    first_block_height: u64,
+    last_block_time: u64,
+    last_block_height: u64,
+    blocks_minted: BTreeMap<PoolId, usize>,
+    epoch_blocks: usize,
+    epoch_txs: u64,
+    epoch_outputs: u128,
+    epoch_fees: u64,
+    nonces: Option<Nonces>,
+    praos_params: Option<PraosParams>,
+}
+
+impl serde::Serialize for State {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StableState {
+            block: self.block,
+            epoch: self.epoch,
+            epoch_start_time: self.epoch_start_time,
+            first_block_time: self.first_block_time,
+            first_block_height: self.first_block_height,
+            last_block_time: self.last_block_time,
+            last_block_height: self.last_block_height,
+            blocks_minted: self
+                .blocks_minted
+                .iter()
+                .map(|(pool_id, count)| (*pool_id, *count))
+                .collect(),
+            epoch_blocks: self.epoch_blocks,
+            epoch_txs: self.epoch_txs,
+            epoch_outputs: self.epoch_outputs,
+            epoch_fees: self.epoch_fees,
+            nonces: self.nonces.clone(),
+            praos_params: self.praos_params.clone(),
+        }
+        .serialize(serializer)
+    }
+}
+
 impl State {
     // Constructor
     pub fn new(genesis: &GenesisValues) -> Self {
@@ -85,6 +134,30 @@ impl State {
             nonces: None,
             praos_params: None,
         }
+    }
+
+    pub fn rollback_debug_summary(&self) -> String {
+        let blocks_minted: BTreeMap<PoolId, usize> =
+            self.blocks_minted.iter().map(|(pool_id, count)| (*pool_id, *count)).collect();
+
+        format!(
+            "block={} epoch={} epoch_start_time={} first_block_time={} first_block_height={} last_block_time={} last_block_height={} epoch_blocks={} epoch_txs={} epoch_outputs={} epoch_fees={} blocks_minted_len={} blocks_minted={} nonces={} praos_params={}",
+            self.block,
+            self.epoch,
+            self.epoch_start_time,
+            self.first_block_time,
+            self.first_block_height,
+            self.last_block_time,
+            self.last_block_height,
+            self.epoch_blocks,
+            self.epoch_txs,
+            self.epoch_outputs,
+            self.epoch_fees,
+            blocks_minted.len(),
+            debug_fingerprint(&blocks_minted),
+            debug_fingerprint(&self.nonces),
+            debug_fingerprint(&self.praos_params),
+        )
     }
 
     /// Bootstrap state from snapshot data

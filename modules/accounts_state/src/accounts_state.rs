@@ -19,7 +19,7 @@ use acropolis_common::{
         },
         errors::QueryError,
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
     Era,
 };
 use anyhow::{bail, Result};
@@ -47,10 +47,70 @@ mod runtime;
 mod verifier;
 
 use runtime::{AccountsRuntime, BlockStakeAddressUndoRecorder};
-use verifier::Verifier;
+use verifier::{SpddVerificationReport, Verifier};
 
 use crate::spo_distribution_store::{SPDDStore, SPDDStoreConfig};
 mod spo_distribution_store;
+
+fn log_spdd_failure_diagnostics(state: &State, report: &SpddVerificationReport) {
+    let diagnostics = state.spdd_diagnostics();
+    error!(
+        epoch = report.epoch,
+        total_reference = report.total_reference,
+        total_computed = report.total_computed,
+        total_delegated_utxo = diagnostics.total_utxo,
+        total_delegated_rewards = diagnostics.total_rewards,
+        "SPDD diagnostic totals"
+    );
+
+    let mut mismatches = report
+        .different
+        .iter()
+        .map(|(pool, reference, computed)| {
+            (
+                *pool,
+                i128::from(*computed) - i128::from(*reference),
+                Some(*reference),
+                *computed,
+            )
+        })
+        .chain(
+            report
+                .extra
+                .iter()
+                .map(|(pool, computed)| (*pool, i128::from(*computed), None, *computed)),
+        )
+        .collect::<Vec<_>>();
+    mismatches.sort_by(|left, right| right.1.abs().cmp(&left.1.abs()));
+
+    for (pool, diff, reference, computed) in mismatches.into_iter().take(5) {
+        let breakdown = diagnostics.pools.get(&pool).copied().unwrap_or_default();
+        error!(
+            epoch = report.epoch,
+            pool = %pool,
+            reference = reference.unwrap_or_default(),
+            computed,
+            diff,
+            pool_utxo = breakdown.utxo,
+            pool_rewards = breakdown.rewards,
+            delegators = breakdown.delegators,
+            "SPDD diagnostic pool breakdown"
+        );
+
+        for (stake_address, utxo, rewards, registered) in state.top_pool_contributors(&pool, 5) {
+            error!(
+                epoch = report.epoch,
+                pool = %pool,
+                stake_address = %stake_address,
+                utxo,
+                rewards,
+                registered,
+                total = utxo + rewards,
+                "SPDD diagnostic top contributor"
+            );
+        }
+    }
+}
 
 // Subscriptions
 declare_cardano_reader!(
@@ -290,14 +350,19 @@ impl AccountsState {
             )?;
 
             if primary.should_restore_history() {
+                let restore_from = primary.restore_from_index();
+                runtime
+                    .stake_delta_replay_audit
+                    .begin(runtime.stake_address_undo_history.rollback_window(restore_from));
                 state.rollback_stake_addresses(
                     &mut runtime.stake_address_undo_history,
-                    primary.block_info().number,
+                    restore_from,
                 );
-                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+                state = history.lock().await.get_rolled_back_state(restore_from);
                 runtime.rewards.rollback_to(
                     primary.block_info(),
                     state.current_epoch_registration_changes(),
+                    state.rewards_stability_window_slot(),
                 );
             }
 
@@ -397,7 +462,11 @@ impl AccountsState {
                     }
 
                     let spdd = state.generate_spdd();
-                    verifier.verify_spdd(block_info, &spdd);
+                    if let Some(report) = verifier.verify_spdd(block_info, &spdd) {
+                        if !report.passed {
+                            log_spdd_failure_diagnostics(&state, &report);
+                        }
+                    }
                     ctx.handle(
                         "publish_spdd",
                         spo_publisher.publish_spdd(block_info, spdd).await,
@@ -572,12 +641,15 @@ impl AccountsState {
                         block = block_info.number
                     );
                     async {
+                        runtime.stake_delta_replay_audit.record(block_info.number, &deltas_msg);
                         state.handle_stake_deltas(&deltas_msg, &mut ctx, &mut stake_address_undo);
                     }
                     .instrument(span)
                     .await;
                 }
-                RollbackWrapper::Rollback(_) => {}
+                RollbackWrapper::Rollback((block_info, _)) => {
+                    runtime.stake_delta_replay_audit.record_rollback_marker(block_info.number);
+                }
             }
 
             match ctx.consume_sync(
@@ -690,10 +762,16 @@ impl AccountsState {
         }
 
         // History
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "AccountsState",
-            StateHistoryStore::default_block_store(),
-        )));
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
+
+        let history = Arc::new(Mutex::new(
+            StateHistory::<State>::new("accounts_state", StateHistoryStore::default_block_store())
+                .with_dump_index(dump_index)
+                .with_serializer(State::serialize_for_rollback_debug)
+                .with_summary(State::rollback_debug_summary)
+                .with_artifact_dumper(State::rollback_debug_dump_utxos)
+                .with_mismatch_reporter(State::rollback_debug_log_utxo_diffs),
+        ));
         let history_query = history.clone();
         let history_tick = history.clone();
 

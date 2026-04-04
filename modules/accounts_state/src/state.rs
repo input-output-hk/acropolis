@@ -1,7 +1,10 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::calculate_rewards;
-use crate::runtime::{BlockStakeAddressUndoRecorder, RewardRuntime, StakeAddressUndoHistory};
+use crate::runtime::{
+    BlockStakeAddressUndoRecorder, RewardRuntime, StakeAddressRollbackSummary,
+    StakeAddressUndoHistory,
+};
 use crate::verifier::Verifier;
 use acropolis_common::caryatid::ValidationContext;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
@@ -26,6 +29,7 @@ use acropolis_common::{
         utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
     },
     stake_addresses::{StakeAddressMap, StakeAddressState},
+    state_history::debug_fingerprint,
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
     InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
     PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind,
@@ -58,6 +62,27 @@ pub struct EpochSnapshots {
     pub go: Arc<EpochSnapshot>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StableEpochSnapshots {
+    mark: EpochSnapshot,
+    set: EpochSnapshot,
+    go: EpochSnapshot,
+}
+
+impl serde::Serialize for EpochSnapshots {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        StableEpochSnapshots {
+            mark: (*self.mark).clone(),
+            set: (*self.set).clone(),
+            go: (*self.go).clone(),
+        }
+        .serialize(serializer)
+    }
+}
+
 impl EpochSnapshots {
     /// Push a new snapshot
     pub fn push(&mut self, latest: EpochSnapshot) {
@@ -67,12 +92,26 @@ impl EpochSnapshots {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct PendingRewardsPlan {
     rewarded_epoch: u64,
     rewarded_era: Era,
     shelley_params: ShelleyParams,
     stake_rewards: Lovelace,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct SpddPoolBreakdown {
+    pub(crate) utxo: Lovelace,
+    pub(crate) rewards: Lovelace,
+    pub(crate) delegators: u64,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SpddDiagnostics {
+    pub(crate) total_utxo: Lovelace,
+    pub(crate) total_rewards: Lovelace,
+    pub(crate) pools: BTreeMap<PoolId, SpddPoolBreakdown>,
 }
 
 /// Overall state - stored per block
@@ -148,7 +187,292 @@ pub struct State {
     pending_mir_treasury: ImHashMap<StakeAddress, i64>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StableState {
+    spos: OrdMap<PoolId, PoolRegistration>,
+    retiring_spos: Vec<PoolId>,
+    stake_addresses: BTreeMap<StakeAddress, StakeAddressState>,
+    epoch_snapshots: StableEpochSnapshots,
+    pots: Pots,
+    dreps: OrdMap<DRepCredential, Lovelace>,
+    protocol_parameters: Option<ProtocolParams>,
+    previous_protocol_parameters: Option<ProtocolParams>,
+    pool_refunds: Vec<(PoolId, StakeAddress)>,
+    proposal_deposits: BTreeMap<StakeAddress, Lovelace>,
+    proposal_refunds: Vec<(StakeAddress, Lovelace)>,
+    current_epoch_registration_changes: Vec<RegistrationChange>,
+    pending_rewards_plan: Option<PendingRewardsPlan>,
+    drep_delegators: OrdMap<DRepCredential, OrdSet<StakeAddress>>,
+    stability_window_slot: u64,
+    pending_mir_reserves: BTreeMap<StakeAddress, i64>,
+    pending_mir_treasury: BTreeMap<StakeAddress, i64>,
+}
+
 impl State {
+    fn stable_stake_addresses(&self) -> BTreeMap<StakeAddress, StakeAddressState> {
+        self.stake_addresses
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(stake_address, state)| (stake_address.clone(), state.clone()))
+            .collect()
+    }
+
+    fn stable_state(&self) -> StableState {
+        let stake_addresses = self.stable_stake_addresses();
+        let proposal_deposits: BTreeMap<StakeAddress, Lovelace> = self
+            .proposal_deposits
+            .iter()
+            .map(|(stake_address, value)| (stake_address.clone(), *value))
+            .collect();
+        let pending_mir_reserves: BTreeMap<StakeAddress, i64> = self
+            .pending_mir_reserves
+            .iter()
+            .map(|(stake_address, value)| (stake_address.clone(), *value))
+            .collect();
+        let pending_mir_treasury: BTreeMap<StakeAddress, i64> = self
+            .pending_mir_treasury
+            .iter()
+            .map(|(stake_address, value)| (stake_address.clone(), *value))
+            .collect();
+
+        StableState {
+            spos: self.spos.clone(),
+            retiring_spos: self.retiring_spos.clone(),
+            stake_addresses,
+            epoch_snapshots: StableEpochSnapshots {
+                mark: (*self.epoch_snapshots.mark).clone(),
+                set: (*self.epoch_snapshots.set).clone(),
+                go: (*self.epoch_snapshots.go).clone(),
+            },
+            pots: self.pots.clone(),
+            dreps: self.dreps.clone(),
+            protocol_parameters: self.protocol_parameters.clone(),
+            previous_protocol_parameters: self.previous_protocol_parameters.clone(),
+            pool_refunds: self.pool_refunds.clone(),
+            proposal_deposits,
+            proposal_refunds: self.proposal_refunds.clone(),
+            current_epoch_registration_changes: self.current_epoch_registration_changes.clone(),
+            pending_rewards_plan: self.pending_rewards_plan.clone(),
+            drep_delegators: self.drep_delegators.clone(),
+            stability_window_slot: self.stability_window_slot,
+            pending_mir_reserves,
+            pending_mir_treasury,
+        }
+    }
+
+    pub fn serialize_for_rollback_debug(state: &Self) -> std::result::Result<Vec<u8>, String> {
+        bincode::serialize(&state.stable_state()).map_err(|e| e.to_string())
+    }
+
+    pub fn rollback_debug_summary(&self) -> String {
+        let stake_addresses = self.stable_stake_addresses();
+        let stake_registered: BTreeMap<StakeAddress, bool> = stake_addresses
+            .iter()
+            .map(|(stake_address, state)| (stake_address.clone(), state.registered))
+            .collect();
+        let stake_utxos: BTreeMap<StakeAddress, u64> = stake_addresses
+            .iter()
+            .map(|(stake_address, state)| (stake_address.clone(), state.utxo_value))
+            .collect();
+        let stake_rewards: BTreeMap<StakeAddress, u64> = stake_addresses
+            .iter()
+            .map(|(stake_address, state)| (stake_address.clone(), state.rewards))
+            .collect();
+        let stake_delegated_spos: BTreeMap<StakeAddress, Option<PoolId>> = stake_addresses
+            .iter()
+            .map(|(stake_address, state)| (stake_address.clone(), state.delegated_spo))
+            .collect();
+        let stake_delegated_dreps: BTreeMap<StakeAddress, Option<DRepChoice>> = stake_addresses
+            .iter()
+            .map(|(stake_address, state)| (stake_address.clone(), state.delegated_drep.clone()))
+            .collect();
+        let registered_count = stake_registered.values().filter(|registered| **registered).count();
+        let delegated_spo_count =
+            stake_delegated_spos.values().filter(|delegated_spo| delegated_spo.is_some()).count();
+        let delegated_drep_count = stake_delegated_dreps
+            .values()
+            .filter(|delegated_drep| delegated_drep.is_some())
+            .count();
+        let total_utxo: u128 = stake_utxos.values().map(|value| u128::from(*value)).sum::<u128>();
+        let total_rewards: u128 =
+            stake_rewards.values().map(|value| u128::from(*value)).sum::<u128>();
+        let proposal_deposits: BTreeMap<StakeAddress, Lovelace> = self
+            .proposal_deposits
+            .iter()
+            .map(|(stake_address, value)| (stake_address.clone(), *value))
+            .collect();
+        let pending_mir_reserves: BTreeMap<StakeAddress, i64> = self
+            .pending_mir_reserves
+            .iter()
+            .map(|(stake_address, value)| (stake_address.clone(), *value))
+            .collect();
+        let pending_mir_treasury: BTreeMap<StakeAddress, i64> = self
+            .pending_mir_treasury
+            .iter()
+            .map(|(stake_address, value)| (stake_address.clone(), *value))
+            .collect();
+
+        format!(
+            "spos_len={} spos={} retiring_spos_len={} retiring_spos={} stake_addresses_len={} stake_addresses={} stake_registered_count={} stake_registered={} stake_utxo_total={} stake_utxos={} stake_rewards_total={} stake_rewards={} delegated_spo_count={} delegated_spos={} delegated_drep_count={} delegated_dreps={} epoch_snapshots_mark_epoch={} epoch_snapshots_set_epoch={} epoch_snapshots_go_epoch={} epoch_snapshots={} pots={} dreps_len={} dreps={} protocol_parameters={} previous_protocol_parameters={} pool_refunds_len={} pool_refunds={} proposal_deposits_len={} proposal_deposits={} proposal_refunds_len={} proposal_refunds={} registration_changes_len={} registration_changes={} pending_rewards_plan={} drep_delegators_len={} drep_delegators={} stability_window_slot={} pending_mir_reserves_len={} pending_mir_reserves={} pending_mir_treasury_len={} pending_mir_treasury={}",
+            self.spos.len(),
+            debug_fingerprint(&self.spos),
+            self.retiring_spos.len(),
+            debug_fingerprint(&self.retiring_spos),
+            stake_addresses.len(),
+            debug_fingerprint(&stake_addresses),
+            registered_count,
+            debug_fingerprint(&stake_registered),
+            total_utxo,
+            debug_fingerprint(&stake_utxos),
+            total_rewards,
+            debug_fingerprint(&stake_rewards),
+            delegated_spo_count,
+            debug_fingerprint(&stake_delegated_spos),
+            delegated_drep_count,
+            debug_fingerprint(&stake_delegated_dreps),
+            self.epoch_snapshots.mark.epoch,
+            self.epoch_snapshots.set.epoch,
+            self.epoch_snapshots.go.epoch,
+            debug_fingerprint(&self.epoch_snapshots),
+            debug_fingerprint(&self.pots),
+            self.dreps.len(),
+            debug_fingerprint(&self.dreps),
+            debug_fingerprint(&self.protocol_parameters),
+            debug_fingerprint(&self.previous_protocol_parameters),
+            self.pool_refunds.len(),
+            debug_fingerprint(&self.pool_refunds),
+            proposal_deposits.len(),
+            debug_fingerprint(&proposal_deposits),
+            self.proposal_refunds.len(),
+            debug_fingerprint(&self.proposal_refunds),
+            self.current_epoch_registration_changes.len(),
+            debug_fingerprint(&self.current_epoch_registration_changes),
+            debug_fingerprint(&self.pending_rewards_plan),
+            self.drep_delegators.len(),
+            debug_fingerprint(&self.drep_delegators),
+            self.stability_window_slot,
+            pending_mir_reserves.len(),
+            debug_fingerprint(&pending_mir_reserves),
+            pending_mir_treasury.len(),
+            debug_fingerprint(&pending_mir_treasury),
+        )
+    }
+
+    fn rollback_debug_utxos_path(module: &str) -> String {
+        format!("{module}.stake_utxos")
+    }
+
+    pub fn rollback_debug_dump_utxos(module: &str, state: &Self) {
+        let stake_utxos: BTreeMap<StakeAddress, u64> = state
+            .stable_stake_addresses()
+            .into_iter()
+            .map(|(stake_address, account)| (stake_address, account.utxo_value))
+            .collect();
+        let utxo_bytes = match bincode::serialize(&stake_utxos) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                error!(module, "failed to encode rollback utxo baseline: {error}");
+                return;
+            }
+        };
+        if let Err(error) = std::fs::write(Self::rollback_debug_utxos_path(module), utxo_bytes) {
+            error!(module, "failed to write rollback utxo baseline: {error}");
+        }
+    }
+
+    pub fn rollback_debug_log_utxo_diffs(module: &str, current: &Self) {
+        let baseline_utxos: BTreeMap<StakeAddress, u64> =
+            match std::fs::read(Self::rollback_debug_utxos_path(module)) {
+                Ok(bytes) => match bincode::deserialize(&bytes) {
+                    Ok(utxos) => utxos,
+                    Err(error) => {
+                        error!(module, "failed to decode rollback utxo baseline: {error}");
+                        return;
+                    }
+                },
+                Err(error) => {
+                    error!(module, "failed to read rollback utxo baseline: {error}");
+                    return;
+                }
+            };
+        let current_utxos: BTreeMap<StakeAddress, u64> = current
+            .stable_stake_addresses()
+            .into_iter()
+            .map(|(stake_address, account)| (stake_address, account.utxo_value))
+            .collect();
+
+        let mut utxo_diffs = Vec::new();
+        let mut positive_delta_total = 0_i128;
+        let mut negative_delta_total = 0_i128;
+        let mut missing_from_current = 0_u64;
+        let mut missing_from_baseline = 0_u64;
+
+        for (stake_address, baseline_utxo) in &baseline_utxos {
+            match current_utxos.get(stake_address) {
+                Some(current_utxo) => {
+                    let delta = i128::from(*current_utxo) - i128::from(*baseline_utxo);
+                    if delta != 0 {
+                        if delta > 0 {
+                            positive_delta_total += delta;
+                        } else {
+                            negative_delta_total += delta;
+                        }
+                        utxo_diffs.push((
+                            stake_address.clone(),
+                            *baseline_utxo,
+                            *current_utxo,
+                            delta,
+                        ));
+                    }
+                }
+                None => {
+                    missing_from_current += 1;
+                    let delta = -i128::from(*baseline_utxo);
+                    negative_delta_total += delta;
+                    utxo_diffs.push((stake_address.clone(), *baseline_utxo, 0, delta));
+                }
+            }
+        }
+
+        for (stake_address, current_utxo) in &current_utxos {
+            if !baseline_utxos.contains_key(stake_address) {
+                missing_from_baseline += 1;
+                let delta = i128::from(*current_utxo);
+                positive_delta_total += delta;
+                utxo_diffs.push((stake_address.clone(), 0, *current_utxo, delta));
+            }
+        }
+
+        utxo_diffs.sort_by(|left, right| {
+            right.3.abs().cmp(&left.3.abs()).then_with(|| left.0.cmp(&right.0))
+        });
+
+        tracing::error!(
+            module,
+            differing_addresses = utxo_diffs.len(),
+            positive_delta_total,
+            negative_delta_total,
+            missing_from_current,
+            missing_from_baseline,
+            "rollback utxo diff summary"
+        );
+
+        for (rank, (stake_address, baseline_utxo, current_utxo, delta)) in
+            utxo_diffs.into_iter().take(20).enumerate()
+        {
+            tracing::error!(
+                module,
+                rank = rank + 1,
+                %stake_address,
+                baseline_utxo,
+                current_utxo,
+                delta,
+                "rollback utxo diff"
+            );
+        }
+    }
+
     fn wait_for_rewards_start_signal(
         start_rewards_rx: std::sync::mpsc::Receiver<()>,
     ) -> Result<()> {
@@ -346,13 +670,47 @@ impl State {
         &self.current_epoch_registration_changes
     }
 
+    pub(crate) fn rewards_stability_window_slot(&self) -> u64 {
+        self.stability_window_slot
+    }
+
     pub(crate) fn rollback_stake_addresses(
         &self,
         undo_history: &mut StakeAddressUndoHistory,
         index: u64,
-    ) {
+    ) -> Option<StakeAddressRollbackSummary> {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        undo_history.rollback_to(index, &mut stake_addresses);
+        let summary = undo_history.rollback_to(index, &mut stake_addresses);
+
+        if let Some(summary) = summary.as_ref() {
+            for (rank, (stake_address, rollback_utxo_effect)) in
+                summary.top_utxo_effects.iter().take(20).enumerate()
+            {
+                let current_state = stake_addresses.get(stake_address);
+                let current_utxo =
+                    current_state.as_ref().map(|state| state.utxo_value).unwrap_or_default();
+                let current_rewards =
+                    current_state.as_ref().map(|state| state.rewards).unwrap_or_default();
+                let current_registered =
+                    current_state.as_ref().map(|state| state.registered).unwrap_or(false);
+                let current_delegated_spo =
+                    current_state.as_ref().and_then(|state| state.delegated_spo);
+
+                info!(
+                    restore_from = summary.restore_from,
+                    rank = rank + 1,
+                    stake_address = %stake_address,
+                    rollback_utxo_effect,
+                    current_utxo,
+                    current_rewards,
+                    current_registered,
+                    current_delegated_spo = ?current_delegated_spo,
+                    "stake address post rollback state"
+                );
+            }
+        }
+
+        summary
     }
 
     /// Get the stake address state for a give stake key
@@ -1276,6 +1634,55 @@ impl State {
         stake_addresses.dump_spdd_state()
     }
 
+    pub(crate) fn spdd_diagnostics(&self) -> SpddDiagnostics {
+        let stake_addresses = self.stake_addresses.lock().unwrap();
+        let mut diagnostics = SpddDiagnostics::default();
+
+        for stake_address_state in stake_addresses.values() {
+            let Some(pool) = stake_address_state.delegated_spo else {
+                continue;
+            };
+
+            diagnostics.total_utxo += stake_address_state.utxo_value;
+            diagnostics.total_rewards += stake_address_state.rewards;
+
+            let entry = diagnostics.pools.entry(pool).or_default();
+            entry.utxo += stake_address_state.utxo_value;
+            entry.rewards += stake_address_state.rewards;
+            entry.delegators += 1;
+        }
+
+        diagnostics
+    }
+
+    pub(crate) fn top_pool_contributors(
+        &self,
+        pool: &PoolId,
+        limit: usize,
+    ) -> Vec<(StakeAddress, Lovelace, Lovelace, bool)> {
+        let stake_addresses = self.stake_addresses.lock().unwrap();
+        let mut contributors = stake_addresses
+            .iter()
+            .filter_map(|(stake_address, state)| {
+                (state.delegated_spo.as_ref() == Some(pool)).then_some((
+                    stake_address.clone(),
+                    state.utxo_value,
+                    state.rewards,
+                    state.registered,
+                ))
+            })
+            .collect::<Vec<_>>();
+
+        contributors.sort_by(|left, right| {
+            (right.1 + right.2)
+                .cmp(&(left.1 + left.2))
+                .then_with(|| right.2.cmp(&left.2))
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        contributors.truncate(limit);
+        contributors
+    }
+
     /// Derive the DRep Delegation Distribution (DRDD) - the total amount
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
     pub fn generate_drdd(&self) -> DRepDelegationDistribution {
@@ -2101,6 +2508,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::rewards::{RewardDetail, RewardsResult};
     use acropolis_common::crypto::{keyhash_224, keyhash_256};
     use acropolis_common::messages::BootstrapPotDeltas;
     use acropolis_common::queries::accounts::AccountsStateQueryResponse;
@@ -2190,6 +2598,50 @@ mod tests {
             "test_topic",
             "accounts_state",
         )
+    }
+
+    async fn apply_epoch_boundary_accounting(
+        state: &mut State,
+        rewards_runtime: &mut RewardRuntime,
+        verifier: &Verifier,
+        stake_address: &StakeAddress,
+        pool: PoolId,
+        undo: &mut BlockStakeAddressUndoRecorder,
+    ) {
+        state.pending_mir_reserves.insert(stake_address.clone(), 50);
+        rewards_runtime.set_epoch_rewards_task(tokio::spawn({
+            let reward_account = stake_address.clone();
+            async move {
+                Ok(RewardsResult {
+                    epoch: 0,
+                    total_paid: 30,
+                    total_unpaid: 0,
+                    rewards: BTreeMap::from([(
+                        pool,
+                        vec![RewardDetail {
+                            account: reward_account,
+                            rtype: RewardType::Member,
+                            amount: 30,
+                            pool,
+                            registered: true,
+                        }],
+                    )]),
+                    spo_rewards: vec![(
+                        pool,
+                        SPORewards {
+                            total_rewards: 30,
+                            operator_rewards: 0,
+                        },
+                    )],
+                })
+            }
+        }));
+
+        state
+            .complete_previous_epoch_rewards_calculation(verifier, false, rewards_runtime, undo)
+            .await
+            .unwrap();
+        state.apply_pending_mirs(undo);
     }
 
     #[test]
@@ -2848,5 +3300,157 @@ mod tests {
         let rolled_back_state = rolled_back.get_stake_state(&stake_address).unwrap();
         assert_eq!(rolled_back_state.utxo_value, 0);
         assert!(rolled_back_state.registered);
+    }
+
+    #[test]
+    fn rollback_messages_keep_the_target_block_state() {
+        let mut history =
+            StateHistory::<State>::new("AccountsState", StateHistoryStore::default_block_store());
+        let mut runtime = crate::runtime::AccountsRuntime::default();
+        let mut state = State::default();
+        let mut ctx = create_validation_context();
+        let stake_address = create_address(&STAKE_KEY_HASH);
+
+        let mut block_one_undo = BlockStakeAddressUndoRecorder::default();
+        state.register_stake_address(
+            &stake_address,
+            None,
+            0,
+            &mut ctx,
+            &mut runtime.rewards,
+            &mut block_one_undo,
+        );
+        history.commit(1, state.clone());
+        runtime.stake_address_undo_history.commit(1, block_one_undo);
+
+        let mut state = history.get_current_state();
+        let mut block_two_undo = BlockStakeAddressUndoRecorder::default();
+        state.handle_stake_deltas(
+            &StakeAddressDeltasMessage {
+                deltas: vec![StakeAddressDelta {
+                    stake_address: stake_address.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 42,
+                }],
+            },
+            &mut ctx,
+            &mut block_two_undo,
+        );
+        history.commit(2, state.clone());
+        runtime.stake_address_undo_history.commit(2, block_two_undo);
+
+        let mut state = history.get_current_state();
+        let mut block_three_undo = BlockStakeAddressUndoRecorder::default();
+        state.handle_stake_deltas(
+            &StakeAddressDeltasMessage {
+                deltas: vec![StakeAddressDelta {
+                    stake_address: stake_address.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 5,
+                }],
+            },
+            &mut ctx,
+            &mut block_three_undo,
+        );
+        history.commit(3, state.clone());
+        runtime.stake_address_undo_history.commit(3, block_three_undo);
+
+        let current = history.get_current_state();
+        assert_eq!(
+            current.get_stake_state(&stake_address).unwrap().utxo_value,
+            47
+        );
+
+        current.rollback_stake_addresses(&mut runtime.stake_address_undo_history, 3);
+        let rolled_back = history.get_rolled_back_state(3);
+        let rolled_back_state = rolled_back.get_stake_state(&stake_address).unwrap();
+        assert_eq!(rolled_back_state.utxo_value, 42);
+        assert!(rolled_back_state.registered);
+    }
+
+    #[tokio::test]
+    async fn rollback_replay_preserves_spdd_after_rewards_and_mirs() {
+        let mut history =
+            StateHistory::<State>::new("AccountsState", StateHistoryStore::default_block_store());
+        let mut runtime = crate::runtime::AccountsRuntime::default();
+        let mut state = State::default();
+        let mut ctx = create_validation_context();
+        let verifier = Verifier::new();
+        let stake_address = create_address(&STAKE_KEY_HASH);
+        let pool = test_keyhash(0x01).into();
+        state.pots.reserves = 1_000;
+
+        let mut block_one_undo = BlockStakeAddressUndoRecorder::default();
+        state.register_stake_address(
+            &stake_address,
+            None,
+            0,
+            &mut ctx,
+            &mut runtime.rewards,
+            &mut block_one_undo,
+        );
+        state.record_stake_delegation(&stake_address, &pool, &mut block_one_undo);
+        state.handle_stake_deltas(
+            &StakeAddressDeltasMessage {
+                deltas: vec![StakeAddressDelta {
+                    stake_address: stake_address.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 100,
+                }],
+            },
+            &mut ctx,
+            &mut block_one_undo,
+        );
+        history.commit(1, state.clone());
+        runtime.stake_address_undo_history.commit(1, block_one_undo);
+
+        let mut state = history.get_current_state();
+        let mut block_two_undo = BlockStakeAddressUndoRecorder::default();
+        apply_epoch_boundary_accounting(
+            &mut state,
+            &mut runtime.rewards,
+            &verifier,
+            &stake_address,
+            pool,
+            &mut block_two_undo,
+        )
+        .await;
+
+        let expected_spdd = state.generate_spdd();
+        let expected_account = state.get_stake_state(&stake_address).unwrap();
+        assert_eq!(expected_spdd.get(&pool).unwrap().active, 180);
+        assert_eq!(expected_account.utxo_value, 100);
+        assert_eq!(expected_account.rewards, 80);
+
+        history.commit(2, state.clone());
+        runtime.stake_address_undo_history.commit(2, block_two_undo);
+
+        let current = history.get_current_state();
+        current.rollback_stake_addresses(&mut runtime.stake_address_undo_history, 2);
+        let rolled_back = history.get_rolled_back_state(2);
+        let rolled_back_account = rolled_back.get_stake_state(&stake_address).unwrap();
+        assert_eq!(rolled_back_account.utxo_value, 100);
+        assert_eq!(rolled_back_account.rewards, 0);
+
+        let mut replayed = rolled_back;
+        let mut replay_undo = BlockStakeAddressUndoRecorder::default();
+        apply_epoch_boundary_accounting(
+            &mut replayed,
+            &mut runtime.rewards,
+            &verifier,
+            &stake_address,
+            pool,
+            &mut replay_undo,
+        )
+        .await;
+
+        assert_eq!(replayed.generate_spdd(), expected_spdd);
+        assert_eq!(
+            replayed.get_stake_state(&stake_address).unwrap(),
+            expected_account
+        );
     }
 }

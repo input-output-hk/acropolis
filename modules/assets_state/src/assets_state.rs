@@ -18,7 +18,10 @@ use acropolis_common::{
         assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
         errors::QueryError,
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{
+        serialize_with_bincode, summary_with_fingerprint, StateHistory, StateHistoryStore,
+        DEFAULT_DUMP_INDEX,
+    },
     BlockStatus,
 };
 use anyhow::{bail, Result};
@@ -110,7 +113,7 @@ impl AssetsState {
             let primary = PrimaryRead::from_read(asset_deltas_reader.read_with_rollbacks().await?);
 
             if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
-                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+                state = history.lock().await.get_rolled_back_state(primary.restore_from_index());
             }
 
             if let Some(deltas_msg) = primary.message() {
@@ -251,10 +254,13 @@ impl AssetsState {
         info!("Creating asset query handler on '{assets_query_topic}'");
 
         // Initialize state history
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "AssetsState",
-            StateHistoryStore::default_block_store(),
-        )));
+        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
+        let history = Arc::new(Mutex::new(
+            StateHistory::<State>::new("AssetsState", StateHistoryStore::default_block_store())
+                .with_dump_index(dump_index)
+                .with_serializer(serialize_with_bincode::<State>)
+                .with_summary(summary_with_fingerprint::<State>),
+        ));
         let address_state = if storage_config.store_addresses {
             Some(Arc::new(Mutex::new(AddressState::new())))
         } else {

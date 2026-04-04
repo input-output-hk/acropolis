@@ -14,11 +14,13 @@ acropolis_common = { path = "../../common" }
 caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
+bincode = "1"
 bigdecimal = "0.4.8"
 chrono = { workspace = true }
 config = { workspace = true }
 hex = { workspace = true }
 imbl = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 fjall = { workspace = true }

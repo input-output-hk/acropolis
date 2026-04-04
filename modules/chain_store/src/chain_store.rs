@@ -170,7 +170,7 @@ impl ChainStore {
 
                 if primary.is_rollback() {
                     let mut history = history.lock().await;
-                    state = history.get_rolled_back_state(primary.block_info().number);
+                    state = history.get_rolled_back_state(primary.restore_from_index());
                     store.rollback(primary.block_info())?;
                 }
 
