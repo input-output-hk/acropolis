@@ -5,9 +5,7 @@ use crate::validations;
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::messages::Message;
 use acropolis_common::protocol_params::ProtocolParams;
-use acropolis_common::state_history::{
-    serialize_with_bincode, summary_with_fingerprint, StateHistory, StateHistoryStore,
-};
+use acropolis_common::state_history::{StateHistory, StateHistoryStore};
 use acropolis_common::validation::ValidationError;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
@@ -138,7 +136,6 @@ impl State {
     pub fn new(
         immutable_utxo_store: Arc<dyn ImmutableUTXOStore>,
         address_delta_publish_mode: AddressDeltaPublishMode,
-        dump_index: Option<u64>,
     ) -> Self {
         Self {
             last_slot: 0,
@@ -147,10 +144,7 @@ impl State {
             reference_scripts_history: StateHistory::new(
                 "utxo_state.reference_scripts_history",
                 StateHistoryStore::default_block_store(),
-            )
-            .with_dump_index(dump_index)
-            .with_serializer(serialize_with_bincode::<ReferenceScriptsState>)
-            .with_summary(summary_with_fingerprint::<ReferenceScriptsState>),
+            ),
             volatile_created: VolatileIndex::new(),
             volatile_spent: VolatileIndex::new(),
             address_delta_observer: None,
@@ -160,10 +154,7 @@ impl State {
             protocol_parameters_history: StateHistory::new(
                 "utxo_state.protocol_parameters_history",
                 StateHistoryStore::default_block_store(),
-            )
-            .with_dump_index(dump_index)
-            .with_serializer(serialize_with_bincode::<ProtocolParams>)
-            .with_summary(summary_with_fingerprint::<ProtocolParams>),
+            ),
             avvm_cancelled_value: None,
             pointer_address_values: None,
             address_delta_publish_mode,
@@ -605,16 +596,6 @@ impl State {
                 if let Some(script_ref) = utxo.script_ref.as_ref() {
                     spent_reference_scripts.push(script_ref.script_hash);
                 }
-            } else {
-                error!(
-                    block_number = block.number,
-                    block_status = ?block.status,
-                    tx_identifier = %tx.tx_identifier,
-                    input = %input,
-                    produces = tx.produces.len(),
-                    consumes = tx.consumes.len(),
-                    "Valid transaction input UTxO not found while building compact address deltas"
-                );
             }
         }
 
@@ -689,16 +670,6 @@ impl State {
                 if let Some(script_ref) = utxo.script_ref.as_ref() {
                     spent_reference_scripts.push(script_ref.script_hash);
                 }
-            } else {
-                error!(
-                    block_number = block.number,
-                    block_status = ?block.status,
-                    tx_identifier = %tx.tx_identifier,
-                    input = %input,
-                    produces = tx.produces.len(),
-                    consumes = tx.consumes.len(),
-                    "Valid transaction input UTxO not found while building extended address deltas"
-                );
             }
         }
 
@@ -1036,11 +1007,7 @@ mod tests {
 
     fn new_state_with_mode(mode: AddressDeltaPublishMode) -> State {
         let config = Arc::new(Config::builder().build().unwrap());
-        State::new(
-            Arc::new(InMemoryImmutableUTXOStore::new(config)),
-            mode,
-            None,
-        )
+        State::new(Arc::new(InMemoryImmutableUTXOStore::new(config)), mode)
     }
 
     fn policy_id() -> PolicyId {

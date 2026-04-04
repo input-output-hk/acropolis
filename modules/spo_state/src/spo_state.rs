@@ -21,7 +21,7 @@ use acropolis_common::{
         PoolsStateQueryResponse, DEFAULT_POOLS_QUERY_TOPIC,
     },
     rational_number::RationalNumber,
-    state_history::{serialize_with_bincode, StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
+    state_history::{StateHistory, StateHistoryStore},
     Era, PoolId,
 };
 use anyhow::{bail, Result};
@@ -576,13 +576,10 @@ impl SPOState {
         let store_config = StoreConfig::from(config.clone());
 
         // Create history
-        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
-        let history = Arc::new(Mutex::new(
-            StateHistory::<State>::new("spo_state", StateHistoryStore::default_block_store())
-                .with_dump_index(dump_index)
-                .with_serializer(serialize_with_bincode::<State>)
-                .with_summary(State::rollback_debug_summary),
-        ));
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "spo_state",
+            StateHistoryStore::default_block_store(),
+        )));
         let history_spo_state = history.clone();
         let history_tick = history.clone();
 

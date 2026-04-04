@@ -16,7 +16,7 @@ use acropolis_common::{
         },
         errors::QueryError,
     },
-    state_history::{serialize_with_bincode, StateHistory, StateHistoryStore, DEFAULT_DUMP_INDEX},
+    state_history::{StateHistory, StateHistoryStore},
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -333,13 +333,10 @@ impl EpochsState {
         info!("Creating query handler on '{}'", epochs_query_topic);
 
         // state history
-        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
-        let history = Arc::new(Mutex::new(
-            StateHistory::<State>::new("epochs_state", StateHistoryStore::default_block_store())
-                .with_dump_index(dump_index)
-                .with_serializer(serialize_with_bincode::<State>)
-                .with_summary(State::rollback_debug_summary),
-        ));
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "epochs_state",
+            StateHistoryStore::default_block_store(),
+        )));
         let history_query = history.clone();
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up

@@ -17,10 +17,7 @@ use acropolis_common::{
             DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
         },
     },
-    state_history::{
-        serialize_with_bincode, summary_with_fingerprint, StateHistory, StateHistoryStore,
-        DEFAULT_DUMP_INDEX,
-    },
+    state_history::{StateHistory, StateHistoryStore},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -349,13 +346,10 @@ impl DRepState {
         info!("Creating DRep state publisher on '{validation_topic}'");
 
         // Initalize state history
-        let dump_index = config.get::<u64>(DEFAULT_DUMP_INDEX).ok();
-        let history = Arc::new(Mutex::new(
-            StateHistory::<State>::new("DRepState", StateHistoryStore::default_block_store())
-                .with_dump_index(dump_index)
-                .with_serializer(serialize_with_bincode::<State>)
-                .with_summary(summary_with_fingerprint::<State>),
-        ));
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "DRepState",
+            StateHistoryStore::default_block_store(),
+        )));
         let history_run = history.clone();
         let query_history = history.clone();
         let ticker_history = history.clone();

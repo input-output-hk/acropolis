@@ -1,5 +1,4 @@
 use crate::rewards::RewardsResult;
-use acropolis_common::messages::StakeAddressDeltasMessage;
 use acropolis_common::stake_addresses::{StakeAddressMap, StakeAddressState};
 use acropolis_common::{
     math::update_value_with_delta, params::SECURITY_PARAMETER_K, BlockInfo, DRepChoice, PoolId,
@@ -13,7 +12,6 @@ use tracing::{error, info};
 #[derive(Debug, Default)]
 pub(crate) struct AccountsRuntime {
     pub(crate) stake_address_undo_history: StakeAddressUndoHistory,
-    pub(crate) stake_delta_replay_audit: StakeDeltaReplayAudit,
     pub(crate) rewards: RewardRuntime,
 }
 
@@ -243,150 +241,6 @@ struct StakeAddressUndoEntry {
     reward_deltas: HashMap<StakeAddress, i64>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct StakeAddressRollbackWindow {
-    pub(crate) restore_from: u64,
-    pub(crate) replay_end: u64,
-}
-
-#[derive(Debug, Default, Clone)]
-pub(crate) struct StakeAddressRollbackSummary {
-    pub(crate) restore_from: u64,
-    pub(crate) entries: usize,
-    pub(crate) change_count: usize,
-    pub(crate) differing_addresses: usize,
-    pub(crate) oldest_entry_index: Option<u64>,
-    pub(crate) newest_entry_index: Option<u64>,
-    pub(crate) positive_utxo_effect_total: i128,
-    pub(crate) negative_utxo_effect_total: i128,
-    pub(crate) top_utxo_effects: Vec<(StakeAddress, i128)>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct StakeDeltaReplayAudit {
-    active_window: Option<StakeAddressRollbackWindow>,
-    replayed_deltas: HashMap<StakeAddress, i128>,
-}
-
-impl StakeDeltaReplayAudit {
-    pub(crate) fn begin(&mut self, window: Option<StakeAddressRollbackWindow>) {
-        if let Some(active_window) = self.active_window {
-            self.log_incomplete(active_window, None, "replaced by a newer rollback window");
-        }
-        self.active_window = window;
-        self.replayed_deltas.clear();
-    }
-
-    pub(crate) fn record(&mut self, block_number: u64, deltas_msg: &StakeAddressDeltasMessage) {
-        let Some(window) = self.active_window else {
-            return;
-        };
-
-        if block_number < window.restore_from {
-            return;
-        }
-
-        if block_number > window.replay_end {
-            self.log_incomplete(
-                window,
-                Some(block_number),
-                "stake delta replay skipped past the rollback window",
-            );
-            self.active_window = None;
-            self.replayed_deltas.clear();
-            return;
-        }
-
-        for delta in &deltas_msg.deltas {
-            *self.replayed_deltas.entry(delta.stake_address.clone()).or_default() +=
-                i128::from(delta.delta);
-        }
-
-        if block_number == window.replay_end {
-            self.log_summary(window);
-            self.active_window = None;
-            self.replayed_deltas.clear();
-        }
-    }
-
-    pub(crate) fn record_rollback_marker(&self, block_number: u64) {
-        let Some(window) = self.active_window else {
-            return;
-        };
-
-        if block_number < window.restore_from || block_number > window.replay_end {
-            return;
-        }
-
-        info!(
-            restore_from = window.restore_from,
-            replay_end = window.replay_end,
-            block_number,
-            "stake delta replay observed rollback marker"
-        );
-    }
-
-    fn log_summary(&self, window: StakeAddressRollbackWindow) {
-        let positive_replay_delta_total: i128 =
-            self.replayed_deltas.values().copied().filter(|delta| *delta > 0).sum();
-        let negative_replay_delta_total: i128 =
-            self.replayed_deltas.values().copied().filter(|delta| *delta < 0).sum();
-
-        info!(
-            restore_from = window.restore_from,
-            replay_end = window.replay_end,
-            differing_addresses = self.replayed_deltas.len(),
-            positive_replay_delta_total,
-            negative_replay_delta_total,
-            "stake delta replay summary"
-        );
-
-        let mut top_deltas: Vec<_> = self
-            .replayed_deltas
-            .iter()
-            .filter(|(_, delta)| **delta != 0)
-            .map(|(stake_address, delta)| (stake_address, *delta))
-            .collect();
-        top_deltas.sort_by(|(_, left), (_, right)| {
-            right.abs().cmp(&left.abs()).then_with(|| right.cmp(left))
-        });
-
-        for (rank, (stake_address, replayed_delta)) in top_deltas.into_iter().take(20).enumerate() {
-            info!(
-                restore_from = window.restore_from,
-                replay_end = window.replay_end,
-                rank = rank + 1,
-                stake_address = %stake_address,
-                replayed_delta,
-                "stake delta replay diff"
-            );
-        }
-    }
-
-    fn log_incomplete(
-        &self,
-        window: StakeAddressRollbackWindow,
-        observed_block_number: Option<u64>,
-        reason: &str,
-    ) {
-        let positive_replay_delta_total: i128 =
-            self.replayed_deltas.values().copied().filter(|delta| *delta > 0).sum();
-        let negative_replay_delta_total: i128 =
-            self.replayed_deltas.values().copied().filter(|delta| *delta < 0).sum();
-
-        error!(
-            restore_from = window.restore_from,
-            replay_end = window.replay_end,
-            observed_block_number,
-            differing_addresses = self.replayed_deltas.len(),
-            positive_replay_delta_total,
-            negative_replay_delta_total,
-            reason,
-            "stake delta replay audit did not complete"
-        );
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct StakeAddressUndoHistory {
     history: VecDeque<StakeAddressUndoEntry>,
@@ -404,109 +258,6 @@ impl StakeAddressUndoHistory {
         Self {
             history: VecDeque::new(),
             retention,
-        }
-    }
-
-    pub(crate) fn rollback_window(&self, index: u64) -> Option<StakeAddressRollbackWindow> {
-        let replay_end = self
-            .history
-            .iter()
-            .rev()
-            .find(|entry| entry.index >= index)
-            .map(|entry| entry.index)?;
-
-        Some(StakeAddressRollbackWindow {
-            restore_from: index,
-            replay_end,
-        })
-    }
-
-    fn build_rollback_summary(&self, index: u64) -> Option<StakeAddressRollbackSummary> {
-        let mut tracked_utxo_effects: HashMap<StakeAddress, i128> = HashMap::new();
-        let mut entries = 0usize;
-        let mut change_count = 0usize;
-        let mut oldest_entry_index = None;
-        let mut newest_entry_index = None;
-
-        for entry in self.history.iter().rev().take_while(|entry| entry.index >= index) {
-            entries += 1;
-            change_count += entry.changes.len();
-            newest_entry_index.get_or_insert(entry.index);
-            oldest_entry_index = Some(entry.index);
-
-            for (stake_address, change) in &entry.changes {
-                let rollback_utxo_effect = -(i128::from(change.inverse_utxo_delta));
-                if rollback_utxo_effect == 0 {
-                    continue;
-                }
-                *tracked_utxo_effects.entry(stake_address.clone()).or_default() +=
-                    rollback_utxo_effect;
-            }
-        }
-
-        if entries == 0 {
-            return None;
-        }
-
-        let positive_utxo_effect_total: i128 =
-            tracked_utxo_effects.values().copied().filter(|effect| *effect > 0).sum();
-        let negative_utxo_effect_total: i128 =
-            tracked_utxo_effects.values().copied().filter(|effect| *effect < 0).sum();
-
-        let mut top_utxo_effects: Vec<_> =
-            tracked_utxo_effects.into_iter().filter(|(_, effect)| *effect != 0).collect();
-        top_utxo_effects.sort_by(|(_, left), (_, right)| {
-            right.abs().cmp(&left.abs()).then_with(|| right.cmp(left))
-        });
-
-        Some(StakeAddressRollbackSummary {
-            restore_from: index,
-            entries,
-            change_count,
-            differing_addresses: top_utxo_effects.len(),
-            oldest_entry_index,
-            newest_entry_index,
-            positive_utxo_effect_total,
-            negative_utxo_effect_total,
-            top_utxo_effects,
-        })
-    }
-
-    fn log_rollback_summary(summary: &StakeAddressRollbackSummary) {
-        let StakeAddressRollbackSummary {
-            restore_from,
-            entries,
-            change_count,
-            differing_addresses,
-            oldest_entry_index,
-            newest_entry_index,
-            positive_utxo_effect_total,
-            negative_utxo_effect_total,
-            top_utxo_effects,
-        } = summary;
-
-        info!(
-            restore_from,
-            entries,
-            change_count,
-            differing_addresses,
-            oldest_entry_index,
-            newest_entry_index,
-            positive_utxo_effect_total,
-            negative_utxo_effect_total,
-            "stake address undo rollback summary"
-        );
-
-        for (rank, (stake_address, rollback_utxo_effect)) in
-            top_utxo_effects.iter().take(20).enumerate()
-        {
-            info!(
-                restore_from,
-                rank = rank + 1,
-                stake_address = %stake_address,
-                rollback_utxo_effect,
-                "stake address undo rollback diff"
-            );
         }
     }
 
@@ -530,16 +281,7 @@ impl StakeAddressUndoHistory {
         });
     }
 
-    pub(crate) fn rollback_to(
-        &mut self,
-        index: u64,
-        stake_addresses: &mut StakeAddressMap,
-    ) -> Option<StakeAddressRollbackSummary> {
-        let summary = self.build_rollback_summary(index);
-        if let Some(summary) = summary.as_ref() {
-            Self::log_rollback_summary(summary);
-        }
-
+    pub(crate) fn rollback_to(&mut self, index: u64, stake_addresses: &mut StakeAddressMap) {
         while let Some(entry) = self.history.back() {
             if entry.index >= index {
                 let entry = self.history.pop_back().expect("checked back above");
@@ -570,8 +312,6 @@ impl StakeAddressUndoHistory {
                 break;
             }
         }
-
-        summary
     }
 }
 

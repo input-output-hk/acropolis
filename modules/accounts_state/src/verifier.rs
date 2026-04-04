@@ -12,17 +12,6 @@ use itertools::{
 use std::{cmp::Ordering, collections::BTreeMap, fs::File};
 use tracing::{debug, error, info, warn};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpddVerificationReport {
-    pub epoch: u64,
-    pub passed: bool,
-    pub total_computed: Lovelace,
-    pub total_reference: Lovelace,
-    pub different: Vec<(PoolId, Lovelace, Lovelace)>,
-    pub extra: Vec<(PoolId, Lovelace)>,
-    pub missing: Vec<(PoolId, Lovelace)>,
-}
-
 /// Verifier
 pub struct Verifier {
     /// Map of pots values for every epoch
@@ -335,35 +324,26 @@ impl Verifier {
         Some(reference_spdd)
     }
 
-    pub fn verify_spdd(
-        &self,
-        blk: &BlockInfo,
-        spdd: &BTreeMap<PoolId, DelegatedStake>,
-    ) -> Option<SpddVerificationReport> {
+    pub fn verify_spdd(&self, blk: &BlockInfo, spdd: &BTreeMap<PoolId, DelegatedStake>) {
         let epoch = blk.epoch - 1;
         let Some(reference) = self.read_spdd(epoch) else {
             // No reference = no verification; silently exiting.
-            return None;
+            return;
         };
 
-        let report = Self::verify_spdd_impl(epoch, spdd, &reference);
-        if report.passed {
-            info!(
-                "Verification of SPDD, end of epoch {epoch}: OK, total active stake {}",
-                report.total_computed
-            );
+        let (outcome, total, _, _, _) = Self::verify_spdd_impl(epoch, spdd, &reference);
+        if outcome {
+            info!("Verification of SPDD, end of epoch {epoch}: OK, total active stake {total}");
         } else {
             error!("Verification of SPDD, end of epoch {epoch}: Failed");
         }
-
-        Some(report)
     }
 
     pub fn verify_spdd_impl(
         epoch: u64,
         spdd: &BTreeMap<PoolId, DelegatedStake>,
         reference: &BTreeMap<PoolId, Lovelace>,
-    ) -> SpddVerificationReport {
+    ) -> (bool, Lovelace, usize, usize, usize) {
         let mut different = Vec::new();
         let mut extra = Vec::new();
         let mut missing = Vec::new();
@@ -377,10 +357,10 @@ impl Verifier {
             total_computed += computed_stake.active;
             if let Some(ref_stake) = reference.get(pool) {
                 if *ref_stake != computed_stake.active {
-                    different.push((*pool, *ref_stake, computed_stake.active));
+                    different.push((pool, ref_stake, computed_stake.active));
                 }
             } else if computed_stake.active != 0 {
-                extra.push((*pool, computed_stake.active));
+                extra.push((pool, computed_stake.active));
             }
         }
 
@@ -390,7 +370,7 @@ impl Verifier {
         for (pool, ref_stake) in reference.iter() {
             total_reference += ref_stake;
             if *ref_stake != 0 && spdd.get(pool).is_none() {
-                missing.push((*pool, *ref_stake));
+                missing.push((pool, ref_stake));
             }
         }
 
@@ -401,15 +381,7 @@ impl Verifier {
             && extra.is_empty()
             && missing.is_empty()
         {
-            return SpddVerificationReport {
-                epoch,
-                passed: true,
-                total_computed,
-                total_reference,
-                different,
-                extra,
-                missing,
-            };
+            return (true, total_computed, 0, 0, 0);
         }
 
         // There are some errors, print them
@@ -433,15 +405,13 @@ impl Verifier {
             error!("SPDD verification epoch {epoch}, {p}: ref {e}, No comp");
         }
 
-        SpddVerificationReport {
-            epoch,
-            passed: false,
+        (
+            false,
             total_computed,
-            total_reference,
-            different,
-            extra,
-            missing,
-        }
+            different.len(),
+            extra.len(),
+            missing.len(),
+        )
     }
 }
 
@@ -488,12 +458,10 @@ mod tests {
             }
         }
 
-        let report = Verifier::verify_spdd_impl(0, &spdd, &reference);
-        assert!(!report.passed);
-        assert_eq!(report.total_computed, 18);
-        assert_eq!(report.different.len(), 4);
-        assert_eq!(report.extra.len(), 1);
-        assert_eq!(report.missing.len(), 1);
+        assert_eq!(
+            Verifier::verify_spdd_impl(0, &spdd, &reference),
+            (false, 18, 4, 1, 1)
+        );
     }
 
     #[test]
