@@ -168,10 +168,17 @@ impl ChainStore {
                     blocks_reader.read_with_rollbacks().await,
                 )?;
 
-                if primary.is_rollback() {
+                if primary.should_restore_history() {
+                    let restore_from = primary.restore_from_index();
                     let mut history = history.lock().await;
-                    state = history.get_rolled_back_state(primary.restore_from_index());
-                    store.rollback(primary.block_info())?;
+                    state = history.get_rolled_back_state(restore_from);
+
+                    // Keep the persisted store on the same rewind boundary as StateHistory.
+                    // Explicit rollback markers point at the last kept block, while replayed
+                    // RolledBack blocks replace the block at their own height.
+                    let mut rollback_from = primary.block_info().as_ref().clone();
+                    rollback_from.number = restore_from;
+                    store.rollback(&rollback_from)?;
                 }
 
                 if let Some(block) = primary.message() {
