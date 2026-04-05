@@ -102,7 +102,7 @@ impl TxUnpacker {
                 || (!primary.is_rollback()
                     && primary.block_info().status == BlockStatus::RolledBack)
             {
-                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+                state = history.lock().await.get_rolled_back_state(primary.restore_from_index());
             }
 
             let raw_message = primary

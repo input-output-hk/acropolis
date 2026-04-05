@@ -193,7 +193,7 @@ impl DRepState {
             )?;
 
             if primary.is_rollback() {
-                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+                state = history.lock().await.get_rolled_back_state(primary.restore_from_index());
 
                 let rollback_message = primary
                     .rollback_message()

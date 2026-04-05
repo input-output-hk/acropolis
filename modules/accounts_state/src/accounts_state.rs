@@ -43,8 +43,10 @@ use stake_reward_deltas_publisher::StakeRewardDeltasPublisher;
 use state::State;
 mod monetary;
 mod rewards;
+mod runtime;
 mod verifier;
 
+use runtime::{AccountsRuntime, BlockStakeAddressUndoRecorder};
 use verifier::Verifier;
 
 use crate::spo_distribution_store::{SPDDStore, SPDDStoreConfig};
@@ -268,6 +270,7 @@ impl AccountsState {
         // Track if this is the first epoch after snapshot bootstrap
         // We skip rewards calculation on the first epoch since pot deltas were already applied
         let mut skip_first_epoch_rewards = is_snapshot_mode;
+        let mut runtime = AccountsRuntime::default();
 
         // Main loop of synchronised messages
         loop {
@@ -276,6 +279,7 @@ impl AccountsState {
 
             // Get a mutable state
             let mut state = history.lock().await.get_current_state();
+            let mut stake_address_undo = BlockStakeAddressUndoRecorder::default();
 
             // Use certs_message as the synchroniser, but we have to handle it after the
             // epoch things, because they apply to the new epoch, not the last
@@ -285,9 +289,21 @@ impl AccountsState {
                 certs_reader.read_with_rollbacks().await,
             )?;
 
-            if primary.is_rollback() {
-                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            if primary.should_restore_history() {
+                let restore_from = primary.restore_from_index();
+                state.rollback_stake_addresses(
+                    &mut runtime.stake_address_undo_history,
+                    restore_from,
+                );
+                state = history.lock().await.get_rolled_back_state(restore_from);
+                runtime.rewards.rollback_to(
+                    primary.block_info(),
+                    state.current_epoch_registration_changes(),
+                    state.rewards_stability_window_slot(),
+                );
+            }
 
+            if primary.is_rollback() {
                 let rollback_message = primary
                     .rollback_message()
                     .cloned()
@@ -299,7 +315,7 @@ impl AccountsState {
                 stake_registration_updates_publisher.publish_message(rollback_message).await?;
             } else {
                 // Notify the state of the block (used to schedule reward calculations)
-                state.notify_block(primary.block_info());
+                state.notify_block(primary.block_info(), &mut runtime.rewards);
             }
 
             let epoch = primary.epoch();
@@ -330,6 +346,8 @@ impl AccountsState {
                         .complete_previous_epoch_rewards_calculation(
                             verifier,
                             skip_first_epoch_rewards,
+                            &mut runtime.rewards,
+                            &mut stake_address_undo,
                         )
                         .await
                     {
@@ -360,7 +378,7 @@ impl AccountsState {
                 if primary.message().is_some() {
                     let block_info = primary.block_info();
                     // Apply pending MIRs before generating SPDD so they're included in active stake
-                    state.apply_pending_mirs();
+                    state.apply_pending_mirs(&mut stake_address_undo);
 
                     // At the Conway hard fork, pointer addresses lose their staking
                     // functionality (Conway spec 9.1.2). Subtract accumulated pointer
@@ -371,7 +389,12 @@ impl AccountsState {
                     if block_info.is_new_era && block_info.era == Era::Conway && !is_snapshot_mode {
                         ctx.handle(
                             "remove_pointer_address_stake",
-                            state.remove_pointer_address_stake(context.clone()).await,
+                            state
+                                .remove_pointer_address_stake(
+                                    context.clone(),
+                                    &mut stake_address_undo,
+                                )
+                                .await,
                         );
                     }
 
@@ -427,6 +450,8 @@ impl AccountsState {
                                     &ea_msg,
                                     &block_info,
                                     verifier,
+                                    &mut runtime.rewards,
+                                    &mut stake_address_undo,
                                 )
                                 .await
                             {
@@ -473,7 +498,10 @@ impl AccountsState {
                         async {
                             ctx.handle(
                                 "handle_governance_outcomes",
-                                state.handle_governance_outcomes(&outcomes_msg),
+                                state.handle_governance_outcomes(
+                                    &outcomes_msg,
+                                    &mut stake_address_undo,
+                                ),
                             );
                         }
                         .instrument(span)
@@ -496,6 +524,8 @@ impl AccountsState {
                         block_info.epoch_slot,
                         block_info.era,
                         &mut ctx,
+                        &mut runtime.rewards,
+                        &mut stake_address_undo,
                     ) {
                         Ok(updates) => ctx.handle(
                             "stake_registration_updates_publisher.publish",
@@ -521,7 +551,11 @@ impl AccountsState {
                         block = block_info.number
                     );
                     async {
-                        state.handle_withdrawals(&withdrawals_msg, &mut ctx);
+                        state.handle_withdrawals(
+                            &withdrawals_msg,
+                            &mut ctx,
+                            &mut stake_address_undo,
+                        );
                     }
                     .instrument(span)
                     .await;
@@ -540,7 +574,7 @@ impl AccountsState {
                         block = block_info.number
                     );
                     async {
-                        state.handle_stake_deltas(&deltas_msg, &mut ctx);
+                        state.handle_stake_deltas(&deltas_msg, &mut ctx, &mut stake_address_undo);
                     }
                     .instrument(span)
                     .await;
@@ -567,6 +601,7 @@ impl AccountsState {
             // Commit the new state
             if primary.message().is_some() {
                 let block_info = primary.block_info();
+                runtime.stake_address_undo_history.commit(block_info.number, stake_address_undo);
                 history.lock().await.commit(block_info.number, state);
                 if primary.do_validation() {
                     ctx.publish().await;
