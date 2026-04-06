@@ -92,10 +92,10 @@ impl ToPlutusData for Address {
                 "Byron addresses not supported in Plutus script context".into(),
             )),
             Address::Stake(stake) => {
-                let state_cred = stake.to_plutus_data(arena, version)?;
+                let stake_cred = stake.to_plutus_data(arena, version)?;
                 match version {
-                    PlutusVersion::V1 | PlutusVersion::V2 => Ok(constr(arena, 0, vec![state_cred])),
-                    PlutusVersion::V3 => Ok(state_cred),
+                    PlutusVersion::V1 | PlutusVersion::V2 => Ok(constr(arena, 0, vec![stake_cred])),
+                    PlutusVersion::V3 => Ok(stake_cred),
                 }
             }
             Address::None => Err(ScriptContextError::UnsupportedAddress(
