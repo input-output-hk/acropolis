@@ -98,7 +98,7 @@ pub fn encode_script_ref<'a>(
     version: PlutusVersion,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     match version {
-        PlutusVersion::V1 => Ok(constr(arena, 1, vec![])), // Nothing (ignored in V1)
+        PlutusVersion::V1 => Err(ScriptContextError::UnsupportedReferenceScript),
         PlutusVersion::V2 | PlutusVersion::V3 => match script_ref {
             None => Ok(constr(arena, 1, vec![])),
             Some(sr) => {
