@@ -46,7 +46,7 @@ const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 
 /// State for rewards calculation
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct EpochSnapshots {
     /// Latest snapshot (epoch i)
     pub mark: Arc<EpochSnapshot>,
@@ -67,7 +67,7 @@ impl EpochSnapshots {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 struct PendingRewardsPlan {
     rewarded_epoch: u64,
     rewarded_era: Era,
@@ -76,7 +76,7 @@ struct PendingRewardsPlan {
 }
 
 /// Overall state - stored per block
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct State {
     /// Map of active SPOs by pool ID
     spos: OrdMap<PoolId, PoolRegistration>,
@@ -2885,8 +2885,11 @@ mod tests {
 
     #[test]
     fn state_history_and_undo_log_restore_stake_addresses_on_rollback() {
-        let mut history =
-            StateHistory::<State>::new("AccountsState", StateHistoryStore::default_block_store());
+        let mut history = StateHistory::<State>::new(
+            "AccountsState",
+            StateHistoryStore::default_block_store(),
+            &Config::default(),
+        );
         let mut runtime = crate::runtime::AccountsRuntime::default();
         let mut state = State::default();
         let mut ctx = create_validation_context();

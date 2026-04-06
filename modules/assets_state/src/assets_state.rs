@@ -254,6 +254,7 @@ impl AssetsState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AssetsState",
             StateHistoryStore::default_block_store(),
+            &config,
         )));
         let address_state = if storage_config.store_addresses {
             Some(Arc::new(Mutex::new(AddressState::new())))

@@ -305,6 +305,7 @@ impl BlockVrfValidator {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "block_vrf_validator",
             StateHistoryStore::default_block_store(),
+            &config,
         )));
 
         // Start run task

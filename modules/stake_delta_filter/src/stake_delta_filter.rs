@@ -81,7 +81,7 @@ mod utils;
 use state::{DeltaPublisher, State};
 use utils::{process_message, CacheMode, PointerCache, Tracker};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 struct StakeDeltaFilterParams {
     stake_address_delta_topic: String,
     validation_topic: String,
@@ -382,6 +382,7 @@ impl StakeDeltaFilter {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "stake_delta_filter",
             StateHistoryStore::default_block_store(),
+            &context.config,
         )));
         let history_tick = history.clone();
 

@@ -1,7 +1,7 @@
 use acropolis_common::{BlockNumber, Datum};
 use imbl::OrdMap;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 pub struct GovernanceState {
     /// Technical Committee datum mapped to the block number it was created
     pub technical_committee: OrdMap<BlockNumber, Datum>,

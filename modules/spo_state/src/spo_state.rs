@@ -579,6 +579,7 @@ impl SPOState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "spo_state",
             StateHistoryStore::default_block_store(),
+            &config,
         )));
         let history_spo_state = history.clone();
         let history_tick = history.clone();

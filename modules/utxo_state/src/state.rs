@@ -17,6 +17,7 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
+use config::Config;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
@@ -136,6 +137,7 @@ impl State {
     pub fn new(
         immutable_utxo_store: Arc<dyn ImmutableUTXOStore>,
         address_delta_publish_mode: AddressDeltaPublishMode,
+        config: &Config,
     ) -> Self {
         Self {
             last_slot: 0,
@@ -144,6 +146,7 @@ impl State {
             reference_scripts_history: StateHistory::new(
                 "utxo_state.reference_scripts_history",
                 StateHistoryStore::default_block_store(),
+                config,
             ),
             volatile_created: VolatileIndex::new(),
             volatile_spent: VolatileIndex::new(),
@@ -154,6 +157,7 @@ impl State {
             protocol_parameters_history: StateHistory::new(
                 "utxo_state.protocol_parameters_history",
                 StateHistoryStore::default_block_store(),
+                config,
             ),
             avvm_cancelled_value: None,
             pointer_address_values: None,
@@ -1010,7 +1014,11 @@ mod tests {
 
     fn new_state_with_mode(mode: AddressDeltaPublishMode) -> State {
         let config = Arc::new(Config::builder().build().unwrap());
-        State::new(Arc::new(InMemoryImmutableUTXOStore::new(config)), mode)
+        State::new(
+            Arc::new(InMemoryImmutableUTXOStore::new(config)),
+            mode,
+            &Config::default(),
+        )
     }
 
     fn policy_id() -> PolicyId {

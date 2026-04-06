@@ -2,7 +2,7 @@ use acropolis_common::{AssetName, PolicyId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
 pub struct AssetId(pub usize);
 
 impl AssetId {

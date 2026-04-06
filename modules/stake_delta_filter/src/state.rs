@@ -53,7 +53,7 @@ impl DeltaPublisher {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 pub struct State {
     pub pointer_cache: PointerCache,
 

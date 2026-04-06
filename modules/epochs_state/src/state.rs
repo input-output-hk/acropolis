@@ -14,7 +14,7 @@ use imbl::HashMap;
 use pallas::ledger::traverse::MultiEraHeader;
 use tracing::info;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct State {
     // block number
     block: u64,
@@ -328,6 +328,7 @@ mod tests {
         state_history::{StateHistory, StateHistoryStore},
         BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
     };
+    use config::Config;
     use tokio::sync::Mutex;
 
     fn make_block(epoch: u64) -> BlockInfo {
@@ -544,6 +545,7 @@ mod tests {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "epochs_state",
             StateHistoryStore::default_block_store(),
+            &Config::default(),
         )));
         let mut state = history.lock().await.get_current_state();
         let mut block = make_block(1);

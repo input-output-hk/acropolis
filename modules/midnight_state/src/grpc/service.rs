@@ -1048,7 +1048,11 @@ mod tests {
     where
         B: MessageBus<Message> + 'static,
     {
-        let mut history = StateHistory::new("midnight-state", StateHistoryStore::Unbounded);
+        let mut history = StateHistory::new(
+            "midnight-state",
+            StateHistoryStore::Unbounded,
+            &Config::default(),
+        );
         history.commit(block_number, state);
 
         let (_, startup_watch) = tokio::sync::watch::channel(true);
