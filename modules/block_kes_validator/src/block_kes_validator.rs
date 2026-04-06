@@ -20,6 +20,8 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::State;
+
+use crate::ouroboros::kes_validation::op_cert_counter_no_validation;
 mod ouroboros;
 
 const DEFAULT_VALIDATION_KES_PUBLISHER_TOPIC: (&str, &str) =
@@ -212,6 +214,10 @@ impl BlockKesValidator {
 
                     // Publish validation outcomes
                     ctx.publish().await;
+                } else if let Some((pool_id, updated_sequence_number)) =
+                    op_cert_counter_no_validation(&block_msg.header, &block_info)
+                {
+                    state.update_ocert_counter(pool_id, updated_sequence_number);
                 }
 
                 // Commit the new state
