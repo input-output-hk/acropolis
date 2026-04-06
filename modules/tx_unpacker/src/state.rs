@@ -6,7 +6,7 @@ use acropolis_codec::map_transaction;
 use acropolis_common::{
     messages::{ProtocolParamsMessage, RawTxsMessage},
     protocol_params::ProtocolParams,
-    script::{RedeemerTag, ScriptLang},
+    script::RedeemerTag,
     validation::{Phase2ValidationError, TransactionValidationError, ValidationError},
     BlockInfo, DRepScriptHash, GenesisDelegates, NetworkId, ScriptHash, Transaction, TxIdentifier,
     Voter,
@@ -147,12 +147,7 @@ impl State {
         );
 
         // Check if there are any Plutus scripts to validate
-        let has_plutus_scripts = tx.script_witnesses.iter().any(|(_, lang)| {
-            matches!(
-                lang,
-                ScriptLang::PlutusV1 | ScriptLang::PlutusV2 | ScriptLang::PlutusV3
-            )
-        });
+        let has_plutus_scripts = tx.script_witnesses.iter().any(|(_, lang)| lang.is_plutus());
 
         if !has_plutus_scripts {
             // No Plutus scripts to validate
