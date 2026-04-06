@@ -911,13 +911,12 @@ impl ConsensusRuntime {
 
             match message.as_ref() {
                 Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
-                    // Direct mode is pass-through only: do not request validation.
-                    let intent = if force_validation {
-                        BlockIntent::ValidateAndApply
+                    let block_info = if force_validation && self.do_validation {
+                        raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
                     } else {
-                        BlockIntent::Apply
+                        raw_blk_info.clone()
                     };
-                    let block_info = raw_blk_info.with_intent(intent);
+
                     let span = info_span!("consensus", block = block_info.number);
                     self.handle_block_available_direct(block_info, raw_block.clone())
                         .instrument(span)
