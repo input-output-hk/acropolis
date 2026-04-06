@@ -15,11 +15,16 @@ pub fn encode_withdrawals<'a>(
     arena: &'a Arena,
     version: PlutusVersion,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+    let sorted_withdrawals = {
+        let mut w = withdrawals.to_vec();
+        w.sort_by(|a, b| a.address.cmp(&b.address));
+        w
+    };
     match version {
         // V1: List of 2-tuples — `[(StakingCredential, Integer)]` uses
         // standard list-of-tuples ToData, producing List [Constr(0, [key, val])...]
         PlutusVersion::V1 => {
-            let tuples: Vec<_> = withdrawals
+            let tuples: Vec<_> = sorted_withdrawals
                 .iter()
                 .map(|w| {
                     let cred = w.address.credential.to_plutus_data(arena, version)?;
@@ -32,7 +37,7 @@ pub fn encode_withdrawals<'a>(
         }
         // V2: Map of (StakingHash(cred), amount)
         PlutusVersion::V2 => {
-            let pairs: Vec<_> = withdrawals
+            let pairs: Vec<_> = sorted_withdrawals
                 .iter()
                 .map(|w| {
                     let cred = w.address.credential.to_plutus_data(arena, version)?;
@@ -45,7 +50,7 @@ pub fn encode_withdrawals<'a>(
         }
         // V3: Map of (credential, amount) - bare credential, no StakingHash wrapper
         PlutusVersion::V3 => {
-            let pairs: Vec<_> = withdrawals
+            let pairs: Vec<_> = sorted_withdrawals
                 .iter()
                 .map(|w| {
                     let key = w.address.credential.to_plutus_data(arena, version)?;
