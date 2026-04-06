@@ -499,11 +499,8 @@ impl State {
         deltas: &UTXODeltasMessage,
     ) -> Result<()> {
         // get current reference scripts state
-        let mut current_reference_scripts_state = if block.status == BlockStatus::RolledBack {
-            self.reference_scripts_history.get_rolled_back_state(block.number)
-        } else {
-            self.reference_scripts_history.get_or_init_with(ReferenceScriptsState::default)
-        };
+        let mut current_reference_scripts_state =
+            self.reference_scripts_history.get_or_init_with(ReferenceScriptsState::default);
 
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
