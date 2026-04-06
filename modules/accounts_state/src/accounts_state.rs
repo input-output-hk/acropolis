@@ -289,21 +289,18 @@ impl AccountsState {
                 certs_reader.read_with_rollbacks().await,
             )?;
 
-            if primary.should_restore_history() {
-                let restore_from = primary.restore_from_index();
+            if primary.is_rollback() {
                 state.rollback_stake_addresses(
                     &mut runtime.stake_address_undo_history,
-                    restore_from,
+                    primary.block_info().number,
                 );
-                state = history.lock().await.get_rolled_back_state(restore_from);
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
                 runtime.rewards.rollback_to(
                     primary.block_info(),
                     state.current_epoch_registration_changes(),
                     state.rewards_stability_window_slot(),
                 );
-            }
 
-            if primary.is_rollback() {
                 let rollback_message = primary
                     .rollback_message()
                     .cloned()

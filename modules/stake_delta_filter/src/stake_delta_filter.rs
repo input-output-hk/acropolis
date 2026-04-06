@@ -462,7 +462,7 @@ impl StakeDeltaFilter {
                     .ok();
             } else if let Some(message) = primary.rollback_message() {
                 // Handle rollbacks on this topic only
-                state = history.lock().await.get_rolled_back_state(primary.restore_from_index());
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
 
                 // Publish rollbacks downstream
                 publisher.publish_message(message.clone()).await?;

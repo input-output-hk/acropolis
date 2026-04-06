@@ -110,7 +110,7 @@ impl AssetsState {
             let primary = PrimaryRead::from_read(asset_deltas_reader.read_with_rollbacks().await?);
 
             if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
-                state = history.lock().await.get_rolled_back_state(primary.restore_from_index());
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
             }
 
             if let Some(deltas_msg) = primary.message() {

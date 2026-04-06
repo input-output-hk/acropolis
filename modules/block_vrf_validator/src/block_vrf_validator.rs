@@ -199,7 +199,7 @@ impl BlockVrfValidator {
             )?;
 
             if primary.is_rollback() {
-                state = history.lock().await.get_rolled_back_state(primary.restore_from_index());
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
             }
 
             if primary.should_read_epoch_messages() {

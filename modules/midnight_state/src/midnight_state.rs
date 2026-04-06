@@ -78,7 +78,7 @@ impl MidnightState {
                 PrimaryRead::from_read(address_deltas_reader.read_with_rollbacks().await?);
 
             if primary.is_rollback() {
-                state = history.lock().await.get_rolled_back_state(primary.restore_from_index());
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
                 warn!(
                     block_number = primary.block_info().number,
                     block_hash = %primary.block_info().hash,

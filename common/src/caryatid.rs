@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::messages::{CardanoMessage, Message, StateTransitionMessage};
-use crate::types::{BlockInfo, BlockStatus};
+use crate::types::BlockInfo;
 use crate::validation::ValidationOutcomes;
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{Context, MessageBounds};
@@ -96,31 +96,6 @@ impl<T> PrimaryRead<T> {
 
     pub fn is_rollback(&self) -> bool {
         matches!(self, Self::Rollback { .. })
-    }
-
-    pub fn is_rolled_back_block(&self) -> bool {
-        matches!(
-            self,
-            Self::Normal { block_info, .. } if block_info.status == BlockStatus::RolledBack
-        )
-    }
-
-    pub fn should_restore_history(&self) -> bool {
-        self.is_rollback() || self.is_rolled_back_block()
-    }
-
-    /// Returns the first block index whose effects must be removed before this
-    /// message can be applied.
-    ///
-    /// Explicit rollback messages point at the last kept block, so restoration
-    /// must start at the following index. Replayed `RolledBack` blocks replace
-    /// the block at their own number.
-    pub fn restore_from_index(&self) -> u64 {
-        if self.is_rollback() {
-            self.block_info().number.saturating_add(1)
-        } else {
-            self.block_info().number
-        }
     }
 
     pub fn do_validation(&self) -> bool {
@@ -681,28 +656,5 @@ mod tests {
             block.number
         );
         assert_clean_validation(&mut ctx);
-    }
-
-    #[test]
-    fn rollback_messages_restore_from_following_index() {
-        let block = Arc::new(test_block(77));
-        let primary = PrimaryRead::<u8>::Rollback {
-            block_info: block.clone(),
-            rollback_message: rollback_message(block.as_ref()),
-        };
-
-        assert_eq!(primary.restore_from_index(), 78);
-    }
-
-    #[test]
-    fn replayed_rolled_back_blocks_restore_from_their_own_index() {
-        let mut block = test_block(77);
-        block.status = BlockStatus::RolledBack;
-        let primary = PrimaryRead::<u8>::Normal {
-            block_info: Arc::new(block),
-            message: Arc::new(1),
-        };
-
-        assert_eq!(primary.restore_from_index(), 77);
     }
 }
