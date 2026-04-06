@@ -171,13 +171,23 @@ impl ToPlutusData for VotingProcedures {
         arena: &'a Arena,
         version: PlutusVersion,
     ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-        let pairs: Vec<_> = self
-            .votes
+        let sorted_votes = {
+            let mut sorted = self.votes.iter().collect::<Vec<(_, _)>>();
+            sorted.sort_by(|(a, _), (b, _)| a.cmp(b)); // sort by voter
+            sorted
+                .iter()
+                .map(|(voter, single_votes)| {
+                    let mut votes = single_votes.voting_procedures.iter().collect::<Vec<(_, _)>>();
+                    votes.sort_by(|(a, _), (b, _)| a.cmp(b)); // sort inner map by gaid
+                    (*voter, votes)
+                })
+                .collect::<Vec<_>>()
+        };
+        let pairs: Vec<_> = sorted_votes
             .iter()
             .map(|(voter, single_votes)| {
                 let voter_pd = voter.to_plutus_data(arena, version)?;
                 let inner: Vec<_> = single_votes
-                    .voting_procedures
                     .iter()
                     .map(|(gaid, procedure)| {
                         let gaid_pd = gaid.to_plutus_data(arena, version)?;
