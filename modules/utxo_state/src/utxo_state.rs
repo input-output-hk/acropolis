@@ -136,11 +136,7 @@ impl UTXOState {
                 RollbackWrapper::Rollback((block_info, message)) => {
                     // Publish rollbacks downstream
                     let mut state = state.lock().await;
-                    state
-                        .handle_rollback(&block_info, message)
-                        .await
-                        .inspect_err(|e| error!("Rollback handling error: {e}"))
-                        .ok();
+                    state.handle_rollback(&block_info, message).await;
 
                     None
                 }

@@ -325,7 +325,7 @@ impl State {
         Ok(self.pointer_address_values.as_ref().unwrap())
     }
 
-    fn rollback_volatile_from(&mut self, restore_from: u64) {
+    fn rollback_volatile_to(&mut self, restore_from: u64) {
         // Delete all UTXOs created in or after the rollback boundary.
         for key in self.volatile_created.prune_on_or_after(restore_from) {
             self.volatile_utxos.remove(&key);
@@ -342,17 +342,6 @@ impl State {
 
     /// Observe a block for statistics and handle rollbacks
     pub async fn observe_block(&mut self, block: &BlockInfo) -> Result<()> {
-        if block.status == BlockStatus::RolledBack {
-            info!(
-                slot = block.slot,
-                number = block.number,
-                "Rollback received"
-            );
-
-            // Replayed `RolledBack` blocks replace the block at their own number.
-            self.rollback_volatile_from(block.number);
-        }
-
         self.last_slot = block.slot;
         self.last_number = block.number;
 
@@ -851,17 +840,12 @@ impl State {
         Ok(spent_reference_scripts)
     }
 
-    pub async fn handle_rollback(
-        &mut self,
-        block_info: &BlockInfo,
-        message: Arc<Message>,
-    ) -> Result<()> {
-        // Explicit rollback markers point at the last kept block, so restoration
-        // starts at the following index.
-        let restore_from = block_info.number.saturating_add(1);
-        self.rollback_volatile_from(restore_from);
-        self.reference_scripts_history.get_rolled_back_state(restore_from);
-        self.protocol_parameters_history.get_rolled_back_state(restore_from);
+    pub async fn handle_rollback(&mut self, block_info: &BlockInfo, message: Arc<Message>) {
+        // Rollback BlockInfo identifies the next block to be receieved so remove the number inclusively
+        let rollback_to = block_info.number;
+        self.rollback_volatile_to(rollback_to);
+        self.reference_scripts_history.get_rolled_back_state(rollback_to);
+        self.protocol_parameters_history.get_rolled_back_state(rollback_to);
         self.last_slot = block_info.slot;
         self.last_number = block_info.number;
 
@@ -871,7 +855,6 @@ impl State {
         if let Some(observer) = self.block_totals_observer.as_mut() {
             observer.rollback(message).await;
         }
-        Ok(())
     }
 
     fn spending_tx_hash(tx: &TxUTxODeltas) -> Option<TxHash> {
@@ -1194,7 +1177,7 @@ mod tests {
         assert_eq!(1, state.count_valid_utxos().await);
 
         let block9 = create_block(BlockStatus::RolledBack, 9, 9);
-        state.observe_block(&block9).await.unwrap();
+        state.handle_rollback(&block9, Arc::new(Message::None)).await;
 
         assert_eq!(0, state.volatile_utxos.len());
         assert_eq!(0, state.count_valid_utxos().await);
@@ -1245,7 +1228,7 @@ mod tests {
 
         // Roll back to 11
         let block11_2 = create_block(BlockStatus::RolledBack, 11, 11);
-        state.observe_block(&block11_2).await.unwrap();
+        state.handle_rollback(&block11_2, Arc::new(Message::None)).await;
 
         // Should be reinstated
         assert_eq!(1, state.volatile_utxos.len());
@@ -1282,8 +1265,8 @@ mod tests {
         assert!(state.lookup_utxo(&output_10.utxo_identifier).await.unwrap().is_some());
         assert!(state.lookup_utxo(&output_11.utxo_identifier).await.unwrap().is_some());
 
-        let rollback_to_10 = create_block(BlockStatus::RolledBack, 10, 10);
-        state.handle_rollback(&rollback_to_10, Arc::new(Message::None)).await.unwrap();
+        let rollback_to_11 = create_block(BlockStatus::RolledBack, 11, 11);
+        state.handle_rollback(&rollback_to_11, Arc::new(Message::None)).await;
 
         assert!(state.lookup_utxo(&output_10.utxo_identifier).await.unwrap().is_some());
         assert!(state.lookup_utxo(&output_11.utxo_identifier).await.unwrap().is_none());
@@ -1311,8 +1294,8 @@ mod tests {
         state.observe_input(&output.utxo_identifier, &block11).await.unwrap();
         assert_eq!(0, state.count_valid_utxos().await);
 
-        let rollback_to_10 = create_block(BlockStatus::RolledBack, 10, 10);
-        state.handle_rollback(&rollback_to_10, Arc::new(Message::None)).await.unwrap();
+        let rollback_to_11 = create_block(BlockStatus::RolledBack, 11, 11);
+        state.handle_rollback(&rollback_to_11, Arc::new(Message::None)).await;
 
         assert!(state.lookup_utxo(&output.utxo_identifier).await.unwrap().is_some());
         assert_eq!(1, state.count_valid_utxos().await);
@@ -1340,8 +1323,8 @@ mod tests {
         state.observe_input(&output.utxo_identifier, &block11).await.unwrap();
         assert_eq!(0, state.count_valid_utxos().await);
 
-        let rollback_to_10 = create_block(BlockStatus::RolledBack, 10, 10);
-        state.handle_rollback(&rollback_to_10, Arc::new(Message::None)).await.unwrap();
+        let rollback_to_11 = create_block(BlockStatus::RolledBack, 11, 11);
+        state.handle_rollback(&rollback_to_11, Arc::new(Message::None)).await;
 
         assert!(state.lookup_utxo(&output.utxo_identifier).await.unwrap().is_some());
         assert_eq!(1, state.count_valid_utxos().await);
@@ -1380,8 +1363,8 @@ mod tests {
             state.lookup_reference_script(&v1_script.compute_hash())
         );
 
-        let rollback1 = create_block(BlockStatus::RolledBack, 1, 1);
-        state.handle_rollback(&rollback1, Arc::new(Message::None)).await.unwrap();
+        let rollback2 = create_block(BlockStatus::RolledBack, 2, 2);
+        state.handle_rollback(&rollback2, Arc::new(Message::None)).await;
 
         let output = TxOutput {
             utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
