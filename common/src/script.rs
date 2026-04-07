@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     crypto::{keyhash_224, keyhash_224_tagged},
     hash::Hash,
-    AddrKeyhash, ExUnits, KeyHash, NativeAssetsDelta, ProposalProcedure, ScriptHash,
+    AddrKeyhash, ExUnits, KeyHash, NativeAssetsDelta, PolicyId, ProposalProcedure, ScriptHash,
     ShelleyAddressPaymentPart, StakeCredential, TxCertificateWithPos, UTXOValue, UTxOIdentifier,
-    VotingProcedures, Withdrawal,
+    Voter, VotingProcedures, Withdrawal,
 };
 
 pub type ScriptIntegrityHash = Hash<32>;
@@ -275,14 +275,16 @@ impl Datum {
     Debug,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Clone,
     Hash,
 )]
 pub enum RedeemerTag {
     #[n(0)]
-    Spend,
-    #[n(1)]
     Mint,
+    #[n(1)]
+    Spend,
     #[n(2)]
     Cert,
     #[n(3)]
@@ -339,6 +341,16 @@ pub struct RedeemerPointer {
     pub tag: RedeemerTag,
     #[n(1)]
     pub index: u32,
+}
+
+#[derive(Debug)]
+pub enum ScriptPurpose {
+    Spending(UTxOIdentifier),
+    Minting(PolicyId),
+    Rewarding(StakeCredential),
+    Certifying(TxCertificateWithPos),
+    Voting(Voter),
+    Proposing(usize, ProposalProcedure),
 }
 
 /// Get Scripts needed from UTxOs being spend
