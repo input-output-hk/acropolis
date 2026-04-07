@@ -937,7 +937,7 @@ struct AddressTxMapExtended {
 
 // -- Tests --
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
@@ -979,7 +979,7 @@ mod tests {
         }
     }
 
-    fn new_state() -> State {
+    pub fn new_state() -> State {
         new_state_with_mode(AddressDeltaPublishMode::Compact)
     }
 
