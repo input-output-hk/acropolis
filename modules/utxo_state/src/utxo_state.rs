@@ -48,7 +48,7 @@ use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
 use crate::reference_scripts_state::ReferenceScriptsState;
 mod utils;
-mod validations;
+pub mod validations;
 
 declare_cardano_reader!(
     UTxODeltasReader,
