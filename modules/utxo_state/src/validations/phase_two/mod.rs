@@ -2,6 +2,7 @@
 
 mod address;
 mod cert;
+mod evaluate;
 mod governance;
 mod input;
 mod script_context;

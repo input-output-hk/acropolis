@@ -4,8 +4,8 @@ use acropolis_common::{
     protocol_params::{
         AlonzoParams, BabbageParams, ByronParams, ConwayParams, ProtocolParams, ShelleyParams,
     },
-    Address, AssetName, Datum, DatumHash, Era, NativeAsset, PolicyId, ReferenceScript, ScriptHash,
-    ScriptRef, TxHash, UTXOValue, UTxOIdentifier, Value,
+    Address, AssetName, Datum, DatumHash, Era, NativeAsset, PlutusVersion, PolicyId,
+    ReferenceScript, ScriptHash, ScriptLang, ScriptRef, TxHash, UTXOValue, UTxOIdentifier, Value,
 };
 use pallas::ledger::traverse::Era as PallasEra;
 
@@ -16,7 +16,38 @@ pub struct UTxOValueJson {
     pub value: Value,
     #[serde(default, deserialize_with = "deserialize_datum")]
     pub datum: Option<Datum>,
+    #[serde(default, deserialize_with = "deserialize_script_ref")]
     pub script_ref: Option<ScriptRef>,
+}
+
+fn deserialize_script_ref<'de, D>(deserializer: D) -> Result<Option<ScriptRef>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+
+    #[derive(serde::Deserialize)]
+    struct RawScriptRef {
+        script_hash: ScriptHash,
+        script_lang: String,
+    }
+
+    let Some(raw) = Option::<RawScriptRef>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+
+    let script_lang = match raw.script_lang.as_str() {
+        "Native" => ScriptLang::Native,
+        "PlutusV1" => ScriptLang::Plutus(PlutusVersion::V1),
+        "PlutusV2" => ScriptLang::Plutus(PlutusVersion::V2),
+        "PlutusV3" => ScriptLang::Plutus(PlutusVersion::V3),
+        other => panic!("unknown script_lang: {other}"),
+    };
+
+    Ok(Some(ScriptRef {
+        script_hash: raw.script_hash,
+        script_lang,
+    }))
 }
 
 fn deserialize_value<'de, D>(deserializer: D) -> Result<Value, D::Error>

@@ -147,7 +147,8 @@ impl State {
         );
 
         // Check if there are any Plutus scripts to validate
-        let has_plutus_scripts = tx.script_witnesses.iter().any(|(_, lang)| lang.is_plutus());
+        let has_plutus_scripts =
+            tx.script_witnesses.iter().any(|(_, lang)| lang.get_script_lang().is_plutus());
 
         if !has_plutus_scripts {
             // No Plutus scripts to validate
