@@ -3,6 +3,7 @@ use crate::address_delta_mode::AddressDeltaPublishMode;
 use crate::reference_scripts_state::ReferenceScriptsState;
 use crate::validations;
 use crate::volatile_index::VolatileIndex;
+use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::messages::Message;
 use acropolis_common::protocol_params::ProtocolParams;
 use acropolis_common::state_history::{StateHistory, StateHistoryStore};
@@ -878,6 +879,7 @@ impl State {
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
         protocol_params: &ProtocolParams,
+        genesis_values: &GenesisValues,
     ) -> Result<(), Box<ValidationError>> {
         let mut bad_transactions = Vec::new();
         let deltas = &deltas_msg.deltas;
@@ -887,6 +889,7 @@ impl State {
             deltas.iter().flat_map(|tx_deltas| tx_deltas.consumes.iter()).collect::<Vec<_>>();
         all_inputs.extend(deltas.iter().flat_map(|tx_deltas| tx_deltas.reference_inputs.iter()));
         let mut utxos = self.collect_utxos(&all_inputs).await;
+        let cost_models = protocol_params.cost_models();
 
         for tx_deltas in deltas.iter() {
             if block.status != BlockStatus::Bootstrap {
@@ -896,6 +899,9 @@ impl State {
                     stake_registration_updates,
                     &utxos,
                     protocol_params,
+                    genesis_values,
+                    &cost_models,
+                    &|script_hash| self.lookup_reference_script(script_hash),
                     block.era,
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));

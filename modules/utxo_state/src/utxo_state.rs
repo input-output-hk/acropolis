@@ -6,9 +6,10 @@ use acropolis_common::{
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
-        CardanoMessage, Message, PoolRegistrationUpdatesMessage, ProtocolParamsMessage,
-        SnapshotMessage, SnapshotStateMessage, StakeRegistrationUpdatesMessage, StateQuery,
-        StateQueryResponse, StateTransitionMessage, UTXODeltasMessage,
+        CardanoMessage, GenesisCompleteMessage, Message, PoolRegistrationUpdatesMessage,
+        ProtocolParamsMessage, SnapshotMessage, SnapshotStateMessage,
+        StakeRegistrationUpdatesMessage, StateQuery, StateQueryResponse, StateTransitionMessage,
+        UTXODeltasMessage,
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
 };
@@ -50,6 +51,13 @@ use crate::reference_scripts_state::ReferenceScriptsState;
 mod utils;
 mod validations;
 
+declare_cardano_reader!(
+    GenesisCompleteReader,
+    "bootstrapped-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+    GenesisComplete,
+    GenesisCompleteMessage
+);
 declare_cardano_reader!(
     UTxODeltasReader,
     "utxo-deltas-subscribe-topic",
@@ -115,6 +123,7 @@ impl UTXOState {
     async fn run(
         context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,
+        mut bootstrapped_reader: GenesisCompleteReader,
         mut utxo_deltas_reader: UTxODeltasReader,
         mut params_reader: ParamsReader,
         mut pool_updates_reader: Option<PoolUpdatesReader>,
@@ -122,6 +131,19 @@ impl UTXOState {
         publish_tx_validation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
+        let genesis_values = match bootstrapped_reader.read_with_rollbacks().await? {
+            RollbackWrapper::Normal((block_info, genesis_complete)) => {
+                info!(
+                    "Received genesis complete message at block {}",
+                    block_info.number
+                );
+                genesis_complete.values.clone()
+            }
+            _ => {
+                bail!("Failed to read genesis complete message");
+            }
+        };
+
         let mut bootstrap_block_processed = false;
 
         loop {
@@ -209,6 +231,7 @@ impl UTXOState {
                                     &pool_registration_updates,
                                     &stake_registration_updates,
                                     &current_protocol_params,
+                                    &genesis_values,
                                 )
                                 .await
                                 .map_err(|e| e.into()),
@@ -262,6 +285,7 @@ impl UTXOState {
         }
 
         // Subscribers
+        let bootstrapped_reader = GenesisCompleteReader::new(&context, &config).await?;
         let pool_updates_reader = if pool_registration_updates_subscribe_topic.is_some() {
             Some(PoolUpdatesReader::new(&context, &config).await?)
         } else {
@@ -330,6 +354,7 @@ impl UTXOState {
             Self::run(
                 context_run,
                 state_run,
+                bootstrapped_reader,
                 utxo_deltas_reader,
                 params_reader,
                 pool_updates_reader,
