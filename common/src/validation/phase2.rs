@@ -38,17 +38,20 @@ pub enum ScriptContextError {
     #[error("missing script for redeemer: {0:?}")]
     MissingScript(RedeemerPointer),
 
-    #[error("unsupported address type: {0}")]
-    UnsupportedAddress(String),
-
     #[error("missing validation data: {0}")]
     MissingValidationData(String),
+
+    #[error("CBOR decode failed: {0}")]
+    CborDecodeFailed(String),
+
+    #[error("unsupported address type: {0}")]
+    UnsupportedAddress(String),
 
     #[error("unsupported certificate type for Plutus version")]
     UnsupportedCertificate,
 
-    #[error("CBOR decode failed: {0}")]
-    CborDecodeFailed(String),
+    #[error("unsupported reference script for Plutus v1")]
+    UnsupportedReferenceScript,
 
     #[error("Unsupported Script Purpose for Plutus version V1 or V2")]
     UnsupportedScriptPurpose,
