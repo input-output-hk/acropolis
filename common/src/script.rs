@@ -12,18 +12,41 @@ pub type ScriptIntegrityHash = Hash<32>;
 pub type DatumHash = Hash<32>;
 
 #[derive(
+    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+pub enum PlutusVersion {
+    V1,
+    V2,
+    V3,
+}
+
+#[derive(
     Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub enum ScriptLang {
     Native,
-    PlutusV1,
-    PlutusV2,
-    PlutusV3,
+    Plutus(PlutusVersion),
 }
 
 impl ScriptLang {
     pub fn is_native(&self) -> bool {
         matches!(self, ScriptLang::Native)
+    }
+
+    pub fn is_plutus(&self) -> bool {
+        matches!(self, ScriptLang::Plutus(_))
+    }
+
+    pub fn plutus_v1() -> Self {
+        ScriptLang::Plutus(PlutusVersion::V1)
+    }
+
+    pub fn plutus_v2() -> Self {
+        ScriptLang::Plutus(PlutusVersion::V2)
+    }
+
+    pub fn plutus_v3() -> Self {
+        ScriptLang::Plutus(PlutusVersion::V3)
     }
 }
 
@@ -31,13 +54,6 @@ impl ScriptLang {
 pub struct ScriptRef {
     pub script_hash: ScriptHash,
     pub script_lang: ScriptLang,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub enum PlutusVersion {
-    PlutusV1,
-    PlutusV2,
-    PlutusV3,
 }
 
 // The full CBOR bytes of a reference script
@@ -62,9 +78,9 @@ impl ReferenceScript {
     pub fn get_script_lang(&self) -> ScriptLang {
         match self {
             ReferenceScript::Native(_) => ScriptLang::Native,
-            ReferenceScript::PlutusV1(_) => ScriptLang::PlutusV1,
-            ReferenceScript::PlutusV2(_) => ScriptLang::PlutusV2,
-            ReferenceScript::PlutusV3(_) => ScriptLang::PlutusV3,
+            ReferenceScript::PlutusV1(_) => ScriptLang::Plutus(PlutusVersion::V1),
+            ReferenceScript::PlutusV2(_) => ScriptLang::Plutus(PlutusVersion::V2),
+            ReferenceScript::PlutusV3(_) => ScriptLang::Plutus(PlutusVersion::V3),
         }
     }
 

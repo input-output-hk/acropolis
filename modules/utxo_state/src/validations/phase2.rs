@@ -36,7 +36,10 @@ use std::mem::ManuallyDrop;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use acropolis_common::{DatumHash, PolicyId, ScriptHash, StakeAddress, UTxOIdentifier, Voter};
+use acropolis_common::{
+    DatumHash, PlutusVersion as CommonPlutusVersion, PolicyId, ScriptHash, ScriptLang,
+    StakeAddress, UTxOIdentifier, Voter,
+};
 use rayon::prelude::*;
 use rayon::ThreadPool;
 use thiserror::Error;
@@ -882,14 +885,12 @@ pub fn validate_transaction_phase2(
 /// Convert from acropolis_common ScriptLang to uplc PlutusVersion.
 ///
 /// Returns None for native scripts (which don't need Phase 2 validation).
-pub fn script_lang_to_plutus_version(
-    script_lang: &acropolis_common::script::ScriptLang,
-) -> Option<PlutusVersion> {
+pub fn script_lang_to_plutus_version(script_lang: &ScriptLang) -> Option<PlutusVersion> {
     match script_lang {
-        acropolis_common::script::ScriptLang::PlutusV1 => Some(PlutusVersion::V1),
-        acropolis_common::script::ScriptLang::PlutusV2 => Some(PlutusVersion::V2),
-        acropolis_common::script::ScriptLang::PlutusV3 => Some(PlutusVersion::V3),
-        acropolis_common::script::ScriptLang::Native => None,
+        ScriptLang::Plutus(CommonPlutusVersion::V1) => Some(PlutusVersion::V1),
+        ScriptLang::Plutus(CommonPlutusVersion::V2) => Some(PlutusVersion::V2),
+        ScriptLang::Plutus(CommonPlutusVersion::V3) => Some(PlutusVersion::V3),
+        ScriptLang::Native => None,
     }
 }
 
