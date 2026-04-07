@@ -1441,6 +1441,10 @@ mod tests {
                 script_lang: v2_script.get_script_lang(),
             }),
         };
+
+        let block9 = create_block(BlockStatus::RolledBack, 2, 2);
+        state.handle_rollback(&block9, Arc::new(Message::None)).await;
+
         let replay_block = create_block(BlockStatus::RolledBack, 1, 1);
         let replay_deltas = UTXODeltasMessage {
             deltas: vec![TxUTxODeltas {
