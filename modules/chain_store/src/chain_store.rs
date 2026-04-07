@@ -1,48 +1,53 @@
 mod stores;
 
-use crate::stores::{fjall::FjallStore, Block, Store, Tx};
-use acropolis_common::queries::blocks::TransactionHashesAndTimeStamps;
+use crate::queries::{handle_blocks_query, handle_txs_query};
+use crate::state::State;
+use crate::stores::{fjall::FjallStore, Store};
+
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::GenesisDelegates;
 use acropolis_common::{
-    caryatid::SubscriptionExt,
-    crypto::keyhash_224,
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::transactions::{
-        TransactionDelegationCertificate, TransactionDelegationCertificates, TransactionInfo,
-        TransactionMIR, TransactionMIRs, TransactionMetadata, TransactionMetadataItem,
-        TransactionOutputAmount, TransactionPoolRetirementCertificate,
-        TransactionPoolRetirementCertificates, TransactionPoolUpdateCertificate,
-        TransactionPoolUpdateCertificates, TransactionStakeCertificate,
-        TransactionStakeCertificates, TransactionWithdrawal, TransactionWithdrawals,
-        TransactionsStateQuery, TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
+    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
+    declare_cardano_reader,
+    messages::{
+        CardanoMessage, Message, ProtocolParamsMessage, RawBlockMessage, StateQuery,
+        StateQueryResponse, StateTransitionMessage,
     },
-    queries::{
-        blocks::{
-            BlockHashAndTxIndex, BlockHashes, BlockInfo, BlockInvolvedAddress,
-            BlockInvolvedAddresses, BlockKey, BlockTransaction, BlockTransactions,
-            BlockTransactionsCBOR, BlocksStateQuery, BlocksStateQueryResponse, NextBlocks,
-            PreviousBlocks, TransactionHashes, DEFAULT_BLOCKS_QUERY_TOPIC,
-        },
-        misc::Order,
-    },
+    queries::blocks::{BlocksStateQueryResponse, DEFAULT_BLOCKS_QUERY_TOPIC},
+    queries::transactions::{TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
-    AssetName, BechOrdAddress, BlockHash, HeavyDelegate, InstantaneousRewardSource, NativeAsset,
-    NetworkId, PoolId, StakeAddress, TxHash,
+    NetworkId,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
+use caryatid_sdk::message_bus::Subscription;
 use caryatid_sdk::{module, Context};
 use config::Config;
-use pallas::ledger::primitives::{alonzo, conway};
-use pallas_traverse::{MultiEraCert, MultiEraMeta};
-use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::error;
+use tracing::info;
 
-const DEFAULT_BLOCKS_TOPIC: &str = "cardano.block.available";
-const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
+mod helpers;
+mod queries;
+mod state;
+
 const DEFAULT_STORE: &str = "fjall";
+const DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC: (&str, &str) =
+    ("validation-publish-topic", "cardano.validation.chainstore");
+
+declare_cardano_reader!(
+    BlocksReader,
+    "blocks-subscribe-topic",
+    "cardano.block.available",
+    BlockAvailable,
+    RawBlockMessage
+);
+
+declare_cardano_reader!(
+    ParamsReader,
+    "protocol-parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
+);
 
 #[module(
     message_type(Message),
@@ -53,17 +58,17 @@ pub struct ChainStore;
 
 impl ChainStore {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let new_blocks_topic =
-            config.get_string("blocks-topic").unwrap_or(DEFAULT_BLOCKS_TOPIC.to_string());
-        let params_topic = config
-            .get_string("protocol-parameters-topic")
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
         let block_queries_topic = config
             .get_string(DEFAULT_BLOCKS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_BLOCKS_QUERY_TOPIC.1.to_string());
         let txs_queries_topic = config
             .get_string(DEFAULT_TRANSACTIONS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_TRANSACTIONS_QUERY_TOPIC.1.to_string());
+        let validation_topic = config
+            .get_string(DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC.1.to_string());
+        info!("Publishing validation outcomes on '{validation_topic}'");
+
         let network_id: NetworkId =
             config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
 
@@ -99,10 +104,9 @@ impl ChainStore {
                         )),
                     )));
                 };
-                let res =
-                    Self::handle_blocks_query(&query_store, &state, query).unwrap_or_else(|err| {
-                        BlocksStateQueryResponse::Error(QueryError::internal_error(err.to_string()))
-                    });
+                let res = handle_blocks_query(&query_store, &state, query).unwrap_or_else(|err| {
+                    BlocksStateQueryResponse::Error(QueryError::internal_error(err.to_string()))
+                });
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Blocks(res)))
             }
         });
@@ -119,1241 +123,89 @@ impl ChainStore {
                         )),
                     ));
                 };
-                let res =
-                    Self::handle_txs_query(&query_store, query, network_id).unwrap_or_else(|err| {
-                        TransactionsStateQueryResponse::Error(QueryError::internal_error(
-                            err.to_string(),
-                        ))
-                    });
+                let res = handle_txs_query(&query_store, query, network_id).unwrap_or_else(|err| {
+                    TransactionsStateQueryResponse::Error(QueryError::internal_error(
+                        err.to_string(),
+                    ))
+                });
                 Arc::new(Message::StateQueryResponse(
                     StateQueryResponse::Transactions(res),
                 ))
             }
         });
 
-        let mut new_blocks_subscription = context.subscribe(&new_blocks_topic).await?;
-        let mut params_subscription = context.subscribe(&params_topic).await?;
-        context.run(async move {
-            // Validate the first stored block matches what is already persisted when clear-on-start is false
-            let Ok((_, first_block_message)) = new_blocks_subscription.read().await else {
-                return;
-            };
-            if let Err(err) = Self::handle_first_block(&store, &first_block_message) {
-                panic!("Corrupted DB: {err}")
-            };
+        let mut params_reader = ParamsReader::new(&context, &config).await?;
+        let mut blocks_reader = BlocksReader::new(&context, &config).await?;
+        let run_ctx = context.clone();
+
+        context.run::<Result<(), anyhow::Error>, _>(async move {
+            match blocks_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, block)) => {
+                    if let Err(err) =
+                        State::handle_first_block(&store, block_info.as_ref(), block.as_ref())
+                    {
+                        panic!("Corrupted DB: {err}")
+                    }
+                }
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading blocks");
+                }
+            }
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            }
 
             loop {
-                let Ok((_, message)) = new_blocks_subscription.read().await else {
-                    return;
-                };
+                let mut ctx = ValidationContext::new(&run_ctx, &validation_topic, "chain_store");
 
-                if let Err(err) = Self::handle_new_block(&store, &message) {
-                    error!("Could not insert block: {err}");
+                let mut state = history.lock().await.get_or_init_with(State::new);
+                let primary = PrimaryRead::from_sync(
+                    &mut ctx,
+                    "blocks_reader",
+                    blocks_reader.read_with_rollbacks().await,
+                )?;
+
+                if primary.is_rollback() {
+                    let mut history = history.lock().await;
+                    state = history.get_rolled_back_state(primary.block_info().number);
+                    store.rollback(primary.block_info())?;
                 }
 
-                if let Message::Cardano((block_info, _)) = message.as_ref() {
-                    if block_info.new_epoch {
-                        let Ok((_, message)) = params_subscription.read_ignoring_rollbacks().await
-                        else {
-                            return;
-                        };
-                        let mut history = history.lock().await;
-                        let mut state = history.get_current_state();
-                        if Self::handle_new_params(&mut state, message).is_err() {
-                            return;
-                        };
-                        history.commit(block_info.number, state);
+                if let Some(block) = primary.message() {
+                    ctx.handle(
+                        "handle_new_block",
+                        State::handle_new_block(
+                            &store,
+                            primary.block_info().as_ref(),
+                            block.as_ref(),
+                        ),
+                    );
+                }
+
+                // Epoch-0 params are consumed during init, so the loop only syncs
+                // the params reader on rollbacks and real epoch transitions.
+                if primary.should_read_epoch_transition_messages() {
+                    match ctx
+                        .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
+                    {
+                        RollbackWrapper::Normal((_, params)) => {
+                            state.handle_new_params(params.as_ref());
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
+                }
+
+                if primary.message().is_some() {
+                    let block_info = primary.block_info();
+                    let mut history = history.lock().await;
+                    history.commit(block_info.number, state);
                 }
             }
         });
 
         Ok(())
-    }
-
-    fn handle_new_block(store: &Arc<dyn Store>, message: &Message) -> Result<()> {
-        let Message::Cardano((info, CardanoMessage::BlockAvailable(raw_block))) = message else {
-            bail!("Unexpected message type: {message:?}");
-        };
-
-        if store.should_persist(info.number) {
-            store.insert_block(info, &raw_block.body)?;
-        }
-
-        Ok(())
-    }
-
-    fn handle_first_block(store: &Arc<dyn Store>, message: &Message) -> Result<()> {
-        let Message::Cardano((block_info, CardanoMessage::BlockAvailable(raw_block))) = message
-        else {
-            bail!("Unexpected message type: {message:?}");
-        };
-
-        if !store.should_persist(block_info.number) {
-            if let Some(existing) = store.get_block_by_number(block_info.number)? {
-                if existing.bytes != raw_block.body {
-                    return Err(anyhow::anyhow!(
-                        "Stored block {} does not match. Set clear-on-start to true",
-                        block_info.number
-                    ));
-                }
-            } else {
-                return Err(anyhow::anyhow!(
-                    "Unable to retrieve block {}. Set clear-on-start to true",
-                    block_info.number
-                ));
-            }
-        }
-
-        Self::handle_new_block(store, message)?;
-
-        Ok(())
-    }
-
-    fn handle_blocks_query(
-        store: &Arc<dyn Store>,
-        state: &State,
-        query: &BlocksStateQuery,
-    ) -> Result<BlocksStateQueryResponse> {
-        match query {
-            BlocksStateQuery::GetLatestBlock => {
-                let Some(block) = store.get_latest_block()? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        "Latest block not found",
-                    )));
-                };
-                let info = Self::to_block_info(block, store, state, true)?;
-                Ok(BlocksStateQueryResponse::LatestBlock(info))
-            }
-            BlocksStateQuery::GetLatestBlockTransactions { limit, skip, order } => {
-                let Some(block) = store.get_latest_block()? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        "Latest block not found",
-                    )));
-                };
-                let txs = Self::to_block_transactions(block, limit, skip, order)?;
-                Ok(BlocksStateQueryResponse::LatestBlockTransactions(txs))
-            }
-            BlocksStateQuery::GetLatestBlockTransactionsCBOR { limit, skip, order } => {
-                let Some(block) = store.get_latest_block()? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        "Latest block not found",
-                    )));
-                };
-                let txs = Self::to_block_transactions_cbor(block, limit, skip, order)?;
-                Ok(BlocksStateQueryResponse::LatestBlockTransactionsCBOR(txs))
-            }
-            BlocksStateQuery::GetBlockInfo { block_key } => {
-                let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        format!("Block {:?} not found", block_key),
-                    )));
-                };
-                let info = Self::to_block_info(block, store, state, false)?;
-                Ok(BlocksStateQueryResponse::BlockInfo(info))
-            }
-            BlocksStateQuery::GetBlockBySlot { slot } => {
-                let Some(block) = store.get_block_by_slot(*slot)? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        format!("Block at slot {} not found", slot),
-                    )));
-                };
-                let info = Self::to_block_info(block, store, state, false)?;
-                Ok(BlocksStateQueryResponse::BlockBySlot(info))
-            }
-            BlocksStateQuery::GetBlockByHash { block_hash } => {
-                let Some(block) = store.get_block_by_hash(block_hash.as_ref())? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        format!("{} not found", block_hash),
-                    )));
-                };
-
-                let info = Self::to_block_info(block, store, state, false)?;
-                Ok(BlocksStateQueryResponse::BlockByHash(info))
-            }
-            BlocksStateQuery::GetBlockByEpochSlot { epoch, slot } => {
-                let Some(block) = store.get_block_by_epoch_slot(*epoch, *slot)? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        format!("Block at epoch {} slot {} not found", epoch, slot),
-                    )));
-                };
-                let info = Self::to_block_info(block, store, state, false)?;
-                Ok(BlocksStateQueryResponse::BlockByEpochSlot(info))
-            }
-            BlocksStateQuery::GetNextBlocks {
-                block_key,
-                limit,
-                skip,
-            } => {
-                if *limit == 0 {
-                    return Ok(BlocksStateQueryResponse::NextBlocks(NextBlocks {
-                        blocks: vec![],
-                    }));
-                }
-                let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        format!("Block {:?} not found", block_key),
-                    )));
-                };
-                let number = match block_key {
-                    BlockKey::Number(number) => *number,
-                    _ => Self::get_block_number(&block)?,
-                };
-                let min_number = number + 1 + skip;
-                let max_number = min_number + limit - 1;
-                let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
-                let info = Self::to_block_info_bulk(blocks, store, state, false)?;
-                Ok(BlocksStateQueryResponse::NextBlocks(NextBlocks {
-                    blocks: info,
-                }))
-            }
-            BlocksStateQuery::GetPreviousBlocks {
-                block_key,
-                limit,
-                skip,
-            } => {
-                if *limit == 0 {
-                    return Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
-                        blocks: vec![],
-                    }));
-                }
-                let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        format!("Block {:?} not found", block_key),
-                    )));
-                };
-                let number = match block_key {
-                    BlockKey::Number(number) => *number,
-                    _ => Self::get_block_number(&block)?,
-                };
-                let Some(max_number) = number.checked_sub(1 + skip) else {
-                    return Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
-                        blocks: vec![],
-                    }));
-                };
-                let min_number = max_number.saturating_sub(limit - 1);
-                let blocks = store.get_blocks_by_number_range(min_number, max_number)?;
-                let info = Self::to_block_info_bulk(blocks, store, state, false)?;
-                Ok(BlocksStateQueryResponse::PreviousBlocks(PreviousBlocks {
-                    blocks: info,
-                }))
-            }
-            BlocksStateQuery::GetBlockTransactions {
-                block_key,
-                limit,
-                skip,
-                order,
-            } => {
-                let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        format!("Block {:?} not found", block_key),
-                    )));
-                };
-                let txs = Self::to_block_transactions(block, limit, skip, order)?;
-                Ok(BlocksStateQueryResponse::BlockTransactions(txs))
-            }
-            BlocksStateQuery::GetBlockTransactionsCBOR {
-                block_key,
-                limit,
-                skip,
-                order,
-            } => {
-                let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        format!("Block {:?} not found", block_key),
-                    )));
-                };
-                let txs = Self::to_block_transactions_cbor(block, limit, skip, order)?;
-                Ok(BlocksStateQueryResponse::BlockTransactionsCBOR(txs))
-            }
-            BlocksStateQuery::GetBlockInvolvedAddresses {
-                block_key,
-                limit,
-                skip,
-            } => {
-                let Some(block) = Self::get_block_by_key(store, block_key)? else {
-                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                        format!("Block {:?} not found", block_key),
-                    )));
-                };
-                let addresses = Self::to_block_involved_addresses(block, limit, skip)?;
-                Ok(BlocksStateQueryResponse::BlockInvolvedAddresses(addresses))
-            }
-            BlocksStateQuery::GetBlockHashes { block_numbers } => {
-                let mut block_hashes = HashMap::new();
-                for block_number in block_numbers {
-                    if let Ok(Some(block)) = store.get_block_by_number(*block_number) {
-                        if let Ok(hash) = Self::get_block_hash(&block) {
-                            block_hashes.insert(*block_number, hash);
-                        }
-                    }
-                }
-                Ok(BlocksStateQueryResponse::BlockHashes(BlockHashes {
-                    block_hashes,
-                }))
-            }
-            BlocksStateQuery::GetBlockHashesByNumberRange {
-                min_number,
-                max_number,
-            } => {
-                if *max_number < *min_number {
-                    return Ok(BlocksStateQueryResponse::Error(
-                        QueryError::invalid_request("Invalid number range"),
-                    ));
-                }
-                let mut block_hashes = Vec::new();
-                let blocks = store.get_blocks_by_number_range(*min_number, *max_number)?;
-                for block in blocks {
-                    if let Ok(hash) = Self::get_block_hash(&block) {
-                        block_hashes.push(hash);
-                    }
-                }
-                Ok(BlocksStateQueryResponse::BlockHashesByNumberRange(
-                    block_hashes,
-                ))
-            }
-            BlocksStateQuery::GetTransactionHashes { tx_ids } => {
-                let mut block_ids: HashMap<_, Vec<_>> = HashMap::new();
-                for tx_id in tx_ids {
-                    block_ids.entry(tx_id.block_number()).or_default().push(tx_id);
-                }
-                let mut tx_hashes = HashMap::new();
-                for (block_number, tx_ids) in block_ids {
-                    if let Ok(Some(block)) = store.get_block_by_number(block_number.into()) {
-                        for tx_id in tx_ids {
-                            if let Ok(hashes) = Self::to_block_transaction_hashes(&block) {
-                                if let Some(hash) = hashes.get(tx_id.tx_index() as usize) {
-                                    tx_hashes.insert(*tx_id, *hash);
-                                }
-                            }
-                        }
-                    }
-                }
-                Ok(BlocksStateQueryResponse::TransactionHashes(
-                    TransactionHashes { tx_hashes },
-                ))
-            }
-            BlocksStateQuery::GetBlockHashesAndIndexOfTransactionHashes { tx_hashes } => {
-                let mut block_hashes_and_indexes = Vec::with_capacity(tx_hashes.len());
-
-                for tx_hash in tx_hashes {
-                    match store.get_tx_block_ref_by_hash(tx_hash.as_inner()) {
-                        Ok(Some(tx_block_ref)) => {
-                            let Ok(block_hash) =
-                                BlockHash::try_from(tx_block_ref.block_hash.as_slice())
-                            else {
-                                return Ok(BlocksStateQueryResponse::Error(
-                                    QueryError::internal_error(
-                                        "Failed to instantiate BlockHash from record".to_string(),
-                                    ),
-                                ));
-                            };
-                            block_hashes_and_indexes.push(BlockHashAndTxIndex {
-                                block_hash,
-                                tx_index: tx_block_ref.index as u16,
-                            })
-                        }
-                        Ok(None) => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!("TxHash {} not found", tx_hash),
-                            )))
-                        }
-                        Err(e) => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!("Failed to lookup tx hash {}: {e}", tx_hash),
-                            )))
-                        }
-                    }
-                }
-
-                Ok(
-                    BlocksStateQueryResponse::BlockHashesAndIndexOfTransactionHashes(
-                        block_hashes_and_indexes,
-                    ),
-                )
-            }
-            BlocksStateQuery::GetTransactionHashesAndTimestamps { tx_ids } => {
-                let mut tx_hashes = Vec::with_capacity(tx_ids.len());
-                let mut timestamps = Vec::with_capacity(tx_ids.len());
-
-                for tx in tx_ids {
-                    let block = match store.get_block_by_number(tx.block_number().into()) {
-                        Ok(Some(b)) => b,
-                        Ok(None) => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!("Block {} not found", tx.block_number()),
-                            )))
-                        }
-                        Err(e) => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!("Failed to fetch block {}: {e}", tx.block_number()),
-                            )))
-                        }
-                    };
-
-                    let hashes_in_block = match Self::to_block_transaction_hashes(&block) {
-                        Ok(h) => h,
-                        Err(e) => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!(
-                                    "Failed to extract tx hashes for block {}: {e}",
-                                    tx.block_number()
-                                ),
-                            )))
-                        }
-                    };
-
-                    let tx_hash = match hashes_in_block.get(tx.tx_index() as usize) {
-                        Some(h) => h,
-                        None => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!(
-                                    "tx_index {} out of bounds for block {}",
-                                    tx.tx_index(),
-                                    tx.block_number()
-                                ),
-                            )))
-                        }
-                    };
-
-                    let block_info = match Self::to_block_info(block, store, state, false) {
-                        Ok(info) => info,
-                        Err(e) => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!(
-                                    "Failed to build block info for block {}: {e}",
-                                    tx.block_number()
-                                ),
-                            )))
-                        }
-                    };
-
-                    tx_hashes.push(*tx_hash);
-                    timestamps.push(block_info.timestamp);
-                }
-
-                Ok(BlocksStateQueryResponse::TransactionHashesAndTimestamps(
-                    TransactionHashesAndTimeStamps {
-                        tx_hashes,
-                        timestamps,
-                    },
-                ))
-            }
-            BlocksStateQuery::GetBlockByTipOffset { offset } => {
-                let tip = store.get_tip_block_number();
-
-                let stable_block_number = tip.saturating_sub(*offset as u64);
-
-                let block_opt = match store.get_block_by_number(stable_block_number) {
-                    Ok(b) => b,
-                    Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
-                };
-
-                let block_info_opt = match block_opt
-                    .map(|b| Self::to_block_info(b, store, state, false))
-                    .transpose()
-                {
-                    Ok(v) => v,
-                    Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
-                };
-
-                Ok(BlocksStateQueryResponse::BlockByTipOffset(block_info_opt))
-            }
-            BlocksStateQuery::GetStableBlockByHash { block_hash, offset } => {
-                let tip = store.get_tip_block_number();
-
-                let stable_boundary = tip.saturating_sub(*offset as u64);
-
-                let block_opt = match store.get_block_by_hash(block_hash.as_slice()) {
-                    Ok(b) => b,
-                    Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
-                };
-
-                let block_info_opt = match block_opt
-                    .map(|b| Self::to_block_info(b, store, state, false))
-                    .transpose()
-                {
-                    Ok(v) => v,
-                    Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
-                };
-
-                let stable_block = block_info_opt.filter(|b| b.number <= stable_boundary);
-
-                Ok(BlocksStateQueryResponse::StableBlockByHash(stable_block))
-            }
-        }
-    }
-
-    fn get_block_by_key(store: &Arc<dyn Store>, block_key: &BlockKey) -> Result<Option<Block>> {
-        match block_key {
-            BlockKey::Hash(hash) => store.get_block_by_hash(hash.as_ref()),
-            BlockKey::Number(number) => store.get_block_by_number(*number),
-        }
-    }
-
-    fn get_block_number(block: &Block) -> Result<u64> {
-        Ok(pallas_traverse::MultiEraBlock::decode(&block.bytes)?.number())
-    }
-
-    fn get_block_hash(block: &Block) -> Result<BlockHash> {
-        Ok(BlockHash::from(
-            *pallas_traverse::MultiEraBlock::decode(&block.bytes)?.hash(),
-        ))
-    }
-
-    fn to_block_info(
-        block: Block,
-        store: &Arc<dyn Store>,
-        state: &State,
-        is_latest: bool,
-    ) -> Result<BlockInfo> {
-        let blocks = vec![block];
-        let mut info = Self::to_block_info_bulk(blocks, store, state, is_latest)?;
-        Ok(info.remove(0))
-    }
-
-    fn to_block_info_bulk(
-        blocks: Vec<Block>,
-        store: &Arc<dyn Store>,
-        state: &State,
-        final_block_is_latest: bool,
-    ) -> Result<Vec<BlockInfo>> {
-        if blocks.is_empty() {
-            return Ok(vec![]);
-        }
-        let mut decoded_blocks = vec![];
-        for block in &blocks {
-            decoded_blocks.push(pallas_traverse::MultiEraBlock::decode(&block.bytes)?);
-        }
-
-        let (latest_number, latest_hash) = if final_block_is_latest {
-            let latest = decoded_blocks.last().unwrap();
-            (latest.number(), latest.hash())
-        } else {
-            let raw_latest = store.get_latest_block()?.unwrap();
-            let latest = pallas_traverse::MultiEraBlock::decode(&raw_latest.bytes)?;
-            (latest.number(), latest.hash())
-        };
-
-        let mut next_hash = if final_block_is_latest {
-            None
-        } else {
-            let next_number = decoded_blocks.last().unwrap().number() + 1;
-            if next_number > latest_number {
-                None
-            } else if next_number == latest_number {
-                Some(latest_hash)
-            } else {
-                let raw_next = store.get_block_by_number(next_number)?;
-                if let Some(raw_next) = raw_next {
-                    let next = pallas_traverse::MultiEraBlock::decode(&raw_next.bytes)?;
-                    Some(next.hash())
-                } else {
-                    None
-                }
-            }
-        };
-
-        let mut block_info = vec![];
-        for (block, decoded) in blocks.iter().zip(decoded_blocks).rev() {
-            let header = decoded.header();
-            let mut output = None;
-            let mut fees = None;
-            for tx in decoded.txs() {
-                if let Some(new_fee) = tx.fee() {
-                    fees = Some(fees.unwrap_or_default() + new_fee);
-                }
-                for o in tx.outputs() {
-                    output = Some(output.unwrap_or_default() + o.value().coin())
-                }
-            }
-            let (op_cert_hot_vkey, op_cert_counter) = match &header {
-                pallas_traverse::MultiEraHeader::BabbageCompatible(h) => {
-                    let cert = &h.header_body.operational_cert;
-                    (
-                        Some(&cert.operational_cert_hot_vkey),
-                        Some(cert.operational_cert_sequence_number),
-                    )
-                }
-                pallas_traverse::MultiEraHeader::ShelleyCompatible(h) => (
-                    Some(&h.header_body.operational_cert_hot_vkey),
-                    Some(h.header_body.operational_cert_sequence_number),
-                ),
-                _ => (None, None),
-            };
-            let op_cert = op_cert_hot_vkey.map(|vkey| keyhash_224(vkey));
-
-            block_info.push(BlockInfo {
-                timestamp: block.extra.timestamp,
-                number: header.number(),
-                hash: BlockHash::from(*header.hash()),
-                slot: header.slot(),
-                epoch: block.extra.epoch,
-                epoch_slot: block.extra.epoch_slot,
-                issuer: acropolis_codec::map_to_block_issuer(
-                    &header,
-                    &state.byron_heavy_delegates,
-                    &state.shelley_genesis_delegates,
-                ),
-                size: block.bytes.len() as u64,
-                tx_count: decoded.tx_count() as u64,
-                output,
-                fees,
-                block_vrf: header.vrf_vkey().map(|key| key.try_into().ok().unwrap()),
-                op_cert,
-                op_cert_counter,
-                previous_block: header.previous_hash().map(|h| BlockHash::from(*h)),
-                next_block: next_hash.map(|h| BlockHash::from(*h)),
-                confirmations: latest_number - header.number(),
-            });
-
-            next_hash = Some(header.hash());
-        }
-
-        block_info.reverse();
-        Ok(block_info)
-    }
-
-    fn to_block_transaction_hashes(block: &Block) -> Result<Vec<TxHash>> {
-        let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
-        let txs = decoded.txs();
-        Ok(txs.iter().map(|tx| TxHash::from(*tx.hash())).collect())
-    }
-
-    fn to_block_transactions(
-        block: Block,
-        limit: &u64,
-        skip: &u64,
-        order: &Order,
-    ) -> Result<BlockTransactions> {
-        let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
-        let txs = decoded.txs();
-        let txs_iter: Box<dyn Iterator<Item = _>> = match *order {
-            Order::Asc => Box::new(txs.iter()),
-            Order::Desc => Box::new(txs.iter().rev()),
-        };
-        let hashes = txs_iter
-            .skip(*skip as usize)
-            .take(*limit as usize)
-            .map(|tx| TxHash::from(*tx.hash()))
-            .collect();
-        Ok(BlockTransactions { hashes })
-    }
-
-    fn to_block_transactions_cbor(
-        block: Block,
-        limit: &u64,
-        skip: &u64,
-        order: &Order,
-    ) -> Result<BlockTransactionsCBOR> {
-        let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
-        let txs = decoded.txs();
-        let txs_iter: Box<dyn Iterator<Item = _>> = match *order {
-            Order::Asc => Box::new(txs.iter()),
-            Order::Desc => Box::new(txs.iter().rev()),
-        };
-        let txs = txs_iter
-            .skip(*skip as usize)
-            .take(*limit as usize)
-            .map(|tx| {
-                let hash = TxHash::from(*tx.hash());
-                let cbor = tx.encode();
-                BlockTransaction { hash, cbor }
-            })
-            .collect();
-        Ok(BlockTransactionsCBOR { txs })
-    }
-
-    fn to_block_involved_addresses(
-        block: Block,
-        limit: &u64,
-        skip: &u64,
-    ) -> Result<BlockInvolvedAddresses> {
-        let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
-        let mut addresses = BTreeMap::new();
-        for tx in decoded.txs() {
-            let hash = TxHash::from(*tx.hash());
-            for output in tx.outputs() {
-                if let Ok(pallas_address) = output.address() {
-                    if let Ok(address) = acropolis_codec::map_address(&pallas_address) {
-                        addresses
-                            .entry(BechOrdAddress(address))
-                            .or_insert_with(Vec::new)
-                            .push(hash);
-                    }
-                }
-            }
-        }
-        let addresses: Vec<BlockInvolvedAddress> = addresses
-            .into_iter()
-            .skip(*skip as usize)
-            .take(*limit as usize)
-            .map(|(address, txs)| BlockInvolvedAddress {
-                address: address.0,
-                txs,
-            })
-            .collect();
-        Ok(BlockInvolvedAddresses { addresses })
-    }
-
-    fn to_tx_info(tx: &Tx) -> Result<TransactionInfo> {
-        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
-        let txs = block.txs();
-        let Some(tx_decoded) = txs.get(tx.index as usize) else {
-            return Err(anyhow!("Transaction not found in block for given index"));
-        };
-        let mut output_amounts = Vec::new();
-        for output in tx_decoded.outputs() {
-            let value = output.value();
-            let lovelace_amount = value.coin();
-            if lovelace_amount != 0 {
-                output_amounts.push(TransactionOutputAmount::Lovelace(lovelace_amount));
-            }
-            for policy in value.assets() {
-                for asset in policy.assets() {
-                    if asset.is_output() {
-                        output_amounts.push(TransactionOutputAmount::Asset(NativeAsset {
-                            name: AssetName::new(asset.name()).ok_or(anyhow!("Bad asset name"))?,
-                            amount: asset.output_coin().ok_or(anyhow!("No output amount"))?,
-                        }));
-                    }
-                }
-            }
-        }
-        let mut mir_cert_count = 0;
-        let mut delegation_count = 0;
-        let mut stake_cert_count = 0;
-        let mut pool_update_count = 0;
-        let mut pool_retire_count = 0;
-        // TODO: check counts use all correct certs
-        for cert in tx_decoded.certs() {
-            match cert {
-                MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
-                    alonzo::Certificate::StakeRegistration { .. } => {
-                        stake_cert_count += 1;
-                    }
-                    alonzo::Certificate::StakeDeregistration { .. } => {
-                        stake_cert_count += 1;
-                    }
-                    alonzo::Certificate::StakeDelegation { .. } => delegation_count += 1,
-                    alonzo::Certificate::PoolRegistration { .. } => {
-                        pool_update_count += 1;
-                    }
-                    alonzo::Certificate::PoolRetirement { .. } => pool_retire_count += 1,
-                    alonzo::Certificate::MoveInstantaneousRewardsCert { .. } => mir_cert_count += 1,
-                    _ => (),
-                },
-                MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
-                    conway::Certificate::StakeRegistration { .. } => {
-                        stake_cert_count += 1;
-                    }
-                    conway::Certificate::StakeDeregistration { .. } => {
-                        stake_cert_count += 1;
-                    }
-                    conway::Certificate::StakeDelegation { .. } => delegation_count += 1,
-                    conway::Certificate::PoolRegistration { .. } => {
-                        pool_update_count += 1;
-                    }
-                    conway::Certificate::PoolRetirement { .. } => pool_retire_count += 1,
-                    conway::Certificate::Reg { .. } => stake_cert_count += 1,
-                    conway::Certificate::UnReg { .. } => stake_cert_count += 1,
-                    conway::Certificate::StakeRegDeleg { .. } => delegation_count += 1,
-                    conway::Certificate::VoteRegDeleg { .. } => delegation_count += 1,
-                    conway::Certificate::StakeVoteRegDeleg { .. } => delegation_count += 1,
-                    _ => (),
-                },
-                _ => (),
-            }
-        }
-        Ok(TransactionInfo {
-            hash: TxHash::from(*tx_decoded.hash()),
-            block_hash: BlockHash::from(*block.hash()),
-            block_number: block.number(),
-            block_time: tx.block.extra.timestamp,
-            epoch: tx.block.extra.epoch,
-            slot: block.slot(),
-            index: tx.index,
-            output_amounts,
-            recorded_fee: tx_decoded.fee(),
-            // TODO reporting too many bytes (140)
-            size: tx_decoded.size() as u64,
-            invalid_before: tx_decoded.validity_start(),
-            // TODO
-            invalid_after: None,
-            utxo_count: (tx_decoded.requires().len() + tx_decoded.produces().len()) as u64,
-            withdrawal_count: tx_decoded.withdrawals_sorted_set().len() as u64,
-            mir_cert_count,
-            delegation_count,
-            stake_cert_count,
-            pool_update_count,
-            pool_retire_count,
-            asset_mint_or_burn_count: tx_decoded
-                .mints()
-                .iter()
-                .map(|p| p.assets().len())
-                .sum::<usize>() as u64,
-            redeemer_count: tx_decoded.redeemers().len() as u64,
-            valid_contract: tx_decoded.is_valid(),
-        })
-    }
-
-    fn to_tx_stakes(tx: &Tx, network_id: NetworkId) -> Result<Vec<TransactionStakeCertificate>> {
-        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
-        let txs = block.txs();
-        let Some(tx_decoded) = txs.get(tx.index as usize) else {
-            return Err(anyhow!("Transaction not found in block for given index"));
-        };
-        let mut certs = Vec::new();
-        // TODO: check cert types
-        for (index, cert) in tx_decoded.certs().iter().enumerate() {
-            match cert {
-                MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
-                    alonzo::Certificate::StakeRegistration(cred) => {
-                        certs.push(TransactionStakeCertificate {
-                            index: index as u64,
-                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
-                            registration: true,
-                        });
-                    }
-                    alonzo::Certificate::StakeDeregistration(cred) => {
-                        certs.push(TransactionStakeCertificate {
-                            index: index as u64,
-                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
-                            registration: false,
-                        });
-                    }
-                    _ => (),
-                },
-                MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
-                    conway::Certificate::StakeRegistration(cred) => {
-                        certs.push(TransactionStakeCertificate {
-                            index: index as u64,
-                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
-                            registration: true,
-                        });
-                    }
-                    conway::Certificate::StakeDeregistration(cred) => {
-                        certs.push(TransactionStakeCertificate {
-                            index: index as u64,
-                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
-                            registration: false,
-                        });
-                    }
-                    conway::Certificate::StakeRegDeleg(cred, _, _) => {
-                        certs.push(TransactionStakeCertificate {
-                            index: index as u64,
-                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
-                            registration: true,
-                        });
-                    }
-                    conway::Certificate::StakeVoteRegDeleg(cred, _, _, _) => {
-                        certs.push(TransactionStakeCertificate {
-                            index: index as u64,
-                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
-                            registration: true,
-                        });
-                    }
-                    _ => (),
-                },
-                _ => (),
-            }
-        }
-        Ok(certs)
-    }
-
-    fn to_tx_delegations(
-        tx: &Tx,
-        network_id: NetworkId,
-    ) -> Result<Vec<TransactionDelegationCertificate>> {
-        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
-        let txs = block.txs();
-        let Some(tx_decoded) = txs.get(tx.index as usize) else {
-            return Err(anyhow!("Transaction not found in block for given index"));
-        };
-        let mut certs = Vec::new();
-        for (index, cert) in tx_decoded.certs().iter().enumerate() {
-            match cert {
-                MultiEraCert::AlonzoCompatible(cert) => {
-                    if let alonzo::Certificate::StakeDelegation(cred, pool_key_hash) =
-                        cert.as_ref().as_ref()
-                    {
-                        certs.push(TransactionDelegationCertificate {
-                            index: index as u64,
-                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
-                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
-                            active_epoch: tx.block.extra.epoch + 1,
-                        });
-                    }
-                }
-                MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
-                    conway::Certificate::StakeDelegation(cred, pool_key_hash) => {
-                        certs.push(TransactionDelegationCertificate {
-                            index: index as u64,
-                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
-                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
-                            active_epoch: tx.block.extra.epoch + 1,
-                        });
-                    }
-                    conway::Certificate::StakeRegDeleg(cred, pool_key_hash, _) => {
-                        certs.push(TransactionDelegationCertificate {
-                            index: index as u64,
-                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
-                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
-                            active_epoch: tx.block.extra.epoch + 1,
-                        });
-                    }
-                    conway::Certificate::StakeVoteRegDeleg(cred, pool_key_hash, _, _) => {
-                        certs.push(TransactionDelegationCertificate {
-                            index: index as u64,
-                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
-                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
-                            active_epoch: tx.block.extra.epoch + 1,
-                        });
-                    }
-                    _ => (),
-                },
-                _ => (),
-            }
-        }
-        Ok(certs)
-    }
-
-    fn to_tx_withdrawals(tx: &Tx) -> Result<Vec<TransactionWithdrawal>> {
-        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
-        let txs = block.txs();
-        let Some(tx_decoded) = txs.get(tx.index as usize) else {
-            return Err(anyhow!("Transaction not found in block for given index"));
-        };
-        let mut withdrawals = Vec::new();
-        for (address, amount) in tx_decoded.withdrawals_sorted_set() {
-            withdrawals.push(TransactionWithdrawal {
-                address: StakeAddress::from_binary(address)?,
-                amount,
-            });
-        }
-        Ok(withdrawals)
-    }
-
-    fn to_tx_mirs(tx: &Tx, network_id: NetworkId) -> Result<Vec<TransactionMIR>> {
-        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
-        let txs = block.txs();
-        let Some(tx_decoded) = txs.get(tx.index as usize) else {
-            return Err(anyhow!("Transaction not found in block for given index"));
-        };
-        let mut certs = Vec::new();
-        for (cert_index, cert) in tx_decoded.certs().iter().enumerate() {
-            if let MultiEraCert::AlonzoCompatible(cert) = cert {
-                if let alonzo::Certificate::MoveInstantaneousRewardsCert(cert) =
-                    cert.as_ref().as_ref()
-                {
-                    match &cert.target {
-                        alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
-                            for (cred, amount) in creds.clone().to_vec() {
-                                certs.push(TransactionMIR {
-                                    cert_index: cert_index as u64,
-                                    pot: match cert.source {
-                                        alonzo::InstantaneousRewardSource::Reserves => {
-                                            InstantaneousRewardSource::Reserves
-                                        }
-                                        alonzo::InstantaneousRewardSource::Treasury => {
-                                            InstantaneousRewardSource::Treasury
-                                        }
-                                    },
-                                    address: acropolis_codec::map_stake_address(
-                                        &cred,
-                                        network_id.clone(),
-                                    ),
-                                    amount: amount as u64,
-                                });
-                            }
-                        }
-                        alonzo::InstantaneousRewardTarget::OtherAccountingPot(_coin) => {
-                            // TODO
-                        }
-                    }
-                }
-            }
-        }
-        Ok(certs)
-    }
-
-    fn to_tx_pool_updates(
-        tx: &Tx,
-        network_id: NetworkId,
-    ) -> Result<Vec<TransactionPoolUpdateCertificate>> {
-        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
-        let txs = block.txs();
-        let Some(tx_decoded) = txs.get(tx.index as usize) else {
-            return Err(anyhow!("Transaction not found in block for given index"));
-        };
-        let mut certs = Vec::new();
-        for (cert_index, cert) in tx_decoded.certs().iter().enumerate() {
-            match cert {
-                MultiEraCert::AlonzoCompatible(cert) => {
-                    if let alonzo::Certificate::PoolRegistration {
-                        operator,
-                        vrf_keyhash,
-                        pledge,
-                        cost,
-                        margin,
-                        reward_account,
-                        pool_owners,
-                        relays,
-                        pool_metadata,
-                    } = cert.as_ref().as_ref()
-                    {
-                        certs.push(TransactionPoolUpdateCertificate {
-                            cert_index: cert_index as u64,
-                            pool_reg: acropolis_codec::to_pool_reg(
-                                operator,
-                                vrf_keyhash,
-                                pledge,
-                                cost,
-                                margin,
-                                reward_account,
-                                pool_owners,
-                                relays,
-                                pool_metadata,
-                                network_id.clone(),
-                                false,
-                            )?,
-                            // Pool registration/updates become active after 2 epochs
-                            active_epoch: tx.block.extra.epoch + 2,
-                        });
-                    }
-                }
-                MultiEraCert::Conway(cert) => {
-                    if let conway::Certificate::PoolRegistration {
-                        operator,
-                        vrf_keyhash,
-                        pledge,
-                        cost,
-                        margin,
-                        reward_account,
-                        pool_owners,
-                        relays,
-                        pool_metadata,
-                    } = cert.as_ref().as_ref()
-                    {
-                        certs.push(TransactionPoolUpdateCertificate {
-                            cert_index: cert_index as u64,
-                            pool_reg: acropolis_codec::to_pool_reg(
-                                operator,
-                                vrf_keyhash,
-                                pledge,
-                                cost,
-                                margin,
-                                reward_account,
-                                pool_owners,
-                                relays,
-                                pool_metadata,
-                                network_id.clone(),
-                                false,
-                            )?,
-                            // Pool registration/updates become active after 2 epochs
-                            active_epoch: tx.block.extra.epoch + 2,
-                        });
-                    }
-                }
-                _ => (),
-            }
-        }
-        Ok(certs)
-    }
-
-    fn to_tx_pool_retirements(tx: &Tx) -> Result<Vec<TransactionPoolRetirementCertificate>> {
-        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
-        let txs = block.txs();
-        let Some(tx_decoded) = txs.get(tx.index as usize) else {
-            return Err(anyhow!("Transaction not found in block for given index"));
-        };
-        let mut certs = Vec::new();
-        for (cert_index, cert) in tx_decoded.certs().iter().enumerate() {
-            match cert {
-                MultiEraCert::AlonzoCompatible(cert) => {
-                    if let alonzo::Certificate::PoolRetirement(operator, epoch) =
-                        cert.as_ref().as_ref()
-                    {
-                        certs.push(TransactionPoolRetirementCertificate {
-                            cert_index: cert_index as u64,
-                            pool_id: acropolis_codec::to_pool_id(operator),
-                            retirement_epoch: *epoch,
-                        });
-                    }
-                }
-                MultiEraCert::Conway(cert) => {
-                    if let conway::Certificate::PoolRetirement(operator, epoch) =
-                        cert.as_ref().as_ref()
-                    {
-                        certs.push(TransactionPoolRetirementCertificate {
-                            cert_index: cert_index as u64,
-                            pool_id: acropolis_codec::to_pool_id(operator),
-                            retirement_epoch: *epoch,
-                        });
-                    }
-                }
-                _ => (),
-            }
-        }
-        Ok(certs)
-    }
-
-    fn to_tx_metadata(tx: &Tx) -> Result<Vec<TransactionMetadataItem>> {
-        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
-        let txs = block.txs();
-        let Some(tx_decoded) = txs.get(tx.index as usize) else {
-            return Err(anyhow!("Transaction not found in block for given index"));
-        };
-        let mut items = Vec::new();
-        if let MultiEraMeta::AlonzoCompatible(metadata) = tx_decoded.metadata() {
-            for (label, datum) in &metadata.clone().to_vec() {
-                items.push(TransactionMetadataItem {
-                    label: label.to_string(),
-                    json_metadata: acropolis_codec::map_metadatum(datum),
-                });
-            }
-        }
-        Ok(items)
-    }
-
-    fn handle_txs_query(
-        store: &Arc<dyn Store>,
-        query: &TransactionsStateQuery,
-        network_id: NetworkId,
-    ) -> Result<TransactionsStateQueryResponse> {
-        match query {
-            TransactionsStateQuery::GetTransactionInfo { tx_hash } => {
-                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
-                    return Ok(TransactionsStateQueryResponse::Error(
-                        QueryError::not_found("Transaction not found"),
-                    ));
-                };
-                Ok(TransactionsStateQueryResponse::TransactionInfo(
-                    Self::to_tx_info(&tx)?,
-                ))
-            }
-            TransactionsStateQuery::GetTransactionStakeCertificates { tx_hash } => {
-                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
-                    return Ok(TransactionsStateQueryResponse::Error(
-                        QueryError::not_found("Transaction not found"),
-                    ));
-                };
-                Ok(
-                    TransactionsStateQueryResponse::TransactionStakeCertificates(
-                        TransactionStakeCertificates {
-                            certificates: Self::to_tx_stakes(&tx, network_id)?,
-                        },
-                    ),
-                )
-            }
-            TransactionsStateQuery::GetTransactionDelegationCertificates { tx_hash } => {
-                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
-                    return Ok(TransactionsStateQueryResponse::Error(
-                        QueryError::not_found("Transaction not found"),
-                    ));
-                };
-                Ok(
-                    TransactionsStateQueryResponse::TransactionDelegationCertificates(
-                        TransactionDelegationCertificates {
-                            certificates: Self::to_tx_delegations(&tx, network_id)?,
-                        },
-                    ),
-                )
-            }
-            TransactionsStateQuery::GetTransactionWithdrawals { tx_hash } => {
-                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
-                    return Ok(TransactionsStateQueryResponse::Error(
-                        QueryError::not_found("Transaction not found"),
-                    ));
-                };
-                Ok(TransactionsStateQueryResponse::TransactionWithdrawals(
-                    TransactionWithdrawals {
-                        withdrawals: Self::to_tx_withdrawals(&tx)?,
-                    },
-                ))
-            }
-            TransactionsStateQuery::GetTransactionMIRs { tx_hash } => {
-                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
-                    return Ok(TransactionsStateQueryResponse::Error(
-                        QueryError::not_found("Transaction not found"),
-                    ));
-                };
-                Ok(TransactionsStateQueryResponse::TransactionMIRs(
-                    TransactionMIRs {
-                        mirs: Self::to_tx_mirs(&tx, network_id)?,
-                    },
-                ))
-            }
-            TransactionsStateQuery::GetTransactionPoolUpdateCertificates { tx_hash } => {
-                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
-                    return Ok(TransactionsStateQueryResponse::Error(
-                        QueryError::not_found("Transaction not found"),
-                    ));
-                };
-                Ok(
-                    TransactionsStateQueryResponse::TransactionPoolUpdateCertificates(
-                        TransactionPoolUpdateCertificates {
-                            pool_updates: Self::to_tx_pool_updates(&tx, network_id)?,
-                        },
-                    ),
-                )
-            }
-            TransactionsStateQuery::GetTransactionPoolRetirementCertificates { tx_hash } => {
-                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
-                    return Ok(TransactionsStateQueryResponse::Error(
-                        QueryError::not_found("Transaction not found"),
-                    ));
-                };
-                Ok(
-                    TransactionsStateQueryResponse::TransactionPoolRetirementCertificates(
-                        TransactionPoolRetirementCertificates {
-                            pool_retirements: Self::to_tx_pool_retirements(&tx)?,
-                        },
-                    ),
-                )
-            }
-            TransactionsStateQuery::GetTransactionMetadata { tx_hash } => {
-                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
-                    return Ok(TransactionsStateQueryResponse::Error(
-                        QueryError::not_found("Transaction not found"),
-                    ));
-                };
-                Ok(TransactionsStateQueryResponse::TransactionMetadata(
-                    TransactionMetadata {
-                        metadata: Self::to_tx_metadata(&tx)?,
-                    },
-                ))
-            }
-            _ => Ok(TransactionsStateQueryResponse::Error(
-                QueryError::not_implemented("Unimplemented".to_string()),
-            )),
-        }
-    }
-
-    fn handle_new_params(state: &mut State, message: Arc<Message>) -> Result<()> {
-        if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) = message.as_ref() {
-            if let Some(byron) = &params.params.byron {
-                state.byron_heavy_delegates = byron.heavy_delegation.clone();
-            }
-            if let Some(shelley) = &params.params.shelley {
-                state.shelley_genesis_delegates = shelley.gen_delegs.clone();
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Default, Debug, Clone)]
-pub struct State {
-    pub byron_heavy_delegates: HashMap<PoolId, HeavyDelegate>,
-    pub shelley_genesis_delegates: GenesisDelegates,
-}
-
-impl State {
-    pub fn new() -> Self {
-        Self {
-            byron_heavy_delegates: HashMap::new(),
-            shelley_genesis_delegates: GenesisDelegates::default(),
-        }
     }
 }

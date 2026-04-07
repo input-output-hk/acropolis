@@ -9,8 +9,8 @@ use async_trait::async_trait;
 use caryatid_sdk::Context;
 use config::Config;
 use tokio::sync::Mutex;
-use tracing::error;
 
+use crate::publish_observer_message;
 use crate::state::BlockTotalsObserver;
 
 pub struct BlockTotalsPublisher {
@@ -43,36 +43,27 @@ impl BlockTotalsObserver for BlockTotalsPublisher {
     }
 
     async fn finalise_block(&self, block: &BlockInfo) {
+        if self.publisher.is_none() {
+            return;
+        }
+
         let state = self.state.lock().await;
 
         // Send out the accumulated totals
-        if let Some(publisher) = &self.publisher {
-            let message = BlockTxsMessage {
-                total_txs: state.tx_count,
-                total_output: state.total_output,
-                total_fees: state.total_fees,
-            };
-            let message_enum =
-                Message::Cardano((block.clone(), CardanoMessage::BlockInfoMessage(message)));
+        let message = BlockTxsMessage {
+            total_txs: state.tx_count,
+            total_output: state.total_output,
+            total_fees: state.total_fees,
+        };
+        let message_enum =
+            Message::Cardano((block.clone(), CardanoMessage::BlockInfoMessage(message)));
 
-            publisher
-                .lock()
-                .await
-                .publish(Arc::new(message_enum))
-                .await
-                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-        }
+        publish_observer_message(&self.publisher, Arc::new(message_enum), "Failed to publish")
+            .await;
     }
 
     async fn rollback(&self, message: Arc<Message>) {
-        if let Some(publisher) = &self.publisher {
-            publisher
-                .lock()
-                .await
-                .publish(message)
-                .await
-                .unwrap_or_else(|e| error!("Failed to publish rollback: {e}"));
-        }
+        publish_observer_message(&self.publisher, message, "Failed to publish rollback").await;
     }
 }
 

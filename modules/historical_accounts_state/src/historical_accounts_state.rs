@@ -1,22 +1,24 @@
 //! Acropolis historical accounts state module for Caryatid
 //! Manages optional state data needed for Blockfrost alignment
 
-use acropolis_common::caryatid::SubscriptionExt;
+use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper};
 use acropolis_common::configuration::StartupMode;
+use acropolis_common::declare_cardano_reader;
+use acropolis_common::messages::{CardanoMessage, Message, StateQuery, StateQueryResponse};
+use acropolis_common::messages::{
+    ProtocolParamsMessage, StakeAddressDeltasMessage, StakeRewardDeltasMessage,
+    StateTransitionMessage, TxCertificatesMessage, WithdrawalsMessage,
+};
 use acropolis_common::queries::accounts::{
     AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
 };
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::{
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    BlockInfo, BlockStatus,
-};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tracing::{debug, error, info, info_span};
+use tracing::{debug, error, info};
 
 mod state;
 use state::State;
@@ -26,15 +28,41 @@ use crate::state::HistoricalAccountsConfig;
 mod immutable_historical_account_store;
 mod volatile_historical_accounts;
 
-const DEFAULT_REWARDS_SUBSCRIBE_TOPIC: &str = "cardano.stake.reward.deltas";
-const DEFAULT_TX_CERTIFICATES_SUBSCRIBE_TOPIC: &str = "cardano.certificates";
-const DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC: &str = "cardano.withdrawals";
-const DEFAULT_STAKE_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) = (
+declare_cardano_reader!(
+    RewardsReader,
+    "rewards-subscribe-topic",
+    "cardano.stake.reward.deltas",
+    StakeRewardDeltas,
+    StakeRewardDeltasMessage
+);
+declare_cardano_reader!(
+    CertsReader,
+    "certificates-subscribe-topic",
+    "cardano.certificates",
+    TxCertificates,
+    TxCertificatesMessage
+);
+declare_cardano_reader!(
+    WithdrawalsReader,
+    "withdrawals-subscribe-topic",
+    "cardano.withdrawals",
+    Withdrawals,
+    WithdrawalsMessage
+);
+declare_cardano_reader!(
+    StakeDeltasReader,
     "stake-address-deltas-subscribe-topic",
     "cardano.stake.deltas",
+    StakeAddressDeltas,
+    StakeAddressDeltasMessage
 );
-const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("parameters-subscribe-topic", "cardano.protocol.parameters");
+declare_cardano_reader!(
+    ParamsReader,
+    "parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
+);
 
 // Configuration defaults
 const DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH: (&str, &str) = ("db-path", "./fjall-accounts");
@@ -60,17 +88,27 @@ impl HistoricalAccountsState {
     /// Async run loop
     async fn run(
         state_mutex: Arc<Mutex<State>>,
-        mut rewards_subscription: Box<dyn Subscription<Message>>,
-        mut certs_subscription: Box<dyn Subscription<Message>>,
-        mut withdrawals_subscription: Box<dyn Subscription<Message>>,
-        mut stake_address_deltas_subscription: Box<dyn Subscription<Message>>,
-        mut params_subscription: Box<dyn Subscription<Message>>,
+        mut rewards_reader: RewardsReader,
+        mut certs_reader: CertsReader,
+        mut withdrawals_reader: WithdrawalsReader,
+        mut stake_deltas_reader: StakeDeltasReader,
+        mut params_reader: ParamsReader,
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            let _ = params_subscription.read().await?;
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            }
             debug!("Consumed initial genesis params from params_subscription");
-            let _ = stake_address_deltas_subscription.read().await?;
+            match stake_deltas_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial stake deltas");
+                }
+            }
             debug!("Consumed initial stake deltas from stake_address_deltas_subscription");
         }
 
@@ -90,108 +128,69 @@ impl HistoricalAccountsState {
         });
         // Main loop of synchronised messages
         loop {
-            let mut current_block: Option<BlockInfo> = None;
-
             // Use certs_message as the synchroniser
-            let (_, certs_message) = certs_subscription.read_ignoring_rollbacks().await?;
-            let new_epoch = match certs_message.as_ref() {
-                Message::Cardano((block_info, _)) => {
-                    // Handle rollbacks on this topic only
-                    let mut state = state_mutex.lock().await;
-                    if block_info.status == BlockStatus::RolledBack {
-                        state.volatile.rollback_before(block_info.number);
-                        state.volatile.next_block();
+            let primary = PrimaryRead::from_read(certs_reader.read_with_rollbacks().await?);
+
+            if primary.is_rollback() {
+                let mut state = state_mutex.lock().await;
+                state.volatile.rollback_before(primary.block_info().number);
+                state.volatile.next_block();
+            }
+
+            // Init drains the epoch-0 bootstrap messages, so the main loop only
+            // synchronizes these readers on rollbacks and real transitions.
+            if primary.should_read_epoch_transition_messages() {
+                match params_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((block_info, params)) => {
+                        let mut state = state_mutex.lock().await;
+                        state.volatile.start_new_epoch(block_info.number);
+                        if let Some(shelley) = &params.params.shelley {
+                            state.volatile.update_k(shelley.security_param);
+                        }
                     }
-
-                    current_block = Some(block_info.clone());
-                    block_info.new_epoch && block_info.epoch > 0
+                    RollbackWrapper::Rollback(_) => {}
                 }
-                _ => false,
-            };
+            }
 
-            // Read from epoch-boundary messages only when it's a new epoch
-            if new_epoch {
-                let (_, params_msg) = params_subscription.read_ignoring_rollbacks().await?;
-                if let Message::Cardano((ref block_info, CardanoMessage::ProtocolParams(params))) =
-                    params_msg.as_ref()
-                {
-                    Self::check_sync(&current_block, block_info);
-                    let mut state = state_mutex.lock().await;
-                    state.volatile.start_new_epoch(block_info.number);
-                    if let Some(shelley) = &params.params.shelley {
-                        state.volatile.update_k(shelley.security_param);
+            // Rewards publish on real epoch transitions (>0) and rollbacks.
+            if primary.should_read_epoch_transition_messages() {
+                match rewards_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((block_info, rewards_msg)) => {
+                        let mut state = state_mutex.lock().await;
+                        state.handle_rewards(&rewards_msg, block_info.epoch as u32);
                     }
-                }
-
-                let (_, rewards_msg) = rewards_subscription.read_ignoring_rollbacks().await?;
-                if let Message::Cardano((
-                    block_info,
-                    CardanoMessage::StakeRewardDeltas(rewards_msg),
-                )) = rewards_msg.as_ref()
-                {
-                    Self::check_sync(&current_block, block_info);
-                    let mut state = state_mutex.lock().await;
-                    state.handle_rewards(rewards_msg, block_info.epoch as u32);
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 
             // Now handle the certs_message properly
-            match certs_message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-                    let span = info_span!(
-                        "historical_account_state.handle_certs",
-                        block = block_info.number
-                    );
-                    let _entered = span.enter();
-
-                    Self::check_sync(&current_block, block_info);
-                    let mut state = state_mutex.lock().await;
-                    state.handle_tx_certificates(tx_certs_msg, block_info.epoch as u32);
-                }
-
-                _ => error!("Unexpected message type: {certs_message:?}"),
+            if let Some(tx_certs_msg) = primary.message() {
+                let block_info = primary.block_info().clone();
+                let mut state = state_mutex.lock().await;
+                state.handle_tx_certificates(tx_certs_msg, block_info.epoch as u32);
             }
 
             // Handle withdrawals
-            let (_, message) = withdrawals_subscription.read_ignoring_rollbacks().await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
-                    let span = info_span!(
-                        "historical_account_state.handle_withdrawals",
-                        block = block_info.number
-                    );
-                    let _entered = span.enter();
-
-                    Self::check_sync(&current_block, block_info);
+            match withdrawals_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((_, withdrawals_msg)) => {
                     let mut state = state_mutex.lock().await;
-                    state.handle_withdrawals(withdrawals_msg);
+                    state.handle_withdrawals(&withdrawals_msg);
                 }
-
-                _ => error!("Unexpected message type: {message:?}"),
+                RollbackWrapper::Rollback(_) => {}
             }
 
             // Handle address deltas
-            let (_, message) = stake_address_deltas_subscription.read_ignoring_rollbacks().await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
-                    let span = info_span!(
-                        "historical_account_state.handle_address_deltas",
-                        block = block_info.number
-                    );
-                    let _entered = span.enter();
-
-                    Self::check_sync(&current_block, block_info);
-                    {
-                        let mut state = state_mutex.lock().await;
-                        state.handle_address_deltas(deltas_msg);
-                    }
+            match stake_deltas_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((_, deltas_msg)) => {
+                    let mut state = state_mutex.lock().await;
+                    state.handle_address_deltas(&deltas_msg);
                 }
-
-                _ => error!("Unexpected message type: {message:?}"),
+                RollbackWrapper::Rollback(_) => {}
             }
 
             // Prune volatile and persist if needed
-            if let Some(current_block) = current_block {
+            if primary.message().is_some() {
+                let current_block = primary.block_info().clone();
                 let should_prune = {
                     let state = state_mutex.lock().await;
                     state.ready_to_prune(&current_block)
@@ -218,46 +217,10 @@ impl HistoricalAccountsState {
         }
     }
 
-    /// Check for synchronisation
-    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
-        if let Some(ref block) = expected {
-            if block.number != actual.number {
-                error!(
-                    expected = block.number,
-                    actual = actual.number,
-                    "Messages out of sync"
-                );
-            }
-        }
-    }
-
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
         let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
-
-        // Subscription topics
-        let tx_certificates_topic = config
-            .get_string("tx-certificates-topic")
-            .unwrap_or(DEFAULT_TX_CERTIFICATES_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating Tx certificates subscriber on '{tx_certificates_topic}'");
-
-        let withdrawals_topic = config
-            .get_string("withdrawals-topic")
-            .unwrap_or(DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating withdrawals subscriber on '{withdrawals_topic}'");
-
-        let rewards_topic = config
-            .get_string("rewards-topic")
-            .unwrap_or(DEFAULT_REWARDS_SUBSCRIBE_TOPIC.to_string());
-
-        let address_deltas_topic = config
-            .get_string(DEFAULT_STAKE_ADDRESS_DELTAS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_STAKE_ADDRESS_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
-
-        let params_topic = config
-            .get_string(DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
 
         // Query topics
         let historical_accounts_query_topic = config
@@ -417,21 +380,21 @@ impl HistoricalAccountsState {
         });
 
         // Subscribe
-        let rewards_subscription = context.subscribe(&rewards_topic).await?;
-        let certs_subscription = context.subscribe(&tx_certificates_topic).await?;
-        let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
-        let address_deltas_subscription = context.subscribe(&address_deltas_topic).await?;
-        let params_subscription = context.subscribe(&params_topic).await?;
+        let rewards_reader = RewardsReader::new(&context, &config).await?;
+        let certs_reader = CertsReader::new(&context, &config).await?;
+        let withdrawals_reader = WithdrawalsReader::new(&context, &config).await?;
+        let stake_deltas_reader = StakeDeltasReader::new(&context, &config).await?;
+        let params_reader = ParamsReader::new(&context, &config).await?;
 
         // Start run task
         context.run(async move {
             Self::run(
                 state_mutex,
-                rewards_subscription,
-                certs_subscription,
-                withdrawals_subscription,
-                address_deltas_subscription,
-                params_subscription,
+                rewards_reader,
+                certs_reader,
+                withdrawals_reader,
+                stake_deltas_reader,
+                params_reader,
                 is_snapshot_mode,
             )
             .await

@@ -8,32 +8,51 @@ use crate::{
     state::{AssetsStorageConfig, State, StoreTransactions},
 };
 use acropolis_common::{
-    caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    caryatid::{PrimaryRead, RollbackWrapper},
+    declare_cardano_reader,
+    messages::{
+        AddressDeltasMessage, AssetDeltasMessage, CardanoMessage, Message, StateQuery,
+        StateQueryResponse, StateTransitionMessage, UTXODeltasMessage,
+    },
     queries::{
         assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
+    BlockStatus,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{debug, error, info, info_span, Instrument};
 mod address_state;
 pub mod asset_registry;
 mod state;
 
 // Subscription topics
-const DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("asset-deltas-subscribe-topic", "cardano.asset.deltas");
-const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
-const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("address-deltas-subscribe-topic", "cardano.address.deltas");
+declare_cardano_reader!(
+    AssetDeltasReader,
+    "asset-deltas-subscribe-topic",
+    "cardano.asset.deltas",
+    AssetDeltas,
+    AssetDeltasMessage
+);
+declare_cardano_reader!(
+    UTxODeltasReader,
+    "utxo-deltas-subscribe-topic",
+    "cardano.utxo.deltas",
+    UTXODeltas,
+    UTXODeltasMessage
+);
+declare_cardano_reader!(
+    AddressDeltasReader,
+    "address-deltas-subscribe-topic",
+    "cardano.address.deltas",
+    AddressDeltas,
+    AddressDeltasMessage
+);
 
 // Configuration defaults
 const DEFAULT_STORE_ASSETS: (&str, bool) = ("store-assets", false);
@@ -55,19 +74,29 @@ impl AssetsState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         address_state: Option<Arc<Mutex<AddressState>>>,
-        mut asset_deltas_subscription: Box<dyn Subscription<Message>>,
-        mut utxo_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut address_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut asset_deltas_reader: AssetDeltasReader,
+        mut utxo_deltas_reader: Option<UTxODeltasReader>,
+        mut address_deltas_reader: Option<AddressDeltasReader>,
         storage_config: AssetsStorageConfig,
         registry: Arc<Mutex<AssetRegistry>>,
     ) -> Result<()> {
-        if let Some(sub) = utxo_deltas_subscription.as_mut() {
-            let _ = sub.read_ignoring_rollbacks().await?;
-            info!("Consumed initial message from utxo_deltas_subscription");
+        if let Some(reader) = utxo_deltas_reader.as_mut() {
+            match reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial UTxO deltas");
+                }
+            }
+            debug!("Consumed initial message from utxo_deltas_subscription");
         }
-        if let Some(sub) = address_deltas_subscription.as_mut() {
-            let _ = sub.read_ignoring_rollbacks().await?;
-            info!("Consumed initial message from address_deltas_subscription");
+        if let Some(reader) = address_deltas_reader.as_mut() {
+            match reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial address deltas");
+                }
+            }
+            debug!("Consumed initial message from address_deltas_subscription");
         }
         // Main loop of synchronised messages
         loop {
@@ -76,70 +105,56 @@ impl AssetsState {
                 let mut h = history.lock().await;
                 h.get_or_init_with(|| State::new(storage_config))
             };
-            let current_block: BlockInfo;
 
             // Asset deltas are the synchroniser
-            let (_, asset_msg) = asset_deltas_subscription.read_ignoring_rollbacks().await?;
-            match asset_msg.as_ref() {
-                Message::Cardano((ref block_info, CardanoMessage::AssetDeltas(deltas_msg))) => {
-                    // rollback only on asset deltas
-                    if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
-                    }
-                    current_block = block_info.clone();
+            let primary = PrimaryRead::from_read(asset_deltas_reader.read_with_rollbacks().await?);
 
-                    // Always handle the mint deltas (This is how assets get initialized)
-                    {
-                        let mut reg = registry.lock().await;
-                        state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut reg) {
-                            Ok((new_state, updated_asset_ids)) => {
-                                if let Some(ref address_state) = address_state {
-                                    let mut address_state = address_state.lock().await;
-                                    address_state.new_block(
-                                        block_info.number,
-                                        &updated_asset_ids,
-                                        &reg,
-                                    );
-                                }
-                                new_state
-                            }
-                            Err(e) => {
-                                error!("Asset deltas handling error: {e:#}");
-                                state
-                            }
-                        };
-                    }
+            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
 
-                    // Process CIP25 metadata updates
-                    if storage_config.store_info {
-                        let mut reg = registry.lock().await;
-                        state = match state
-                            .handle_cip25_metadata(&mut reg, &deltas_msg.cip25_metadata_updates)
-                        {
-                            Ok(new_state) => new_state,
-                            Err(e) => {
-                                error!("CIP-25 metadata handling error: {e:#}");
-                                state
+            if let Some(deltas_msg) = primary.message() {
+                // Always handle the mint deltas (This is how assets get initialized)
+                {
+                    let mut reg = registry.lock().await;
+                    state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut reg) {
+                        Ok((new_state, updated_asset_ids)) => {
+                            if let Some(ref address_state) = address_state {
+                                let mut address_state = address_state.lock().await;
+                                address_state.new_block(
+                                    primary.block_info().number,
+                                    &updated_asset_ids,
+                                    &reg,
+                                );
                             }
-                        };
-                    }
+                            new_state
+                        }
+                        Err(e) => {
+                            error!("Asset deltas handling error: {e:#}");
+                            state
+                        }
+                    };
                 }
-                other => {
-                    error!("Unexpected message on asset-deltas subscription: {other:?}");
-                    continue;
+
+                // Process CIP25 metadata updates
+                if storage_config.store_info {
+                    let mut reg = registry.lock().await;
+                    state = match state
+                        .handle_cip25_metadata(&mut reg, &deltas_msg.cip25_metadata_updates)
+                    {
+                        Ok(new_state) => new_state,
+                        Err(e) => {
+                            error!("CIP-25 metadata handling error: {e:#}");
+                            state
+                        }
+                    };
                 }
             }
 
             // Handle UTxO deltas if subscription is registered (store-info or store-transactions enabled)
-            if let Some(sub) = utxo_deltas_subscription.as_mut() {
-                let (_, utxo_msg) = sub.read_ignoring_rollbacks().await?;
-                match utxo_msg.as_ref() {
-                    Message::Cardano((
-                        ref block_info,
-                        CardanoMessage::UTXODeltas(utxo_deltas_msg),
-                    )) => {
-                        Self::check_sync(&current_block, block_info, "utxo");
-
+            if let Some(reader) = utxo_deltas_reader.as_mut() {
+                match reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((_, utxo_deltas_msg)) => {
                         if storage_config.store_info {
                             let reg = registry.lock().await;
                             state = match state.handle_cip68_metadata(&utxo_deltas_msg.deltas, &reg)
@@ -163,19 +178,13 @@ impl AssetsState {
                             };
                         }
                     }
-                    other => error!("Unexpected message on utxo-deltas subscription: {other:?}"),
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 
-            if let Some(sub) = address_deltas_subscription.as_mut() {
-                let (_, address_msg) = sub.read_ignoring_rollbacks().await?;
-                match address_msg.as_ref() {
-                    Message::Cardano((
-                        ref block_info,
-                        CardanoMessage::AddressDeltas(address_deltas_msg),
-                    )) => {
-                        Self::check_sync(&current_block, block_info, "address");
-
+            if let Some(reader) = address_deltas_reader.as_mut() {
+                match reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((_, address_deltas_msg)) => {
                         let reg = registry.lock().await;
                         if let Some(ref address_state) = address_state {
                             let mut address_state = address_state.lock().await;
@@ -187,34 +196,16 @@ impl AssetsState {
                             };
                         };
                     }
-                    other => error!("Unexpected message on address-deltas subscription: {other:?}"),
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 
             // Commit state
-            {
+            if primary.message().is_some() {
+                let block_info = primary.block_info();
                 let mut h = history.lock().await;
-                h.commit(current_block.number, state);
+                h.commit(block_info.number, state);
             }
-        }
-    }
-
-    /// Check for synchronisation
-    fn check_sync(expected: &BlockInfo, actual: &BlockInfo, source: &str) {
-        if expected.number != actual.number {
-            error!(
-                expected = expected.number,
-                actual = actual.number,
-                source = source,
-                "Messages out of sync (expected block {}, got {} from {})",
-                expected.number,
-                actual.number,
-                source,
-            );
-            panic!(
-                "Message streams diverged: {} at {} vs {} from {}",
-                source, expected.number, actual.number, source,
-            );
         }
     }
 
@@ -252,26 +243,9 @@ impl AssetsState {
             index_by_policy: get_bool_flag(&config, DEFAULT_INDEX_BY_POLICY),
         };
 
-        let asset_deltas_subscribe_topic =
-            get_string_flag(&config, DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC);
-        info!("Creating subscriber on '{asset_deltas_subscribe_topic}'");
-
-        let utxo_deltas_subscribe_topic: Option<String> =
-            if storage_config.store_info || storage_config.store_transactions.is_enabled() {
-                let topic = get_string_flag(&config, DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC);
-                info!("Creating subscriber on '{topic}'");
-                Some(topic)
-            } else {
-                None
-            };
-
-        let address_deltas_subscribe_topic: Option<String> = if storage_config.store_addresses {
-            let topic = get_string_flag(&config, DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC);
-            info!("Creating subscriber on '{topic}'");
-            Some(topic)
-        } else {
-            None
-        };
+        let utxo_deltas_enabled =
+            storage_config.store_info || storage_config.store_transactions.is_enabled();
+        let address_deltas_enabled = storage_config.store_addresses;
 
         let assets_query_topic = get_string_flag(&config, DEFAULT_ASSETS_QUERY_TOPIC);
         info!("Creating asset query handler on '{assets_query_topic}'");
@@ -523,14 +497,14 @@ impl AssetsState {
         });
 
         // Subscribe to enabled topics
-        let asset_deltas_sub = context.subscribe(&asset_deltas_subscribe_topic).await?;
-        let utxo_deltas_sub = if let Some(topic) = &utxo_deltas_subscribe_topic {
-            Some(context.subscribe(topic).await?)
+        let asset_deltas_reader = AssetDeltasReader::new(&context, &config).await?;
+        let utxo_deltas_reader = if utxo_deltas_enabled {
+            Some(UTxODeltasReader::new(&context, &config).await?)
         } else {
             None
         };
-        let address_deltas_sub = if let Some(topic) = &address_deltas_subscribe_topic {
-            Some(context.subscribe(topic).await?)
+        let address_deltas_reader = if address_deltas_enabled {
+            Some(AddressDeltasReader::new(&context, &config).await?)
         } else {
             None
         };
@@ -540,9 +514,9 @@ impl AssetsState {
             Self::run(
                 history_run,
                 address_state_run,
-                asset_deltas_sub,
-                utxo_deltas_sub,
-                address_deltas_sub,
+                asset_deltas_reader,
+                utxo_deltas_reader,
+                address_deltas_reader,
                 storage_config,
                 registry_run,
             )

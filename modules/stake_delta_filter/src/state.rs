@@ -11,6 +11,7 @@ use acropolis_common::{
     Address, BlockInfo, ShelleyAddressPointer, TxCertificate,
 };
 use anyhow::Result;
+use caryatid_sdk::Context;
 use serde_with::serde_as;
 use std::collections::HashMap;
 use std::{fs, io::Write, sync::Arc};
@@ -28,9 +29,9 @@ pub struct PointerOccurrence {
 pub struct DeltaPublisher(RollbackAwarePublisher<Message>);
 
 impl DeltaPublisher {
-    pub fn new(params: Arc<StakeDeltaFilterParams>) -> Self {
+    pub fn new(context: Arc<Context<Message>>, params: Arc<StakeDeltaFilterParams>) -> Self {
         Self(RollbackAwarePublisher::new(
-            params.context.clone(),
+            context,
             params.stake_address_delta_topic.clone(),
         ))
     }
@@ -47,32 +48,31 @@ impl DeltaPublisher {
         self.0.publish(packed_message).await
     }
 
-    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> Result<()> {
+    pub async fn publish_message(&mut self, message: Arc<Message>) -> Result<()> {
         self.0.publish(message).await
     }
 }
 
+#[derive(Clone, Default)]
 pub struct State {
     pub pointer_cache: PointerCache,
 
     pub params: Arc<StakeDeltaFilterParams>,
-    pub delta_publisher: DeltaPublisher,
 
     pub tracker: Tracker,
 }
 
 impl State {
-    pub async fn handle_deltas(
+    pub fn handle_deltas(
         &mut self,
         block: &BlockInfo,
         delta: &AddressDeltasMessage,
-    ) -> Result<()> {
+    ) -> StakeAddressDeltasMessage {
         let msg = process_message(&self.pointer_cache, delta, block, Some(&mut self.tracker));
 
         // Updating block number in pointer cache: looking for Conway epoch start.
         self.pointer_cache.update_block(block);
-        self.delta_publisher.publish(block, msg).await?;
-        Ok(())
+        msg
     }
 
     pub async fn handle_certs(
@@ -95,15 +95,10 @@ impl State {
         Ok(())
     }
 
-    pub async fn handle_rollback(&mut self, message: Arc<Message>) -> Result<()> {
-        self.delta_publisher.publish_rollback(message).await
-    }
-
     pub fn new(params: Arc<StakeDeltaFilterParams>) -> Self {
         Self {
             pointer_cache: PointerCache::new(),
             params: params.clone(),
-            delta_publisher: DeltaPublisher::new(params.clone()),
             tracker: Tracker::new(),
         }
     }
@@ -133,9 +128,8 @@ impl State {
         Ok(())
     }
 
-    pub async fn tick(&mut self) -> Result<()> {
+    pub async fn tick(&self) -> Result<()> {
         self.info();
-        self.save()?;
         Ok(())
     }
 }

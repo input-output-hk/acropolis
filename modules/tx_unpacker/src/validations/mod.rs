@@ -37,7 +37,7 @@ pub fn validate_tx(
     })?;
 
     if era >= Era::Shelley {
-        shelley::tx::validate(&tx, protocol_params, current_slot)
+        shelley::tx::validate(&tx, protocol_params, current_slot, era)
             .map_err(|e| Box::new((*e).into()))?;
 
         shelley::utxo::validate(&tx, protocol_params, era)

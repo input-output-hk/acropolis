@@ -32,8 +32,8 @@ impl DRepDistributionPublisher {
             .await
     }
 
-    /// Publish a rollback message, if we have anything to roll back
-    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
+    /// Publish a pre-constructed message on the DRDD topic.
+    pub async fn publish_message(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
         self.0.publish(message).await
     }
 }

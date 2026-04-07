@@ -5,10 +5,11 @@ use acropolis_common::{
     validation::{
         KesSignatureError, KesValidation, KesValidationError, OperationalCertificateError,
     },
-    GenesisDelegates, PoolId,
+    BlockInfo, GenesisDelegates, PoolId,
 };
 use imbl::HashMap;
 use pallas::{crypto::key::ed25519, ledger::traverse::MultiEraHeader};
+use tracing::error;
 
 use crate::ouroboros::{kes, praos, tpraos};
 
@@ -212,6 +213,35 @@ fn operational_cert<'a>(header: &'a MultiEraHeader) -> Option<OperationalCertifi
             operational_cert_kes_period: x.header_body.operational_cert.operational_cert_kes_period,
             operational_cert_sigma: &x.header_body.operational_cert.operational_cert_sigma,
         }),
+        _ => None,
+    }
+}
+
+pub fn op_cert_counter_no_validation(
+    raw_header: &[u8],
+    block_info: &BlockInfo,
+) -> Option<(PoolId, u64)> {
+    let header = match MultiEraHeader::decode(block_info.era as u8, None, raw_header) {
+        Ok(header) => header,
+        Err(e) => {
+            error!("Can't decode header {}: {e}", block_info.slot);
+            return None;
+        }
+    };
+
+    let pool_id = match header.issuer_vkey() {
+        Some(vkey) => PoolId::from(keyhash_224(vkey)),
+        None => return None,
+    };
+
+    match header {
+        MultiEraHeader::ShelleyCompatible(x) => {
+            Some((pool_id, x.header_body.operational_cert_sequence_number))
+        }
+        MultiEraHeader::BabbageCompatible(x) => Some((
+            pool_id,
+            x.header_body.operational_cert.operational_cert_sequence_number,
+        )),
         _ => None,
     }
 }

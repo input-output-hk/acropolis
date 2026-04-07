@@ -1,9 +1,9 @@
 use crate::{
     genesis_values::GenesisValues,
     rational_number::{ChameleonFraction, RationalNumber},
-    BlockHash, BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era,
-    ExUnitPrices, ExUnits, GenesisDelegates, HeavyDelegate, NetworkId, PoolId,
-    PoolVotingThresholds, ProtocolConsts,
+    BlockHash, BlockVersionData, Committee, Constitution, CostModel, CostModels,
+    DRepVotingThresholds, Era, ExUnitPrices, ExUnits, GenesisDelegates, HeavyDelegate, NetworkId,
+    PoolId, PoolVotingThresholds, ProtocolConsts,
 };
 use anyhow::{bail, Result};
 use blake2::{digest::consts::U32, Blake2b, Digest};
@@ -48,8 +48,24 @@ impl ProtocolParams {
         self.alonzo.as_ref().map(|a| a.lovelace_per_utxo_word)
     }
 
+    pub fn coins_per_utxo_byte(&self) -> Option<u64> {
+        self.babbage.as_ref().map(|b| b.coins_per_utxo_byte)
+    }
+
     pub fn max_value_size(&self) -> Option<u64> {
         self.alonzo.as_ref().map(|a| a.max_value_size as u64)
+    }
+
+    pub fn genesis_delegates(&self) -> Option<&GenesisDelegates> {
+        self.shelley.as_ref().map(|s| &s.gen_delegs)
+    }
+
+    pub fn cost_models(&self) -> CostModels {
+        CostModels {
+            plutus_v1: self.alonzo.as_ref().and_then(|a| a.plutus_v1_cost_model.clone()),
+            plutus_v2: self.babbage.as_ref().and_then(|b| b.plutus_v2_cost_model.clone()),
+            plutus_v3: self.conway.as_ref().map(|c| c.plutus_v3_cost_model.clone()),
+        }
     }
 }
 
@@ -144,6 +160,7 @@ pub struct ShelleyParams {
     #[serde_as(as = "ChameleonFraction")]
     pub active_slots_coeff: RationalNumber,
     pub epoch_length: u32,
+    #[serde(alias = "maxKESEvolutions")]
     pub max_kes_evolutions: u32,
     pub max_lovelace_supply: u64,
     pub network_id: NetworkId,
@@ -158,6 +175,7 @@ pub struct ShelleyParams {
     pub security_param: u32,
 
     pub slot_length: u32,
+    #[serde(alias = "slotsPerKESPeriod")]
     pub slots_per_kes_period: u32,
     pub system_start: DateTime<Utc>,
     pub update_quorum: u32,
@@ -169,6 +187,18 @@ impl ShelleyParams {
     pub fn min_fee(&self, tx_bytes: u32) -> u64 {
         (tx_bytes as u64 * self.protocol_params.minfee_a as u64)
             + (self.protocol_params.minfee_b as u64)
+    }
+
+    pub fn stability_window(&self) -> u64 {
+        (self.security_param as u64) * self.active_slots_coeff.denom()
+            / self.active_slots_coeff.numer()
+            * 3
+    }
+
+    pub fn randomness_stability_window(&self) -> u64 {
+        (self.security_param as u64) * self.active_slots_coeff.denom()
+            / self.active_slots_coeff.numer()
+            * 4
     }
 }
 
@@ -219,10 +249,8 @@ impl From<&ShelleyParams> for PraosParams {
     fn from(params: &ShelleyParams) -> Self {
         let active_slots_coeff = &params.active_slots_coeff;
         let security_param = params.security_param;
-        let stability_window =
-            (security_param as u64) * active_slots_coeff.denom() / active_slots_coeff.numer() * 3;
-        let randomness_stabilization_window =
-            (security_param as u64) * active_slots_coeff.denom() / active_slots_coeff.numer() * 4;
+        let stability_window = params.stability_window();
+        let randomness_stabilization_window = params.randomness_stability_window();
 
         Self {
             security_param,
@@ -234,7 +262,6 @@ impl From<&ShelleyParams> for PraosParams {
             slot_length: params.slot_length,
             slots_per_kes_period: params.slots_per_kes_period,
             extra_entropy: params.protocol_params.extra_entropy.clone(),
-
             stability_window,
             randomness_stabilization_window,
         }

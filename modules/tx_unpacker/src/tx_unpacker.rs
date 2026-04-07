@@ -3,7 +3,9 @@
 
 use std::sync::Arc;
 
+use crate::state::State;
 use acropolis_common::{
+    caryatid::PrimaryRead,
     messages::{
         AssetDeltasMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
@@ -12,16 +14,14 @@ use acropolis_common::{
     validation::ValidationOutcomes,
     *,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use futures::future::join_all;
 use pallas::codec::minicbor::encode;
 use pallas::ledger::traverse::MultiEraTx;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, info_span, Instrument};
-
-use crate::state::State;
+use tracing::{debug, error, info, info_span, warn, Instrument};
 mod crypto;
 pub mod state;
 pub mod validations;
@@ -85,31 +85,33 @@ impl TxUnpacker {
                 .lock()
                 .await
                 .get_or_init_with(|| State::with_phase2_enabled(phase2_enabled));
-            let mut current_block: Option<BlockInfo> = None;
 
             let Ok((_, message)) = txs_sub.read().await else {
                 return Err(anyhow::anyhow!("Failed to read txs subscription"));
             };
 
-            let (new_epoch, validate) = match message.as_ref() {
-                Message::Cardano((block_info, _)) => {
-                    // Handle rollbacks on this topic only
-                    if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
-                    }
-                    current_block = Some(block_info.clone());
-
-                    // new_epoch? first_epoch?
-                    (block_info.new_epoch, block_info.intent.do_validation())
-                }
-
-                _ => {
-                    error!("Unexpected message type: {message:?}");
-                    (false, false)
+            let primary = match PrimaryRead::from_cardano_message(message) {
+                Ok(primary) => primary,
+                Err(e) => {
+                    error!("Unexpected message type: {e:#}");
+                    continue;
                 }
             };
 
-            match message.as_ref() {
+            if primary.is_rollback()
+                || (!primary.is_rollback()
+                    && primary.block_info().status == BlockStatus::RolledBack)
+            {
+                state = history.lock().await.get_rolled_back_state(primary.block_info().number);
+            }
+
+            let raw_message = primary
+                .message()
+                .or_else(|| primary.rollback_message())
+                .cloned()
+                .expect("primary read should include a message");
+
+            match raw_message.as_ref() {
                 Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         debug!("Received {} txs for slot {}", txs_msg.txs.len(), block.slot);
@@ -284,23 +286,23 @@ impl TxUnpacker {
                 )) => {
                     let mut futures = Vec::new();
                     if let Some(ref topic) = publish_utxo_deltas_topic {
-                        futures.push(context.message_bus.publish(topic, message.clone()));
+                        futures.push(context.message_bus.publish(topic, raw_message.clone()));
                     }
 
                     if let Some(ref topic) = publish_asset_deltas_topic {
-                        futures.push(context.message_bus.publish(topic, message.clone()));
+                        futures.push(context.message_bus.publish(topic, raw_message.clone()));
                     }
 
                     if let Some(ref topic) = publish_withdrawals_topic {
-                        futures.push(context.message_bus.publish(topic, message.clone()));
+                        futures.push(context.message_bus.publish(topic, raw_message.clone()));
                     }
 
                     if let Some(ref topic) = publish_certificates_topic {
-                        futures.push(context.message_bus.publish(topic, message.clone()));
+                        futures.push(context.message_bus.publish(topic, raw_message.clone()));
                     }
 
                     if let Some(ref topic) = publish_governance_procedures_topic {
-                        futures.push(context.message_bus.publish(topic, message.clone()));
+                        futures.push(context.message_bus.publish(topic, raw_message.clone()));
                     }
 
                     join_all(futures)
@@ -310,65 +312,78 @@ impl TxUnpacker {
                         .for_each(|e| error!("Failed to publish: {e}"));
                 }
 
-                _ => error!("Unexpected message type: {message:?}"),
+                _ => error!("Unexpected message type: {raw_message:?}"),
             }
 
-            if new_epoch {
+            if primary.should_read_epoch_transition_messages() {
                 if let Some(ref mut sub) = protocol_params_sub {
-                    let (_, protocol_parameters_msg) = sub.read().await?;
-                    if let Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) =
-                        protocol_parameters_msg.as_ref()
-                    {
-                        Self::check_sync(&current_block, block_info);
-                        let span = info_span!(
-                            "tx_unpacker.handle_protocol_params",
-                            block = block_info.number
-                        );
-                        span.in_scope(|| {
-                            state.handle_protocol_params(params);
-                        });
+                    let protocol_parameters_msg =
+                        Self::read_synced_protocol_params(sub, primary.block_info()).await?;
+                    match protocol_parameters_msg.as_ref() {
+                        Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) => {
+                            Self::check_sync(primary.block_info(), block_info);
+                            let span = info_span!(
+                                "tx_unpacker.handle_protocol_params",
+                                block = block_info.number
+                            );
+                            span.in_scope(|| {
+                                state.handle_protocol_params(params);
+                            });
+                        }
+                        Message::Cardano((
+                            block_info,
+                            CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                        )) => {
+                            Self::check_sync(primary.block_info(), block_info);
+                        }
+                        _ => {
+                            error!(
+                                "Unexpected protocol parameters message type: {protocol_parameters_msg:?}"
+                            );
+                        }
                     }
                 }
             }
 
-            if validate {
-                if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
-                    if let Some(ref genesis) = genesis {
-                        if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
-                            message.as_ref()
-                        {
-                            let span = info_span!("tx_unpacker.validate", block = block.number);
-                            async {
-                                let mut validation_outcomes = ValidationOutcomes::new();
-                                if let Err(e) =
-                                    state.validate(block, txs_msg, &genesis.genesis_delegs)
-                                {
-                                    validation_outcomes.push(*e);
-                                }
+            if let Some(message) = primary.message() {
+                if primary.do_validation() {
+                    if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref()
+                    {
+                        if let Some(ref genesis) = genesis {
+                            if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
+                                message.as_ref()
+                            {
+                                let span = info_span!("tx_unpacker.validate", block = block.number);
+                                async {
+                                    let mut validation_outcomes = ValidationOutcomes::new();
+                                    if let Err(e) =
+                                        state.validate(block, txs_msg, &genesis.genesis_delegs)
+                                    {
+                                        validation_outcomes.push(*e);
+                                    }
 
-                                validation_outcomes
-                                    .publish(
-                                        &context,
-                                        "tx_unpacker",
-                                        publish_tx_validation_topic,
-                                        block,
-                                    )
-                                    .await
-                                    .unwrap_or_else(|e| {
-                                        error!("Failed to publish tx validation: {e}")
-                                    });
+                                    validation_outcomes
+                                        .publish(
+                                            &context,
+                                            "tx_unpacker",
+                                            publish_tx_validation_topic,
+                                            block,
+                                        )
+                                        .await
+                                        .unwrap_or_else(|e| {
+                                            error!("Failed to publish tx validation: {e}")
+                                        });
+                                }
+                                .instrument(span)
+                                .await;
                             }
-                            .instrument(span)
-                            .await;
                         }
                     }
                 }
             }
 
             // Commit the new state
-            if let Some(block_info) = current_block {
-                history.lock().await.commit(block_info.number, state);
-            }
+            history.lock().await.commit(primary.block_info().number, state);
         }
     }
 
@@ -482,15 +497,45 @@ impl TxUnpacker {
     }
 
     /// Check for synchronisation
-    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
-        if let Some(ref block) = expected {
-            if block.number != actual.number {
-                error!(
-                    expected = block.number,
-                    actual = actual.number,
-                    "Messages out of sync"
+    fn check_sync(expected: &BlockInfo, actual: &BlockInfo) {
+        if expected.number != actual.number {
+            error!(
+                expected = expected.number,
+                actual = actual.number,
+                "Messages out of sync"
+            );
+        }
+    }
+
+    async fn read_synced_protocol_params(
+        sub: &mut Box<dyn Subscription<Message>>,
+        current_block: &BlockInfo,
+    ) -> Result<Arc<Message>> {
+        loop {
+            let (_, protocol_parameters_msg) = sub.read().await?;
+            let block_info = match protocol_parameters_msg.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::ProtocolParams(_)))
+                | Message::Cardano((
+                    block_info,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => block_info,
+                _ => {
+                    bail!(
+                        "Unexpected protocol parameters message type: {protocol_parameters_msg:?}"
+                    );
+                }
+            };
+
+            if block_info.number < current_block.number {
+                warn!(
+                    expected = current_block.number,
+                    actual = block_info.number,
+                    "Discarding stale protocol parameters message"
                 );
+                continue;
             }
+
+            return Ok(protocol_parameters_msg);
         }
     }
 }

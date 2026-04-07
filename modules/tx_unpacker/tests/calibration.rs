@@ -25,6 +25,7 @@ fn test_calibration_script_evaluates() {
     assert!(elapsed > 0.0, "Elapsed time should be positive");
 }
 
+
 /// Verify calibration produces stable results.
 /// Runs calibrate(15) five times and checks each run's CV,
 /// then checks that the five medians are within 30% of the overall median.

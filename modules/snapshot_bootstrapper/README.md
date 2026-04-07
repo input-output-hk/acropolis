@@ -8,7 +8,7 @@ processing the live chain.
 This module:
 
 1. Waits for genesis bootstrap completion
-2. Downloads a compressed snapshot file from a configured URL
+2. Downloads a gzip-compressed NES snapshot and matching UTxO sidecar from configured HTTP URLs
 3. Streams and publishes snapshot data (UTXOs, pools, accounts, DReps, proposals)
 4. Signals completion to allow chain synchronization to begin
 
@@ -50,9 +50,18 @@ progress-log-interval = 200
 
 The module expects the following files in `{data-dir}/{network}/`:
 
-- **`snapshots.json`** - Snapshot metadata including download URLs
+- **`snapshots.json`** - Snapshot metadata including HTTP download URLs
 
-The snapshot file is downloaded to `{data-dir}/{network}/{point}.cbor`.
+Each snapshot entry provides:
+
+- `url` - the NES artifact URL, expected to point to a `nes.<slot>.<hash>.cbor.gz` object
+- `utxo_url` - an optional explicit UTxO sidecar URL; if omitted, the bootstrapper derives a sibling `utxos.<slot>.<hash>.cbor.gz` URL in the same directory
+
+CloudFront/S3-hosted artifacts work as normal HTTP downloads. The bootstrapper expects the
+published objects to be gzip-compressed `.cbor.gz` files and stores the decompressed results as:
+
+- `{data-dir}/{network}/nes.<slot>.<hash>.cbor`
+- `{data-dir}/{network}/utxos.<slot>.<hash>.cbor`
 
 ## Example config.json
 

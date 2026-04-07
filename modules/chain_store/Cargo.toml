@@ -16,9 +16,10 @@ fjall = { workspace = true }
 hex = "0.4"
 minicbor = { workspace = true, features = ["std", "half", "derive"] }
 pallas-traverse = { workspace = true }
-tracing = "0.1.40"
+tracing = { workspace = true }
 tokio.workspace = true
 pallas.workspace = true
+imbl = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
