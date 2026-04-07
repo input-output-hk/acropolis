@@ -342,6 +342,20 @@ impl ValidationContext {
         inp
     }
 
+    /// Takes the same arguments as `consume_sync`, but performs default processing of rollback:
+    /// * Some in case of T message,
+    /// * None in case of Rollback message, also checks that the rollback is the expected one.
+    pub fn consume_rollback_optoin<T> (
+        &mut self,
+        handler: &str,
+        inp: Result<RollbackWrapper<T>>,
+    ) -> Result<Option<Arc<T>>> {
+        match self.consume_sync(handler, inp)? {
+            RollbackWrapper::Normal((_blk, msg)) => Ok(Some(msg.clone())),
+            RollbackWrapper::Rollback((_blk, _msg)) => Ok(None)
+        }
+    }
+
     pub async fn publish(&mut self) {
         if let Some(blk) = &self.current_block {
             if let Err(e) = self

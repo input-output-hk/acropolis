@@ -30,6 +30,26 @@ pub struct ActionStatus {
     expiration_epoch: Option<u64>,
 }
 
+#[derive(Default)]
+pub struct VerificationConfig {
+    pub verification_output_file: Option<String>,
+    pub verify_votes_files: Option<String>,
+}
+
+impl VerificationConfig {
+    /// Replaces {action_id} with first 8 characters of transaction_id in hex and
+    /// action_id.action_index, and {epoch} with epoch number.
+    fn apply_votes_pattern(&self, action_id: &GovActionId, new_epoch: u64) -> Option<String> {
+        let pattern = self.verify_votes_files.as_ref()?;
+        let tx_hash = hex::encode(action_id.transaction_id)[0..8].to_string();
+        let act_id = format!("{tx_hash}_{}", action_id.action_index);
+        let applied =
+            pattern.replace("{action_id}", &act_id).replace("{epoch}", &new_epoch.to_string());
+        Some(applied)
+    }
+}
+
+
 impl ActionStatus {
     pub fn new(current_epoch: u64, voting_length: u64) -> Self {
         Self {
@@ -197,6 +217,7 @@ impl CastVotes {
     }
 }
 
+#[derive(Clone, Default)]
 pub struct ConwayVoting {
     conway: Option<ConwayParams>,
     bootstrap: Option<bool>,
@@ -206,31 +227,11 @@ pub struct ConwayVoting {
     pub votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
     action_status: HashMap<GovActionId, ActionStatus>,
 
-    verify_votes_files: Option<String>,
-    verification_output_file: Option<String>,
     action_proposal_count: usize,
     votes_count: usize,
 }
 
 impl ConwayVoting {
-    pub fn new(
-        verification_output_file: Option<String>,
-        verify_votes_files: Option<String>,
-    ) -> Self {
-        Self {
-            conway: None,
-            bootstrap: None,
-            proposals: Default::default(),
-            pending_votes: Default::default(),
-            votes: Default::default(),
-            action_status: Default::default(),
-            action_proposal_count: 0,
-            votes_count: 0,
-            verify_votes_files,
-            verification_output_file,
-        }
-    }
-
     pub fn is_bootstrap(&self) -> Result<bool> {
         self.bootstrap.ok_or_else(|| anyhow!("ConwayVoting::is_bootstrap is not set"))
     }
@@ -505,17 +506,6 @@ impl ConwayVoting {
         }
     }
 
-    /// Replaces {action_id} with first 8 characters of transaction_id in hex and
-    /// action_id.action_index, and {epoch} with epoch number.
-    fn apply_votes_pattern(&self, action_id: &GovActionId, new_epoch: u64) -> Option<String> {
-        let pattern = self.verify_votes_files.as_ref()?;
-        let tx_hash = hex::encode(action_id.transaction_id)[0..8].to_string();
-        let act_id = format!("{tx_hash}_{}", action_id.action_index);
-        let applied =
-            pattern.replace("{action_id}", &act_id).replace("{epoch}", &new_epoch.to_string());
-        Some(applied)
-    }
-
     /// Checks and updates action_id state at the start of new_epoch
     /// If the action is accepted, returns accepted ProposalProcedure.
     pub fn process_one_proposal(
@@ -525,10 +515,11 @@ impl ConwayVoting {
         action_id: &GovActionId,
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<PoolId, DelegatedStake>,
+        vconf: &VerificationConfig,
     ) -> Result<Option<VotingOutcome>> {
         let cast_votes = self.get_actual_votes(action_id, drep_stake, spo_stake)?;
 
-        if let Some(ref_file) = self.apply_votes_pattern(action_id, new_epoch) {
+        if let Some(ref_file) = vconf.apply_votes_pattern(action_id, new_epoch) {
             let ref_path = Path::new(&ref_file);
             if ref_path.exists() {
                 info!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}'...");
@@ -568,8 +559,12 @@ impl ConwayVoting {
 
     /// Function dumps information about completed (expired, ratified, enacted) governance
     /// actions in format, close to that of `gov_action_proposal` from `sqldb`.
-    pub fn print_outcome_to_verify(&self, outcome: &[GovernanceOutcome]) -> Result<()> {
-        let out_file_name = match &self.verification_output_file {
+    pub fn print_outcome_to_verify(
+        &self, 
+        outcome: &[GovernanceOutcome],
+        vconf: &VerificationConfig,
+    ) -> Result<()> {
+        let out_file_name = match &vconf.verification_output_file {
             Some(o) => o,
             None => return Ok(()),
         };
@@ -643,6 +638,7 @@ impl ConwayVoting {
         voting_state: &VotingRegistrationState,
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<PoolId, DelegatedStake>,
+        verification: &VerificationConfig,
     ) -> Result<Vec<GovernanceOutcome>> {
         let mut outcome = Vec::<GovernanceOutcome>::new();
         let actions = self.proposals.keys().cloned().collect::<Vec<_>>();
@@ -658,6 +654,7 @@ impl ConwayVoting {
                 action_id,
                 drep_stake,
                 spo_stake,
+                verification,
             )? {
                 None => continue,
                 Some(out) if out.accepted => {
@@ -807,7 +804,7 @@ mod tests {
     /// Simple test for general mechanics of action_status processing.
     #[test]
     fn test_outcomes_action_status() -> Result<()> {
-        let mut voting = ConwayVoting::new(None, None);
+        let mut voting = ConwayVoting::default();
         let oc1 = create_governance_outcome(1, true);
         voting.action_status.insert(
             oc1.voting.procedure.gov_action_id.clone(),

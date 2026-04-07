@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::conway_voting::ConwayVoting;
+    use crate::conway_voting::{ConwayVoting, VerificationConfig};
     use crate::voting_state::VotingRegistrationState;
     use acropolis_common::{
         protocol_params::ProtocolParams, rational_number::RationalNumber,
@@ -278,7 +278,7 @@ mod tests {
             let conway = cfg.conway.as_ref().unwrap();
             let bootstrap = shelley.protocol_params.protocol_version.major <= 9;
 
-            let mut conway_voting = ConwayVoting::new(None, None);
+            let mut conway_voting = ConwayVoting::default();
             conway_voting.update_parameters(&cfg.conway, bootstrap);
             conway_voting
                 .insert_proposal_procedure(record.start_epoch, &record.proposal_procedure)?;
@@ -311,12 +311,14 @@ mod tests {
                     conway_voting.is_expired(epoch, &record.action_id)?
                 );
 
+                let vconf = VerificationConfig::default();
                 let outcome = conway_voting.process_one_proposal(
                     epoch,
                     voting_state,
                     &record.action_id,
                     current_drep,
                     current_pool,
+                    &vconf,
                 )?;
 
                 let Some(outcome) = outcome else {

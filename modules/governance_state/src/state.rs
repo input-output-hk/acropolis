@@ -19,7 +19,9 @@ use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
 use std::collections::HashMap;
 use tracing::info;
+use crate::conway_voting::VerificationConfig;
 
+#[derive(Clone, Default)]
 pub struct State {
     pub drep_stake_messages_count: usize,
 
@@ -34,25 +36,6 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(
-        verification_output_file: Option<String>,
-        verify_votes_files: Option<String>,
-    ) -> Self {
-        Self {
-            drep_stake_messages_count: 0,
-
-            current_era: Era::default(),
-
-            alonzo_babbage_voting: AlonzoBabbageVoting::default(),
-            conway_voting: ConwayVoting::new(verification_output_file, verify_votes_files),
-
-            drep_stake: HashMap::new(),
-            drep_no_confidence: 0,
-            drep_abstain: 0,
-            spo_stake: HashMap::new(),
-        }
-    }
-
     /// Update current fields to new epoch values. The function should be called
     /// after all block processing is done.
     pub fn advance_epoch(&mut self, epoch_blk: &BlockInfo) -> Result<()> {
@@ -186,6 +169,7 @@ impl State {
     pub fn process_new_epoch(
         &mut self,
         new_block: &BlockInfo,
+        vconf: &VerificationConfig,
     ) -> Result<GovernanceOutcomesMessage> {
         let mut output = GovernanceOutcomesMessage {
             alonzo_babbage_outcomes: self.alonzo_babbage_voting.finalize_voting(new_block)?,
@@ -201,6 +185,7 @@ impl State {
                 &voting_state,
                 &self.drep_stake,
                 &self.spo_stake,
+                vconf,
             )?;
             self.conway_voting.update_action_status_with_outcomes(new_block.epoch, &ratified)?;
             self.conway_voting.include_pending_votes()?;
@@ -220,7 +205,7 @@ impl State {
             output.conway_outcomes = ratified;
         }
 
-        self.conway_voting.print_outcome_to_verify(&output.conway_outcomes)?;
+        self.conway_voting.print_outcome_to_verify(&output.conway_outcomes, vconf)?;
         Ok(output)
     }
 
