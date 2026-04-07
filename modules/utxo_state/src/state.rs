@@ -129,9 +129,6 @@ pub struct State {
 
     /// Address delta publish mode for emitted observer deltas.
     address_delta_publish_mode: AddressDeltaPublishMode,
-
-    /// Is Phase 2 validation enabled (by default it is disabled)
-    phase2_enabled: bool,
 }
 
 impl State {
@@ -139,7 +136,6 @@ impl State {
     pub fn new(
         immutable_utxo_store: Arc<dyn ImmutableUTXOStore>,
         address_delta_publish_mode: AddressDeltaPublishMode,
-        phase2_enabled: bool,
     ) -> Self {
         Self {
             last_slot: 0,
@@ -162,7 +158,6 @@ impl State {
             avvm_cancelled_value: None,
             pointer_address_values: None,
             address_delta_publish_mode,
-            phase2_enabled,
         }
     }
 
@@ -921,11 +916,6 @@ impl State {
             }))
         }
     }
-
-    #[allow(dead_code)]
-    pub fn is_phase2_enabled(&self) -> bool {
-        self.phase2_enabled
-    }
 }
 
 /// Internal helper used during `handle` aggregation for summing UTxO deltas.
@@ -990,16 +980,12 @@ pub mod tests {
     }
 
     pub fn new_state() -> State {
-        new_state_with_mode(AddressDeltaPublishMode::Compact, false)
+        new_state_with_mode(AddressDeltaPublishMode::Compact)
     }
 
-    fn new_state_with_mode(mode: AddressDeltaPublishMode, phase2_enabled: bool) -> State {
+    fn new_state_with_mode(mode: AddressDeltaPublishMode) -> State {
         let config = Arc::new(Config::builder().build().unwrap());
-        State::new(
-            Arc::new(InMemoryImmutableUTXOStore::new(config)),
-            mode,
-            phase2_enabled,
-        )
+        State::new(Arc::new(InMemoryImmutableUTXOStore::new(config)), mode)
     }
 
     fn policy_id() -> PolicyId {
@@ -1591,7 +1577,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn extended_delta_spent_by_and_created_datum_are_preserved() {
-        let mut state = new_state_with_mode(AddressDeltaPublishMode::Extended, false);
+        let mut state = new_state_with_mode(AddressDeltaPublishMode::Extended);
         let observer = Arc::new(RecordingDeltaObserver::new());
         state.register_address_delta_observer(observer.clone());
 
@@ -1655,7 +1641,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn extended_delta_omits_spent_entries_when_tx_has_no_outputs() {
-        let mut state = new_state_with_mode(AddressDeltaPublishMode::Extended, false);
+        let mut state = new_state_with_mode(AddressDeltaPublishMode::Extended);
         let observer = Arc::new(RecordingDeltaObserver::new());
         state.register_address_delta_observer(observer.clone());
 

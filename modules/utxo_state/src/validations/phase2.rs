@@ -9,18 +9,11 @@
 //! It verifies that all scripts in a transaction execute successfully within their
 //! allocated execution budgets.
 //!
-//! # Feature Flag
-//!
-//! Phase 2 validation is disabled by default. Enable it via configuration:
-//! ```toml
-//! [module.tx-unpacker]
-//! phase2_enabled = true
-//! ```
 //!
 //! # Example
 //!
 //! ```ignore
-//! use acropolis_module_tx_unpacker::validations::phase2::{
+//! use acropolis_module_utxo_state::validations::phase2::{
 //!     evaluate_script, ExUnits, PlutusVersion,
 //! };
 //!

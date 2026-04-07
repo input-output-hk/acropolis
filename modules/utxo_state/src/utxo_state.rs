@@ -311,8 +311,7 @@ impl UTXOState {
             _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
         let snapshot_store = store.clone();
-        let phase2_enabled = config.get_bool("phase2-enabled").unwrap_or(false);
-        let mut state = State::new(store, address_delta_publish_mode, phase2_enabled);
+        let mut state = State::new(store, address_delta_publish_mode);
 
         // Create address delta publisher and pass it observations
         let deltas_publisher =
