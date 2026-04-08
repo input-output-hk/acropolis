@@ -5,9 +5,9 @@
 # ============================================================================
 [global.startup]
 network-name = "preview"
-startup-mode = "genesis"   # Options: "genesis" | "snapshot"
-sync-mode = "mithril"      # Options: "mithril" | "upstream"
-block-flow-mode = "direct" # Options: "direct" | "consensus"
+startup-mode = "genesis"      # Options: "genesis" | "snapshot"
+sync-mode = "mithril"         # Options: "mithril" | "upstream"
+block-flow-mode = "consensus" # Options: "direct"  | "consensus"
 topic = "cardano.sequence.start"
 
 # ============================================================================
