@@ -7,6 +7,7 @@
 network-name = "preview"
 startup-mode = "genesis"   # Options: "genesis" | "snapshot"
 sync-mode = "mithril"      # Options: "mithril" | "upstream"
+block-flow-mode = "direct" # Options: "direct" | "consensus"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -23,6 +24,14 @@ download-max-age = "never"
 pause = "none"
 # Stop constraint likewise
 stop = "none"
+# Block to induce a rollback at
+rollback-at-block = 84554
+# Number of blocks to rollback (max is k)
+blocks-to-rollback = 10
+
+[monitor]
+output = "monitor.json" # Write to a file named monitor.json
+frequency_secs = 5.0
 
 [module.snapshot-bootstrapper]
 epoch = 999

@@ -2,10 +2,19 @@
 //! Keeps per-block state for rollbacks or per-epoch state for historical lookups
 //! Use imbl collections in the state to avoid memory explosion!
 
-use std::collections::VecDeque;
+use config::Config;
+use serde::Serialize;
+use std::{
+    collections::VecDeque,
+    fs::{self, File},
+    io::Write,
+};
 use tracing::info;
 
 use crate::params::SECURITY_PARAMETER_K;
+
+pub const DEFAULT_DUMP_BLOCK: &str = "startup.dump-state-block";
+pub const DEFAULT_DUMP_EPOCH: &str = "startup.dump-state-epoch";
 
 pub enum StateHistoryStore {
     Bounded(u64), // Used for rollbacks, bounded at k
@@ -35,15 +44,36 @@ pub struct StateHistory<S> {
     module: String,
 
     store: StateHistoryStore,
+
+    dump_index: Option<u64>,
+
+    rolled_back: bool,
 }
 
-impl<S: Clone + Default> StateHistory<S> {
+pub enum StoreType {
+    Block,
+    Epoch,
+}
+
+impl<S: Clone + Default + Serialize> StateHistory<S> {
     /// Construct
-    pub fn new(module: &str, store: StateHistoryStore) -> Self {
+    pub fn new(
+        module: &str,
+        store: StateHistoryStore,
+        config: &Config,
+        store_type: StoreType,
+    ) -> Self {
+        let dump_index = match store_type {
+            StoreType::Block => config.get::<u64>(DEFAULT_DUMP_BLOCK).ok(),
+            StoreType::Epoch => config.get::<u64>(DEFAULT_DUMP_EPOCH).ok(),
+        };
+
         Self {
             history: VecDeque::new(),
             module: module.to_string(),
             store,
+            dump_index,
+            rolled_back: false,
         }
     }
 
@@ -77,6 +107,7 @@ impl<S: Clone + Default> StateHistory<S> {
                 break;
             }
         }
+        self.rolled_back = true;
         self.get_current_state()
     }
 
@@ -132,6 +163,83 @@ impl<S: Clone + Default> StateHistory<S> {
                 self.history.push_back(HistoryEntry { index, state });
             }
         }
+
+        if let Some(dump_index) = self.dump_index {
+            if index == dump_index {
+                if self.rolled_back {
+                    if self.compare_states() {
+                        tracing::info!("{} rollback validation success", self.module);
+                    } else {
+                        tracing::error!("{} rollback validation failed", self.module);
+                    };
+                } else {
+                    self.dump_to_file();
+                }
+            }
+        }
+    }
+
+    fn dump_to_file(&self) {
+        if let Some(entry) = self.history.back() {
+            let bytes = match bincode::serialize(&entry.state) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    tracing::error!("{}", e);
+                    return;
+                }
+            };
+
+            let mut file = match File::create(self.module.clone()) {
+                Ok(file) => file,
+                Err(e) => {
+                    tracing::error!("{}", e);
+                    return;
+                }
+            };
+
+            match file.write_all(&bytes) {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("{}", e);
+                    return;
+                }
+            }
+
+            info!(
+                "{} dumped state at index {} to {} ({} bytes)",
+                self.module,
+                entry.index,
+                self.module,
+                bytes.len()
+            );
+        } else {
+            info!("{} no state to dump", self.module);
+        }
+    }
+
+    fn compare_states(&mut self) -> bool {
+        let bytes_pre = match fs::read(self.module.clone()) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!("failed to read {}: {}", self.module, e);
+                return false;
+            }
+        };
+
+        let Some(after_state) = self.history.back().map(|e| &e.state) else {
+            info!("{} no current state to compare", self.module);
+            return false;
+        };
+
+        let bytes_after = match bincode::serialize(after_state) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!("serialize after failed: {}", e);
+                return false;
+            }
+        };
+
+        bytes_pre == bytes_after
     }
 }
 

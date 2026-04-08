@@ -11,7 +11,7 @@ use acropolis_common::{
         StateTransitionMessage,
     },
     protocol_params::Nonce,
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, StoreType},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -305,6 +305,8 @@ impl BlockVrfValidator {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "block_vrf_validator",
             StateHistoryStore::default_block_store(),
+            &config,
+            StoreType::Block,
         )));
 
         // Start run task

@@ -8,6 +8,7 @@ use acropolis_common::messages::{
     GovernanceOutcomesMessage, SnapshotMessage, SnapshotStateMessage, StateTransitionMessage,
 };
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::state_history::StoreType;
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
     queries::parameters::{
@@ -176,11 +177,15 @@ impl ParametersState {
             Arc::new(Mutex::new(StateHistory::<State>::new(
                 "ParameterState",
                 StateHistoryStore::Unbounded,
+                &config,
+                StoreType::Epoch,
             )))
         } else {
             Arc::new(Mutex::new(StateHistory::new(
                 "ParameterState",
                 StateHistoryStore::default_epoch_store(),
+                &config,
+                StoreType::Epoch,
             )))
         };
 

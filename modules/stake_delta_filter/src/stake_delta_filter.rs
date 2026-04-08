@@ -2,21 +2,15 @@
 //! Reads address deltas and filters out only stake addresses from it; also resolves pointer addresses.
 
 use acropolis_common::{
-    caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
-    declare_cardano_reader,
-    messages::{
+    NetworkId, caryatid::{PrimaryRead, RollbackWrapper, ValidationContext}, configuration::StartupMode, declare_cardano_reader, messages::{
         AddressDeltasMessage, CardanoMessage, Message, StateQuery, StateQueryResponse,
         StateTransitionMessage, TxCertificatesMessage,
-    },
-    queries::{
+    }, queries::{
         errors::QueryError,
         stake_deltas::{
-            StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
+            DEFAULT_STAKE_DELTAS_QUERY_TOPIC, StakeDeltaQuery, StakeDeltaQueryResponse
         },
-    },
-    state_history::{StateHistory, StateHistoryStore},
-    NetworkId,
+    }, state_history::{StateHistory, StateHistoryStore, StoreType}
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -81,7 +75,7 @@ mod utils;
 use state::{DeltaPublisher, State};
 use utils::{process_message, CacheMode, PointerCache, Tracker};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 struct StakeDeltaFilterParams {
     stake_address_delta_topic: String,
     validation_topic: String,
@@ -382,6 +376,8 @@ impl StakeDeltaFilter {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "stake_delta_filter",
             StateHistoryStore::default_block_store(),
+            &context.config,
+            StoreType::Block,
         )));
         let history_tick = history.clone();
 

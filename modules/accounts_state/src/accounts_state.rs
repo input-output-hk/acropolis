@@ -19,7 +19,7 @@ use acropolis_common::{
         },
         errors::QueryError,
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, StoreType},
     Era,
 };
 use anyhow::{bail, Result};
@@ -692,6 +692,8 @@ impl AccountsState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AccountsState",
             StateHistoryStore::default_block_store(),
+            &config,
+            StoreType::Block,
         )));
         let history_query = history.clone();
         let history_tick = history.clone();

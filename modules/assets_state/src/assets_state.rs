@@ -18,7 +18,7 @@ use acropolis_common::{
         assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
         errors::QueryError,
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, StoreType},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -253,6 +253,8 @@ impl AssetsState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "AssetsState",
             StateHistoryStore::default_block_store(),
+            &config,
+            StoreType::Block,
         )));
         let address_state = if storage_config.store_addresses {
             Some(Arc::new(Mutex::new(AddressState::new())))

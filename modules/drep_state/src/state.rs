@@ -59,7 +59,7 @@ pub struct DRepRecordExtended {
     pub last_active_epoch: u64,
 }
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default, serde::Serialize)]
 pub struct DRepStorageConfig {
     pub store_info: bool,
     pub store_delegators: bool,
@@ -78,7 +78,7 @@ impl DRepStorageConfig {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct State {
     pub config: DRepStorageConfig,
     pub dreps: HashMap<DRepCredential, DRepRecord>,

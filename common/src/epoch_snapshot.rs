@@ -1,7 +1,7 @@
 use crate::stake_addresses::StakeAddressMap;
 use crate::{
-    Lovelace, NetworkId, PoolId, PoolRegistration, Pots, Ratio, RegistrationChange, StakeAddress,
-    StakeCredential,
+    serialization::serialize_std_hashmap_deterministic, Lovelace, NetworkId, PoolId,
+    PoolRegistration, Pots, Ratio, RegistrationChange, StakeAddress, StakeCredential,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -54,6 +54,7 @@ pub struct EpochSnapshot {
     pub epoch: u64,
 
     /// Map of SPOs by operator ID with their delegation data
+    #[serde(serialize_with = "serialize_std_hashmap_deterministic")]
     pub spos: HashMap<PoolId, SnapshotSPO>,
 
     /// Total SPO (non-OBFT) blocks produced in this epoch

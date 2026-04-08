@@ -22,7 +22,7 @@ use crate::{
     types::{CNightCreation, CNightSpend, DeregistrationEvent, RegistrationEvent},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct StableBlockWindowBounds {
     pub min_block_age_millis: u64,
     pub max_block_age_millis: u64,
@@ -57,7 +57,7 @@ impl StableBlockWindowBounds {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 pub struct State {
     // Epoch aggregate emitted as telemetry when crossing an epoch boundary.
     epoch_totals: EpochTotals,
@@ -542,11 +542,12 @@ mod tests {
         messages::AddressDeltasMessage,
         protocol_params::{ProtocolParams, ShelleyParams},
         rational_number::RationalNumber,
-        state_history::{StateHistory, StateHistoryStore},
+        state_history::{StateHistory, StateHistoryStore, StoreType},
         Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
         Datum, Era, ExtendedAddressDelta, PolicyId, ShelleyAddress, SpentUTxOExtended, TxHash,
         TxIdentifier, UTxOIdentifier, ValueMap,
     };
+    use config::Config;
 
     use crate::{
         configuration::MidnightConfig,
@@ -1191,6 +1192,8 @@ mod tests {
         let mut history = StateHistory::<State>::new(
             "midnight_state_parameters_test",
             StateHistoryStore::Unbounded,
+            &Config::default(),
+            StoreType::Block,
         );
 
         let block1 = test_block_info_for(1, 10);
@@ -1381,6 +1384,8 @@ mod tests {
         let mut history = StateHistory::<State>::new(
             "midnight_state_governance_test",
             StateHistoryStore::Unbounded,
+            &Config::default(),
+            StoreType::Block,
         );
 
         let block1 = test_block_info_for(1, 10);

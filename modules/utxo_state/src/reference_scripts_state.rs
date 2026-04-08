@@ -1,7 +1,7 @@
 use acropolis_common::{ReferenceScript, ScriptHash};
 use imbl::HashMap as ImblHashMap;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ReferenceScriptsState {
     /// <script hash, (ref script struct, and its occurrence count)>
     reference_scripts: ImblHashMap<ScriptHash, (ReferenceScript, u64)>,

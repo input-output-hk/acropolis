@@ -11,7 +11,7 @@ use anyhow::Result;
 use std::ops::RangeInclusive;
 use tracing::info;
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, serde::Serialize)]
 pub struct State {
     pub network_name: String,
     pub current_params: ParametersUpdater,

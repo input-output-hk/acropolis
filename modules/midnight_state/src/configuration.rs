@@ -4,7 +4,7 @@ use acropolis_common::{Address, AssetName, PolicyId};
 use anyhow::{anyhow, Result};
 use config::Config;
 
-#[derive(Debug, serde::Deserialize, Default, Clone)]
+#[derive(Debug, serde::Deserialize, Default, Clone, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct MidnightConfig {
     // CNight Token

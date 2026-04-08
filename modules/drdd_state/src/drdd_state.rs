@@ -5,7 +5,7 @@ use acropolis_common::{
     declare_cardano_reader,
     messages::{CardanoMessage, DRepStakeDistributionMessage, Message, StateTransitionMessage},
     rest_helper::handle_rest_with_query_parameters,
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, StoreType},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -76,6 +76,8 @@ impl DRDDState {
             let history = Arc::new(Mutex::new(StateHistory::<State>::new(
                 "drdd_state",
                 StateHistoryStore::Unbounded,
+                &config,
+                StoreType::Epoch,
             )));
 
             // Subscribe for drdd messages from accounts_state

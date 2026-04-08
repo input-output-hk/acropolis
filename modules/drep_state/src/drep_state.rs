@@ -17,7 +17,7 @@ use acropolis_common::{
             DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
         },
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, StoreType},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -349,6 +349,8 @@ impl DRepState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "DRepState",
             StateHistoryStore::default_block_store(),
+            &config,
+            StoreType::Block,
         )));
         let history_run = history.clone();
         let query_history = history.clone();

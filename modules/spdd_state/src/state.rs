@@ -2,7 +2,7 @@ use acropolis_common::{DelegatedStake, PoolId};
 use imbl::{HashMap, OrdSet};
 use tracing::info;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 pub struct State {
     spdd_history: HashMap<PoolId, DelegatedStake>,
 }

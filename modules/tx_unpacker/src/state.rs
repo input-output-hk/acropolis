@@ -14,7 +14,7 @@ use acropolis_common::{
 use anyhow::Result;
 use pallas::ledger::traverse::MultiEraTx;
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, serde::Serialize)]
 pub struct State {
     pub protocol_params: ProtocolParams,
     /// Whether Phase 2 script validation is enabled (default: false)

@@ -6,7 +6,7 @@ use acropolis_common::{
     commands::chain_sync::ChainSyncCommand,
     configuration::{StartupMode, SyncMode},
     genesis_values::GenesisValues,
-    messages::{CardanoMessage, Command, Message, RawBlockMessage},
+    messages::{CardanoMessage, Command, Message, RawBlockMessage, StateTransitionMessage},
     BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, Point,
 };
 use anyhow::{anyhow, Result};
@@ -47,6 +47,8 @@ const DEFAULT_GENESIS_KEY: &str = r#"
 382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"#;
 const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
 const DEFAULT_STOP: (&str, PauseType) = ("stop", PauseType::NoPause);
+const DEFAULT_ROLLBACK_BLOCK: &str = "rollback-at-block";
+const DEFAULT_BLOCKS_TO_ROLLBACK: (&str, i64) = ("blocks-to-rollback", 0);
 #[cfg(not(target_env = "msvc"))]
 const DEFAULT_PROFILE: (&str, PauseType) = ("profile", PauseType::NoPause);
 const DEFAULT_DOWNLOAD_MAX_AGE: &str = "download-max-age";
@@ -275,6 +277,10 @@ impl MithrilSnapshotFetcher {
             PauseType::from_config(&config, DEFAULT_PAUSE).unwrap_or(PauseType::NoPause);
         let stop_constraint =
             PauseType::from_config(&config, DEFAULT_STOP).unwrap_or(PauseType::NoPause);
+        let mut rollback_block: Option<u64> =
+            config.get_int(DEFAULT_ROLLBACK_BLOCK).ok().and_then(|v| u64::try_from(v).ok());
+        let blocks_to_rollback =
+            config.get_int(DEFAULT_BLOCKS_TO_ROLLBACK.0).unwrap_or(DEFAULT_BLOCKS_TO_ROLLBACK.1);
         #[cfg(not(target_env = "msvc"))]
         let profile_constraint =
             PauseType::from_config(&config, DEFAULT_PROFILE).unwrap_or(PauseType::NoPause);
@@ -292,141 +298,256 @@ impl MithrilSnapshotFetcher {
 
         let mut last_block_info: Option<BlockInfo> = None;
 
-        let mut blocks = hardano::immutable::read_blocks_from_point(&path, point)?;
-
-        // Skip first block if booting from snapshot as `read_blocks_from_point` is inclusive of the point
-        if StartupMode::from_config(&config).is_snapshot() {
-            let _ = blocks.next();
-        }
-
         let mut last_block_number: u64 = 0;
         let mut last_epoch: Option<u64> = None;
         let mut last_era: Option<Era> = None;
-        for raw_block in blocks {
-            let mut stop = false;
-            match raw_block {
-                Ok(raw_block) => {
-                    let span = info_span!("mithril_snapshot_fetcher.raw_block");
-                    async {
-                        // Decode it
-                        // TODO - can we avoid this and still get the slot & number?
-                        let block = MultiEraBlock::decode(&raw_block)?;
-                        let slot = block.slot();
-                        let number = block.number();
+        let mut rollback_was_new_epoch: Option<bool> = None;
+        let mut rollback_epoch: Option<u64> = None;
+        let mut rollback_epoch_slot: Option<u64> = None;
 
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            debug!(number, slot);
-                        }
+        let mut current_point = point;
+        let publish_rollback_block = rollback_block;
+        let mut first_iteration = true;
+        loop {
+            let mut blocks =
+                hardano::immutable::read_blocks_from_point(&path, current_point.clone())?;
 
-                        // Skip EBBs
-                        if let MultiEraBlock::EpochBoundary(_) = block {
-                            return Ok(());
-                        }
+            if first_iteration && StartupMode::from_config(&config).is_snapshot() {
+                let _ = blocks.next();
+                first_iteration = false;
+            }
 
-                        // Error and ignore any out of sequence
-                        if number <= last_block_number && last_block_number != 0 {
-                            error!(
-                                number,
-                                last_block_number, "Rewind of block number in Mithril! Skipped..."
-                            );
-                            return Ok::<(), anyhow::Error>(());
-                        }
-                        last_block_number = number;
+            let mut restarted = false;
 
-                        let (epoch, epoch_slot) = genesis.slot_to_epoch(slot);
-                        let new_epoch = match last_epoch {
-                            Some(last_epoch) => epoch != last_epoch,
-                            None => true,
-                        };
-                        last_epoch = Some(epoch);
+            for raw_block in blocks {
+                let mut stop = false;
+                match raw_block {
+                    Ok(raw_block) => {
+                        let span = info_span!("mithril_snapshot_fetcher.raw_block");
+                        async {
+                            // Decode it
+                            // TODO - can we avoid this and still get the slot & number?
+                            let block = MultiEraBlock::decode(&raw_block)?;
+                            let slot = block.slot();
+                            let number = block.number();
 
-                        if new_epoch {
-                            info!(epoch, number, slot, "New epoch");
-                        }
+                            if tracing::enabled!(tracing::Level::DEBUG) {
+                                debug!(number, slot);
+                            }
 
-                        let timestamp = genesis.slot_to_timestamp(slot);
-                        let era = map_to_block_era(&block)?;
-                        let is_new_era = last_era != Some(era);
-                        last_era = Some(era);
+                            // Skip EBBs
+                            if let MultiEraBlock::EpochBoundary(_) = block {
+                                return Ok(());
+                            }
 
-                        let block_info = BlockInfo {
-                            status: BlockStatus::Immutable,
-                            // Consensus will set the Validate bit if wanted
-                            intent: BlockIntent::Apply,
-                            slot,
-                            number,
-                            hash: BlockHash::from(*block.hash()),
-                            epoch,
-                            epoch_slot,
-                            new_epoch,
-                            is_new_era,
-                            timestamp,
-                            tip_slot: None,
-                            era,
-                        };
-
-                        // Check profile constraint
-                        #[cfg(not(target_env = "msvc"))]
-                        if profile_constraint.should_pause(&block_info) {
-                            let filename = format!(
-                                "memory-{}.jeprof",
-                                profile_constraint.get_filename_part(&block_info)
-                            );
-                            info!("Dumping jemalloc profile to {} ...", filename);
-                            let cfn = std::ffi::CString::new(filename)?;
-                            unsafe {
-                                let _ = tikv_jemalloc_ctl::raw::write(
-                                    b"prof.dump\0",
-                                    cfn.as_ptr() as *const _,
+                            // Error and ignore any out of sequence
+                            if number <= last_block_number && last_block_number != 0 {
+                                error!(
+                                    number,
+                                    last_block_number,
+                                    "Rewind of block number in Mithril! Skipped..."
                                 );
+                                return Ok::<(), anyhow::Error>(());
                             }
-                        }
+                            last_block_number = number;
 
-                        // Check pause constraint
-                        if pause_constraint.should_pause(&block_info) {
-                            if prompt_pause(pause_constraint.get_description()).await {
-                                info!("Continuing without further pauses...");
-                                pause_constraint = PauseType::NoPause;
-                            } else {
-                                pause_constraint.next();
+                            let (epoch, epoch_slot) = genesis.slot_to_epoch(slot);
+                            let new_epoch = match last_epoch {
+                                Some(last_epoch) => epoch != last_epoch,
+                                None => true,
+                            };
+                            last_epoch = Some(epoch);
+
+                            if new_epoch {
+                                info!(epoch, number, slot, "New epoch");
                             }
-                        }
 
-                        // And stop constraint - note we can pause first if we want to
-                        if stop_constraint.should_pause(&block_info) {
-                            info!(number, slot, "Stopping early");
-                            stop = true;
-                        } else {
-                            // Send the block message
-                            let message = RawBlockMessage {
-                                header: block.header().cbor().to_vec(),
-                                body: raw_block,
+                            let timestamp = genesis.slot_to_timestamp(slot);
+                            let era = map_to_block_era(&block)?;
+                            let is_new_era = last_era != Some(era);
+                            last_era = Some(era);
+
+                            let mut block_info = BlockInfo {
+                                status: BlockStatus::Immutable,
+                                // Consensus will set the Validate bit if wanted
+                                intent: BlockIntent::Apply,
+                                slot,
+                                number,
+                                hash: BlockHash::from(*block.hash()),
+                                epoch,
+                                epoch_slot,
+                                new_epoch,
+                                is_new_era,
+                                timestamp,
+                                tip_slot: None,
+                                era,
                             };
 
-                            let message_enum = Message::Cardano((
-                                block_info.clone(),
-                                CardanoMessage::BlockAvailable(message),
-                            ));
+                            // Check profile constraint
+                            #[cfg(not(target_env = "msvc"))]
+                            if profile_constraint.should_pause(&block_info) {
+                                let filename = format!(
+                                    "memory-{}.jeprof",
+                                    profile_constraint.get_filename_part(&block_info)
+                                );
+                                info!("Dumping jemalloc profile to {} ...", filename);
+                                let cfn = std::ffi::CString::new(filename)?;
+                                unsafe {
+                                    let _ = tikv_jemalloc_ctl::raw::write(
+                                        b"prof.dump\0",
+                                        cfn.as_ptr() as *const _,
+                                    );
+                                }
+                            }
 
-                            context
-                                .message_bus
-                                .publish(&block_publish_topic, Arc::new(message_enum))
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish block message: {e}"));
+                            // Check pause constraint
+                            if pause_constraint.should_pause(&block_info) {
+                                if prompt_pause(pause_constraint.get_description()).await {
+                                    info!("Continuing without further pauses...");
+                                    pause_constraint = PauseType::NoPause;
+                                } else {
+                                    pause_constraint.next();
+                                }
+                            }
 
-                            last_block_info = Some(block_info);
+                            if let Some(block_number) = rollback_block {
+                                if block_number - blocks_to_rollback as u64 == block_info.number {
+                                    current_point = pallas::network::miniprotocols::Point::Specific(
+                                        block.slot(),
+                                        vec![],
+                                    );
+                                    rollback_was_new_epoch = Some(block_info.new_epoch);
+                                    rollback_epoch = Some(block_info.epoch);
+                                    rollback_epoch_slot = Some(block_info.epoch_slot);
+                                }
+                            }
+
+                            // And stop constraint - note we can pause first if we want to
+                            if stop_constraint.should_pause(&block_info) {
+                                info!(number, slot, "Stopping early");
+                                stop = true;
+                            } else if let Some(block_number) = rollback_block {
+                                if block_number == block_info.number {
+                                    block_info.number -= blocks_to_rollback as u64;
+                                    block_info.new_epoch =
+                                        rollback_was_new_epoch.expect("No new epoch set");
+                                    block_info.epoch = rollback_epoch.expect("No epoch set");
+                                    block_info.epoch_slot =
+                                        rollback_epoch_slot.expect("No epoch slot set");
+                                    let message_enum = Message::Cardano((
+                                        block_info.clone(),
+                                        CardanoMessage::StateTransition(
+                                            StateTransitionMessage::Rollback(Point::Specific {
+                                                hash: block_info.hash,
+                                                slot: block_info.slot,
+                                            }),
+                                        ),
+                                    ));
+
+                                    context
+                                        .message_bus
+                                        .publish(&block_publish_topic, Arc::new(message_enum))
+                                        .await
+                                        .unwrap_or_else(|e| {
+                                            error!("Failed to publish block message: {e}")
+                                        });
+
+                                    rollback_block = None;
+
+                                    last_block_number =
+                                        block_info.number - blocks_to_rollback as u64 - 1;
+                                    restarted = true;
+                                } else {
+                                    // Send the block message
+                                    let message = RawBlockMessage {
+                                        header: block.header().cbor().to_vec(),
+                                        body: raw_block,
+                                    };
+
+                                    if publish_rollback_block.is_some() && rollback_block.is_none()
+                                    {
+                                        if let Some(rollback_block) = publish_rollback_block {
+                                            if block_info.number
+                                                == rollback_block - blocks_to_rollback as u64
+                                            {
+                                                block_info.new_epoch = rollback_was_new_epoch
+                                                    .expect("No new epoch set");
+                                                block_info.status = BlockStatus::RolledBack;
+                                                tracing::error!("Publishing rolled back block");
+                                            }
+                                        }
+                                    }
+
+                                    let message_enum = Message::Cardano((
+                                        block_info.clone(),
+                                        CardanoMessage::BlockAvailable(message),
+                                    ));
+
+                                    context
+                                        .message_bus
+                                        .publish(&block_publish_topic, Arc::new(message_enum))
+                                        .await
+                                        .unwrap_or_else(|e| {
+                                            error!("Failed to publish block message: {e}")
+                                        });
+
+                                    last_block_info = Some(block_info);
+                                }
+                            } else {
+                                // Send the block message
+                                let message = RawBlockMessage {
+                                    header: block.header().cbor().to_vec(),
+                                    body: raw_block,
+                                };
+
+                                if publish_rollback_block.is_some() && rollback_block.is_none() {
+                                    if let Some(rollback_block) = publish_rollback_block {
+                                        if block_info.number
+                                            == rollback_block - blocks_to_rollback as u64
+                                        {
+                                            block_info.new_epoch =
+                                                rollback_was_new_epoch.expect("No new epoch set");
+                                            block_info.status = BlockStatus::RolledBack;
+                                            tracing::error!("Publishing rolledback block");
+                                        }
+                                    }
+                                }
+
+                                let message_enum = Message::Cardano((
+                                    block_info.clone(),
+                                    CardanoMessage::BlockAvailable(message),
+                                ));
+
+                                context
+                                    .message_bus
+                                    .publish(&block_publish_topic, Arc::new(message_enum))
+                                    .await
+                                    .unwrap_or_else(|e| {
+                                        error!("Failed to publish block message: {e}")
+                                    });
+
+                                last_block_info = Some(block_info);
+                            }
+                            Ok::<(), anyhow::Error>(())
                         }
-                        Ok::<(), anyhow::Error>(())
+                        .instrument(span)
+                        .await?;
                     }
-                    .instrument(span)
-                    .await?;
+                    Err(e) => error!("Error reading block: {e}"),
                 }
-                Err(e) => error!("Error reading block: {e}"),
-            }
 
-            if stop {
+                if stop {
+                    break;
+                }
+
+                if restarted {
+                    break;
+                }
+            }
+            if !restarted {
                 break;
             }
+            tracing::error!("Simulating rollback");
         }
 
         // Send completion message

@@ -8,7 +8,7 @@ use acropolis_common::{
         StateTransitionMessage,
     },
     protocol_params::Nonce,
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, StoreType},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -125,6 +125,8 @@ impl MidnightState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "midnight_state",
             StateHistoryStore::Unbounded,
+            &config,
+            StoreType::Block,
         )));
         let grpc_history = history.clone();
         let grpc_context = context.clone();

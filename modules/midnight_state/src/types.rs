@@ -61,7 +61,7 @@ pub struct Deregistration {
 /// These structs are used internally by the indexing state and are not
 /// exposed by public getter methods.
 /// ---------------------------------------------------------------------------
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct UTxOMeta {
     pub creation: CNightCreation,
     pub spend: Option<CNightSpend>,
@@ -106,7 +106,7 @@ impl TryFrom<&UTxOMeta> for AssetSpend {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct CNightCreation {
     pub holder_address: StakeAddress,
     pub quantity: u64,
@@ -117,7 +117,7 @@ pub struct CNightCreation {
     pub block_timestamp: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct CNightSpend {
     pub block_number: BlockNumber,
     pub block_hash: BlockHash,
@@ -126,7 +126,7 @@ pub struct CNightSpend {
     pub block_timestamp: i64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub struct RegistrationEvent {
     pub block_number: u64,
     pub block_hash: BlockHash,
@@ -154,7 +154,7 @@ impl From<(BlockNumber, &RegistrationEvent)> for Registration {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub struct DeregistrationEvent {
     pub registration_utxo: UTxOIdentifier,
     pub spent_block_timestamp: i64,

@@ -1,17 +1,20 @@
 use acropolis_common::{
     messages::{AccountsBootstrapMessage, SPOStakeDistributionMessage, SPOStateMessage},
+    serialization::serialize_std_hashmap_deterministic,
     PoolId, VrfKeyHash,
 };
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
 /// Epoch data for block vrf validation
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize)]
 pub struct Snapshot {
     /// Map of pool_id to its vrf_key_hash
+    #[serde(serialize_with = "serialize_std_hashmap_deterministic")]
     pub active_spos: HashMap<PoolId, VrfKeyHash>,
 
     /// active stakes keyed by pool id
+    #[serde(serialize_with = "serialize_std_hashmap_deterministic")]
     pub active_stakes: HashMap<PoolId, u64>,
 
     pub total_active_stakes: u64,

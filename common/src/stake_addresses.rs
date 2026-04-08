@@ -1,14 +1,13 @@
 use crate::{
-    math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice,
-    DRepCredential, DelegatedStake, Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress,
-    StakeAddressDelta, Withdrawal,
+    math::update_value_with_delta, messages::DRepDelegationDistribution,
+    serialization::serialize_std_hashmap_deterministic, DRepChoice, DRepCredential, DelegatedStake,
+    Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress, StakeAddressDelta, Withdrawal,
 };
 use anyhow::{anyhow, bail, Result};
 use dashmap::DashMap;
 use imbl::{OrdMap, OrdSet};
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
-use std::collections::HashSet;
 use std::{
     collections::{
         hash_map::{Entry, Iter, Values},
@@ -46,12 +45,14 @@ pub struct AccountState {
     pub address_state: StakeAddressState,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, serde::Serialize)]
 pub struct StakeAddressMap {
+    #[serde(serialize_with = "serialize_std_hashmap_deterministic")]
     inner: HashMap<StakeAddress, StakeAddressState>,
 
     /// Reverse indexing for tracking which stake addresses delegate to a given DRep credential.
-    drep_delegates: HashMap<DRepCredential, HashSet<StakeAddress>>,
+    #[serde(serialize_with = "serialize_std_hashmap_deterministic")]
+    drep_delegates: HashMap<DRepCredential, OrdSet<StakeAddress>>,
 }
 
 impl StakeAddressMap {
