@@ -89,6 +89,11 @@ impl ConsensusTree {
         self.k
     }
 
+    /// Update the security parameter k at runtime (e.g. from protocol params).
+    pub fn update_k(&mut self, new_k: u64) {
+        self.k = new_k;
+    }
+
     /// Take the observer out for reuse (e.g. when re-creating the tree).
     /// Replaces the current observer with a no-op stub.
     pub fn take_observer(&mut self) -> Box<dyn ConsensusTreeObserver + Send> {

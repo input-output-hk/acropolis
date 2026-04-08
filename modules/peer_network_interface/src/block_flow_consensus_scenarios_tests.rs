@@ -7,11 +7,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use acropolis_common::messages::{
-    BlockOfferedMessage, BlockRescindedMessage, CardanoMessage, ConsensusMessage, Message,
-    StateTransitionMessage,
+    BlockOfferedMessage, BlockRescindedMessage, CardanoMessage, ConsensusMessage,
+    GenesisCompleteMessage, Message, StateTransitionMessage,
 };
 use acropolis_common::{
-    BlockHash, Era, configuration::BlockFlowMode, genesis_values::GenesisValues,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, configuration::BlockFlowMode,
+    genesis_values::GenesisValues,
 };
 use acropolis_module_consensus::Consensus;
 use caryatid_sdk::{Context, Subscription, mock_bus::MockBus};
@@ -91,6 +92,35 @@ async fn make_harness() -> TestHarness {
     let consensus = Consensus;
     consensus.init(context.clone(), context.config.clone()).await.expect("consensus init failed");
 
+    // Publish GenesisComplete so the consensus module can proceed past its
+    // genesis wait and enter the main select loop.
+    let genesis_block_info = BlockInfo {
+        status: BlockStatus::Bootstrap,
+        intent: BlockIntent::Apply,
+        slot: 0,
+        number: 0,
+        hash: BlockHash::new([0; 32]),
+        epoch: 0,
+        epoch_slot: 0,
+        new_epoch: false,
+        is_new_era: false,
+        tip_slot: None,
+        timestamp: 0,
+        era: Era::Byron,
+    };
+    context
+        .publish(
+            "cardano.sequence.bootstrapped",
+            Arc::new(Message::Cardano((
+                genesis_block_info,
+                CardanoMessage::GenesisComplete(GenesisCompleteMessage {
+                    values: GenesisValues::mainnet(),
+                }),
+            ))),
+        )
+        .await
+        .expect("publish GenesisComplete");
+
     // Subscribe to offers topic before creating the flow handler so we don't
     // miss any early messages.
     let offers_sub =
@@ -106,6 +136,7 @@ async fn make_harness() -> TestHarness {
         node_addresses: vec![],
         cache_dir: PathBuf::from("/tmp"),
         genesis_values: None,
+        protocol_params_topic: "cardano.protocol.parameters".to_string(),
         consensus_topic: "cardano.consensus.offers".to_string(),
         block_wanted_topic: "cardano.consensus.wants".to_string(),
         target_peer_count: 15,

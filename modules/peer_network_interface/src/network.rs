@@ -284,6 +284,9 @@ impl NetworkManager {
                     self.handle_disconnect(peer);
                 }
             }
+            NetworkEvent::SecurityParamUpdate { k } => {
+                self.flow_handler.update_security_param(k);
+            }
         }
 
         Ok(())
@@ -693,6 +696,10 @@ pub enum NetworkEvent {
         from_peer: PeerId,
         addresses: Vec<String>,
     },
+    /// Updated security parameter k from protocol parameters.
+    SecurityParamUpdate {
+        k: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -760,6 +767,7 @@ mod tests {
             node_addresses: vec![],
             cache_dir: PathBuf::from("/tmp"),
             genesis_values: None,
+            protocol_params_topic: "test.protocol.parameters".to_string(),
             consensus_topic: "test.consensus.offers".to_string(),
             block_wanted_topic: "test.consensus.wants".to_string(),
             target_peer_count: 15,

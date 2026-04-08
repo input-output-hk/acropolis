@@ -4,7 +4,7 @@ use std::sync::Arc;
 use acropolis_common::BlockHash;
 use acropolis_common::messages::{
     BlockOfferedMessage, BlockRejectedMessage, BlockRescindedMessage, BlockWantedMessage,
-    ConsensusMessage, Message,
+    CardanoMessage, ConsensusMessage, Message,
 };
 use acropolis_common::params::SECURITY_PARAMETER_K;
 use anyhow::Result;
@@ -38,6 +38,12 @@ impl BlockFlowHandler {
         context: Arc<Context<Message>>,
         events_sender: mpsc::Sender<NetworkEvent>,
     ) -> Result<Self> {
+        let params_subscription = context.subscribe(&config.protocol_params_topic).await?;
+        context.run(Self::forward_protocol_params_to_events(
+            params_subscription,
+            events_sender.clone(),
+        ));
+
         match block_flow_mode {
             BlockFlowMode::Direct => {
                 info!("Block flow mode: Direct (auto-fetch)");
@@ -61,6 +67,29 @@ impl BlockFlowHandler {
                 )))
             }
         }
+    }
+
+    async fn forward_protocol_params_to_events(
+        mut subscription: Box<dyn Subscription<Message>>,
+        events_sender: mpsc::Sender<NetworkEvent>,
+    ) {
+        while let Ok((_, msg)) = subscription.read().await {
+            let k = match msg.as_ref() {
+                Message::Cardano((_, CardanoMessage::ProtocolParams(params))) => {
+                    params.params.shelley.as_ref().map(|s| s.security_param as u64).or_else(|| {
+                        params.params.byron.as_ref().map(|b| b.protocol_consts.k as u64)
+                    })
+                }
+                _ => None,
+            };
+            if let Some(k) = k
+                && events_sender.send(NetworkEvent::SecurityParamUpdate { k }).await.is_err()
+            {
+                error!("event channel closed");
+                return;
+            }
+        }
+        error!("protocol params subscription closed");
     }
 
     async fn forward_block_wanted_to_events(
@@ -220,6 +249,14 @@ impl BlockFlowHandler {
         match self {
             BlockFlowHandler::Direct { chain } => *chain = ChainState::new(),
             BlockFlowHandler::Consensus(state) => state.handle_sync_reset(),
+        }
+    }
+
+    /// Update the security parameter k used for deque capping.
+    pub fn update_security_param(&mut self, k: u64) {
+        match self {
+            BlockFlowHandler::Direct { chain } => chain.update_security_param(k),
+            BlockFlowHandler::Consensus(state) => state.update_security_param(k),
         }
     }
 
@@ -507,6 +544,7 @@ pub struct ConsensusFlowState {
     blocks_published_count: u64,
     headers: HashMap<(u64, BlockHash), Header>,
     published_points: VecDeque<SpecificPoint>,
+    security_param_k: u64,
 }
 
 impl ConsensusFlowState {
@@ -519,6 +557,18 @@ impl ConsensusFlowState {
             blocks_published_count: 0,
             headers: HashMap::new(),
             published_points: VecDeque::new(),
+            security_param_k: SECURITY_PARAMETER_K,
+        }
+    }
+
+    fn update_security_param(&mut self, k: u64) {
+        if k != self.security_param_k {
+            info!(
+                old_k = self.security_param_k,
+                new_k = k,
+                "Updating ConsensusFlowState security parameter"
+            );
+            self.security_param_k = k;
         }
     }
 
@@ -604,7 +654,7 @@ impl ConsensusFlowState {
                         slot: header.slot,
                         hash: header.hash,
                     });
-                    while self.published_points.len() > SECURITY_PARAMETER_K as usize {
+                    while self.published_points.len() > self.security_param_k as usize {
                         self.published_points.pop_front();
                     }
                     *published_blocks += 1;
@@ -1181,18 +1231,19 @@ mod tests {
     #[test]
     fn consensus_published_points_capped_at_k() {
         let mut state = make_test_consensus_state();
+        let k = state.security_param_k;
 
-        for slot in 1..=(SECURITY_PARAMETER_K + 100) {
+        for slot in 1..=(k + 100) {
             state.published_points.push_back(SpecificPoint {
                 slot,
                 hash: hash_for_slot(slot),
             });
-            while state.published_points.len() > SECURITY_PARAMETER_K as usize {
+            while state.published_points.len() > k as usize {
                 state.published_points.pop_front();
             }
         }
 
-        assert_eq!(state.published_points.len(), SECURITY_PARAMETER_K as usize);
+        assert_eq!(state.published_points.len(), k as usize);
         assert_eq!(state.published_points.front().unwrap().slot, 101);
     }
 

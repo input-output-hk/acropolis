@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use crate::{connection::Header, network::PeerId};
 use acropolis_common::{BlockHash, hash::Hash, params::SECURITY_PARAMETER_K};
 use pallas::network::miniprotocols::Point;
-use tracing::warn;
+use tracing::{info, warn};
 
 #[derive(Debug)]
 struct BlockData {
@@ -140,7 +140,7 @@ impl SpecificPoint {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ChainState {
     pub preferred_upstream: Option<PeerId>,
     blocks: BTreeMap<u64, SlotBlockData>,
@@ -149,11 +149,38 @@ pub struct ChainState {
     rolled_back_to: Option<Header>,
     tips: HashMap<PeerId, Point>,
     waiting_for_first_message: bool,
+    security_param_k: u64,
+}
+
+impl Default for ChainState {
+    fn default() -> Self {
+        Self {
+            preferred_upstream: None,
+            blocks: BTreeMap::new(),
+            published_blocks: VecDeque::new(),
+            unpublished_blocks: VecDeque::new(),
+            rolled_back_to: None,
+            tips: HashMap::new(),
+            waiting_for_first_message: false,
+            security_param_k: SECURITY_PARAMETER_K,
+        }
+    }
 }
 
 impl ChainState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn update_security_param(&mut self, k: u64) {
+        if k != self.security_param_k {
+            info!(
+                old_k = self.security_param_k,
+                new_k = k,
+                "Updating ChainState security parameter"
+            );
+            self.security_param_k = k;
+        }
     }
 
     pub fn handle_roll_forward(&mut self, id: PeerId, header: Header) -> Vec<PeerId> {
@@ -358,7 +385,7 @@ impl ChainState {
         }
         if let Some(published) = self.unpublished_blocks.pop_front() {
             self.published_blocks.push_back(published);
-            while self.published_blocks.len() > SECURITY_PARAMETER_K as usize {
+            while self.published_blocks.len() > self.security_param_k as usize {
                 let Some(block) = self.published_blocks.pop_front() else {
                     break;
                 };

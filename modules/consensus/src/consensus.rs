@@ -6,11 +6,13 @@ pub mod tree_block;
 pub mod tree_error;
 pub mod tree_observer;
 
+use acropolis_common::params::SECURITY_PARAMETER_K;
 use acropolis_common::{
     configuration::{get_bool_flag, get_string_flag, get_u64_flag, BlockFlowMode},
+    genesis_values::GenesisValues,
     messages::{
         BlockRejectedMessage, BlockWantedMessage, CardanoMessage, ConsensusMessage, Message,
-        RawBlockMessage, StateTransitionMessage,
+        ProtocolParamsMessage, RawBlockMessage, StateTransitionMessage,
     },
     types::{BlockInfo, Point},
     validation::ValidationStatus,
@@ -38,7 +40,8 @@ const DEFAULT_CONSENSUS_WANTS_TOPIC: (&str, &str) =
     ("consensus-wants-topic", "cardano.consensus.wants");
 const DEFAULT_FORCE_VALIDATION: (&str, bool) = ("force-validation", true);
 const DEFAULT_VALIDATION_TIMEOUT: (&str, u64) = ("validation-timeout", 60); // seconds
-const DEFAULT_SECURITY_PARAMETER: (&str, u64) = ("security-parameter", 2160); // TODO: This should come from the protocol params message security_param
+const DEFAULT_PROTOCOL_PARAMS_TOPIC: (&str, &str) = ("protocol-params-topic", "cardano.protocol.parameters");
+const DEFAULT_GENESIS_COMPLETION_TOPIC: (&str, &str) = ("genesis-completion-topic", "cardano.sequence.bootstrapped");
 
 /// Events emitted by the consensus tree observer, queued for async publishing.
 enum ObserverEvent {
@@ -186,8 +189,11 @@ impl Consensus {
         let force_validation = get_bool_flag(&config, DEFAULT_FORCE_VALIDATION);
         info!("Force validation and chain selection: {force_validation}");
 
-        let security_parameter = get_u64_flag(&config, DEFAULT_SECURITY_PARAMETER);
-        info!("Security parameter k={security_parameter}");
+        let protocol_params_topic = get_string_flag(&config, DEFAULT_PROTOCOL_PARAMS_TOPIC);
+        info!("Subscribing to protocol parameters on '{protocol_params_topic}'");
+
+        let genesis_completion_topic = get_string_flag(&config, DEFAULT_GENESIS_COMPLETION_TOPIC);
+        info!("Subscribing to genesis completion on '{genesis_completion_topic}'");
 
         // Subscribe for incoming blocks (BlockAvailable)
         let block_subscription = context.subscribe(&blocks_available_topic).await?;
@@ -200,45 +206,66 @@ impl Consensus {
             None
         };
 
+        // Subscribe to protocol parameters
+        let protocol_params_subscription = context.subscribe(&protocol_params_topic).await?;
+
+        // Subscribe to genesis completion for initial security parameter
+        let mut genesis_subscription = context.subscribe(&genesis_completion_topic).await?;
+
         // Subscribe all the validators
         let validator_subscriptions: Vec<_> =
             try_join_all(validator_topics.iter().map(|topic| context.subscribe(topic))).await?;
 
         let do_validation = !validator_subscriptions.is_empty();
 
-        // Create the consensus tree with a queue-based observer
-        let event_queue: EventQueue = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let observer = Box::new(QueuingConsensusTreeObserver {
-            events: event_queue.clone(),
-        });
-        let tree = ConsensusTree::new(security_parameter, observer);
-
-        let mut runtime = ConsensusRuntime {
-            context: context.clone(),
-            blocks_proposed_topic,
-            consensus_wants_topic,
-            event_queue,
-            pending_post_rollback_marker: None,
-            tree,
-            block_data: HashMap::new(),
-            validator_topics,
-            validator_subscriptions,
-            validation_timeout,
-            do_validation,
-            stats: ConsensusStats::default(),
-        };
-
+        let run_context = context.clone();
         context.run(async move {
+            let genesis_k = Self::wait_genesis_values(&mut genesis_subscription)
+                .await
+                .map(|gv| gv.security_param)
+                .unwrap_or(SECURITY_PARAMETER_K);
+
+            let event_queue: EventQueue = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let observer = Box::new(QueuingConsensusTreeObserver {
+                events: event_queue.clone(),
+            });
+            let tree = ConsensusTree::new(genesis_k, observer);
+
+            let mut runtime = ConsensusRuntime {
+                context: run_context,
+                blocks_proposed_topic,
+                consensus_wants_topic,
+                event_queue,
+                pending_post_rollback_marker: None,
+                tree,
+                block_data: HashMap::new(),
+                validator_topics,
+                validator_subscriptions,
+                validation_timeout,
+                do_validation,
+                stats: ConsensusStats::default(),
+            };
             // TODO: Temporary until consensus flow fully works.
             match flow_mode {
                 BlockFlowMode::Direct => {
-                    runtime.run_direct(block_subscription, force_validation).await;
+                    runtime
+                        .run_direct(
+                            block_subscription,
+                            protocol_params_subscription,
+                            force_validation,
+                        )
+                        .await;
                 }
                 BlockFlowMode::Consensus => {
                     let consensus_subscription = consensus_subscription
                         .expect("consensus subscription missing for consensus flow mode");
                     runtime
-                        .run_consensus(block_subscription, consensus_subscription, force_validation)
+                        .run_consensus(
+                            block_subscription,
+                            consensus_subscription,
+                            protocol_params_subscription,
+                            force_validation,
+                        )
                         .await;
                 }
             }
@@ -246,14 +273,50 @@ impl Consensus {
 
         Ok(())
     }
+
+    async fn wait_genesis_values(
+        subscription: &mut Box<dyn Subscription<Message>>,
+    ) -> Result<GenesisValues> {
+        let (_, message) = subscription.read().await?;
+        match message.as_ref() {
+            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                Ok(complete.values.clone())
+            }
+            msg => anyhow::bail!("Unexpected message on genesis completion topic: {msg:?}"),
+        }
+    }
 }
 
 impl ConsensusRuntime {
+    /// Update the security parameter from a protocol params message.
+    ///
+    /// Prefers `shelley.security_param` (Shelley+ eras). Falls back to
+    /// `byron.protocol_consts.k` during the Byron era when shelley params
+    /// have not yet been initialised.
+    fn handle_protocol_params(&mut self, params: &ProtocolParamsMessage) {
+        let new_k = if let Some(shelley) = &params.params.shelley {
+            shelley.security_param as u64
+        } else if let Some(byron) = &params.params.byron {
+            byron.protocol_consts.k as u64
+        } else {
+            return;
+        };
+
+        if new_k != self.tree.k() {
+            info!(
+                old_k = self.tree.k(),
+                new_k, "Updating security parameter from protocol params"
+            );
+            self.tree.update_k(new_k);
+        }
+    }
+
     /// Main select loop for consensus flow: dispatches incoming messages to handler functions.
     async fn run_consensus(
         &mut self,
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut consensus_subscription: Box<dyn Subscription<Message>>,
+        mut protocol_params_subscription: Box<dyn Subscription<Message>>,
         force_validation: bool,
     ) {
         // If force_validation is disabled, treat immutable Mithril replay blocks
@@ -327,6 +390,17 @@ impl ConsensusRuntime {
                     }
 
                     self.stats.maybe_log();
+                }
+
+                result = protocol_params_subscription.read() => {
+                    let Ok((_, message)) = result else {
+                        error!("Protocol params message read failed");
+                        return;
+                    };
+
+                    if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) = message.as_ref() {
+                        self.handle_protocol_params(params);
+                    }
                 }
             }
         }
@@ -895,41 +969,56 @@ impl ConsensusRuntime {
     async fn run_direct(
         &mut self,
         mut block_subscription: Box<dyn Subscription<Message>>,
+        mut protocol_params_subscription: Box<dyn Subscription<Message>>,
         force_validation: bool,
     ) {
         loop {
-            let Ok((_, message)) = block_subscription.read().await else {
-                error!("Block message read failed");
-                return;
-            };
-
-            match message.as_ref() {
-                Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
-                    let block_info = if force_validation && self.do_validation {
-                        raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
-                    } else {
-                        raw_blk_info.clone()
+            tokio::select! {
+                result = block_subscription.read() => {
+                    let Ok((_, message)) = result else {
+                        error!("Block message read failed");
+                        return;
                     };
 
-                    let span = info_span!("consensus", block = block_info.number);
-                    self.handle_block_available_direct(block_info, raw_block.clone())
-                        .instrument(span)
-                        .await;
+                    match message.as_ref() {
+                        Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
+                            let block_info = if force_validation && self.do_validation {
+                                raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
+                            } else {
+                                raw_blk_info.clone()
+                            };
+
+                            let span = info_span!("consensus", block = block_info.number);
+                            self.handle_block_available_direct(block_info, raw_block.clone())
+                                .instrument(span)
+                                .await;
+                        }
+
+                        Message::Cardano((
+                            _,
+                            CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                        )) => {
+                            self.context
+                                .message_bus
+                                .publish(&self.blocks_proposed_topic, message.clone())
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        }
+
+                        _ => error!("Unexpected message type: {message:?}"),
+                    }
                 }
 
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
-                    // Pass rollback to all validators and state modules.
-                    self.context
-                        .message_bus
-                        .publish(&self.blocks_proposed_topic, message.clone())
-                        .await
-                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                }
+                result = protocol_params_subscription.read() => {
+                    let Ok((_, message)) = result else {
+                        error!("Protocol params message read failed");
+                        return;
+                    };
 
-                _ => error!("Unexpected message type: {message:?}"),
+                    if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) = message.as_ref() {
+                        self.handle_protocol_params(params);
+                    }
+                }
             }
         }
     }
@@ -1035,7 +1124,7 @@ mod tests {
 
         let event_queue: EventQueue = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut tree = ConsensusTree::new(
-            DEFAULT_SECURITY_PARAMETER.1,
+            SECURITY_PARAMETER_K,
             Box::new(QueuingConsensusTreeObserver {
                 events: event_queue.clone(),
             }),
