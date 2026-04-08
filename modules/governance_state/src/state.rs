@@ -20,7 +20,7 @@ use acropolis_common::{
 };
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
-use std::collections::HashMap;
+use imbl::HashMap;
 use tracing::{debug, info};
 
 #[derive(Default, Clone)]
@@ -252,9 +252,9 @@ impl State {
     pub fn get_proposal_votes(
         &self,
         proposal_id: &GovActionId,
-    ) -> Result<HashMap<Voter, (TxHash, VotingProcedure)>> {
+    ) -> Result<std::collections::HashMap<Voter, (TxHash, VotingProcedure)>> {
         match self.conway_voting.votes.get(proposal_id) {
-            Some(all_votes) => Ok(all_votes.clone()),
+            Some(all_votes) => Ok(all_votes.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
             None => Err(anyhow::anyhow!(
                 "Governance action: {:?} not found",
                 proposal_id

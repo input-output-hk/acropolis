@@ -199,15 +199,16 @@ pub struct ConwayVoting {
     conway: Option<ConwayParams>,
     bootstrap: Option<bool>,
 
-    pub proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
+    pub proposals: imbl::HashMap<GovActionId, (u64, ProposalProcedure)>,
     pub proposal_order: Vec<GovActionId>,
-    pub pending_votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
-    pub votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
+    pub pending_votes: imbl::HashMap<GovActionId, imbl::HashMap<Voter, (TxHash, VotingProcedure)>>,
+    pub votes: imbl::HashMap<GovActionId, imbl::HashMap<Voter, (TxHash, VotingProcedure)>>,
     action_status: HashMap<GovActionId, ActionStatus>,
 
     verify_votes_files: Option<String>,
     verification_output_file: Option<String>,
-    reference_aggregates: HashMap<(u64, GovActionId), (AggregatedVotes, AggregatedVotesOutcome)>,
+    reference_aggregates:
+        imbl::HashMap<(u64, GovActionId), (AggregatedVotes, AggregatedVotesOutcome)>,
     action_proposal_count: usize,
     votes_count: usize,
 }
@@ -220,7 +221,7 @@ impl ConwayVoting {
     ) -> Result<Self> {
         let reference_aggregates = match verify_aggregates_file {
             Some(file) => AggregatedVotes::get_from_file(Path::new(&file))?,
-            None => HashMap::new(),
+            None => imbl::HashMap::new(),
         };
 
         Ok(Self {
@@ -514,8 +515,8 @@ impl ConwayVoting {
     fn get_actual_votes(
         &self,
         action_id: &GovActionId,
-        drep_stake: &HashMap<DRepCredential, Lovelace>,
-        spo_stake: &HashMap<PoolId, DelegatedStake>,
+        drep_stake: &imbl::HashMap<DRepCredential, Lovelace>,
+        spo_stake: &imbl::HashMap<PoolId, DelegatedStake>,
         default_vote_list: &[(PoolId, DelegatedStakeDefaultVote)],
     ) -> Result<CastVotes> {
         let mut cast_votes = CastVotes::default();
@@ -658,8 +659,8 @@ impl ConwayVoting {
         new_epoch: u64,
         voting_state: &VotingRegistrationState,
         action_id: &GovActionId,
-        drep_stake: &HashMap<DRepCredential, Lovelace>,
-        spo_stake: &HashMap<PoolId, DelegatedStake>,
+        drep_stake: &imbl::HashMap<DRepCredential, Lovelace>,
+        spo_stake: &imbl::HashMap<PoolId, DelegatedStake>,
         default_vote: &[(PoolId, DelegatedStakeDefaultVote)],
     ) -> Result<Option<VotingOutcome>> {
         let cast_votes = self.get_actual_votes(action_id, drep_stake, spo_stake, default_vote)?;
@@ -819,8 +820,8 @@ impl ConwayVoting {
         &mut self,
         new_block: &BlockInfo,
         voting_state: &VotingRegistrationState,
-        drep_stake: &HashMap<DRepCredential, Lovelace>,
-        spo_stake: &HashMap<PoolId, DelegatedStake>,
+        drep_stake: &imbl::HashMap<DRepCredential, Lovelace>,
+        spo_stake: &imbl::HashMap<PoolId, DelegatedStake>,
         default_vote: &[(PoolId, DelegatedStakeDefaultVote)],
     ) -> Result<Vec<GovernanceOutcome>> {
         let mut outcome = Vec::<GovernanceOutcome>::new();
@@ -949,7 +950,8 @@ impl ConwayVoting {
     }
 
     pub fn include_pending_votes(&mut self) -> Result<()> {
-        for (action_id, pending) in self.pending_votes.drain() {
+        let pending_votes = std::mem::take(&mut self.pending_votes);
+        for (action_id, pending) in pending_votes {
             let votes = self.votes.entry(action_id).or_default();
             for (voter, (tx_hash, voting_proc)) in pending.into_iter() {
                 votes.insert(voter, (tx_hash, voting_proc));
