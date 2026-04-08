@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
+use acropolis_common::validation::UplcMachineError;
 use acropolis_common::{
     validation::Phase2ValidationError, CostModels, ReferenceScript, ScriptHash, ScriptLang,
     TxUTxODeltas, UTXOValue, UTxOIdentifier,
@@ -282,13 +283,19 @@ fn evaluate_single_script(
 
     // Script bytes are CBOR-wrapped (a CBOR byte string containing FLAT data).
     let script_bytes: serde_cbor::Value = serde_cbor::from_slice(cbor_bytes).map_err(|e| {
-        Phase2ValidationError::UplcMachineError(format!("failed to CBOR-unwrap script bytes: {e}"))
+        Phase2ValidationError::UplcMachineError(UplcMachineError::DecodeFailed {
+            script_hash: sc.script_hash,
+            reason: format!("failed to CBOR-unwrap script bytes: {e}"),
+        })
     })?;
     let script_bytes = match script_bytes {
         serde_cbor::Value::Bytes(b) => b,
         _ => {
             return Err(Phase2ValidationError::UplcMachineError(
-                "script CBOR is not a byte string".into(),
+                UplcMachineError::DecodeFailed {
+                    script_hash: sc.script_hash,
+                    reason: "script CBOR is not a byte string".into(),
+                },
             ));
         }
     };
@@ -327,20 +334,32 @@ fn evaluate_single_script(
     match plutus_version {
         PlutusVersion::V1 | PlutusVersion::V2 => match result.term {
             Ok(term) => match term {
-                Term::Error => Err(Phase2ValidationError::UplcMachineError(
-                    "Error term evaluated".into(),
-                )),
+                Term::Error => Err((UplcMachineError::ScriptFailed {
+                    script_hash: sc.script_hash,
+                    message: "Error term evaluated".into(),
+                })
+                .into()),
                 _ => Ok(()),
             },
-            Err(e) => Err(Phase2ValidationError::UplcMachineError(e.to_string())),
+            Err(e) => Err((UplcMachineError::ScriptFailed {
+                script_hash: sc.script_hash,
+                message: e.to_string(),
+            })
+            .into()),
         },
         // Per CIP-117: V3 scripts must evaluate to Constant(Unit)
         PlutusVersion::V3 => match result.term {
             Ok(Term::Constant(Constant::Unit)) => Ok(()),
-            Ok(_) => Err(Phase2ValidationError::UplcMachineError(
-                "evaluated to a non-unit term".into(),
-            )),
-            Err(e) => Err(Phase2ValidationError::UplcMachineError(e.to_string())),
+            Ok(_) => Err((UplcMachineError::ScriptFailed {
+                script_hash: sc.script_hash,
+                message: "Script evaluated to non-unit term".into(),
+            })
+            .into()),
+            Err(e) => Err((UplcMachineError::ScriptFailed {
+                script_hash: sc.script_hash,
+                message: e.to_string(),
+            })
+            .into()),
         },
     }
 }

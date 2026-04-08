@@ -50,7 +50,6 @@ impl TxUnpacker {
         context: Arc<Context<Message>>,
         network_id: NetworkId,
         history: Arc<Mutex<StateHistory<State>>>,
-        phase2_enabled: bool,
         // publishers
         publish_utxo_deltas_topic: Option<String>,
         publish_asset_deltas_topic: Option<String>,
@@ -81,10 +80,7 @@ impl TxUnpacker {
         };
 
         loop {
-            let mut state = history
-                .lock()
-                .await
-                .get_or_init_with(|| State::with_phase2_enabled(phase2_enabled));
+            let mut state = history.lock().await.get_or_init_with(State::new);
 
             let Ok((_, message)) = txs_sub.read().await else {
                 return Err(anyhow::anyhow!("Failed to read txs subscription"));
@@ -460,12 +456,6 @@ impl TxUnpacker {
             _ => NetworkId::Testnet,
         };
 
-        // Phase 2 script validation (disabled by default)
-        let phase2_enabled = config.get_bool("phase2-enabled").unwrap_or(false);
-        if phase2_enabled {
-            info!("Phase 2 script validation enabled");
-        }
-
         // Initialize State
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "tx_unpacker",
@@ -478,7 +468,6 @@ impl TxUnpacker {
                 context_run,
                 network_id,
                 history,
-                phase2_enabled,
                 publish_utxo_deltas_topic,
                 publish_asset_deltas_topic,
                 publish_withdrawals_topic,

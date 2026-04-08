@@ -25,7 +25,9 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 imbl = { workspace = true }
 rayon = { workspace = true }
+thiserror = { workspace = true }
 uplc-turbo = { workspace = true }
+serde = { workspace = true }
 
 [lib]
 path = "src/utxo_state.rs"
