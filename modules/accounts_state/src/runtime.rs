@@ -388,10 +388,14 @@ impl StakeAddressUndoHistory {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use crate::rewards::RewardDetail;
+
     use super::*;
     use acropolis_common::{
         hash::Hash, BlockHash, BlockIntent, BlockStatus, DRepCredential, Era, KeyHash, NetworkId,
-        StakeCredential,
+        RewardType, StakeCredential,
     };
 
     fn stake_address(seed: u8) -> StakeAddress {
@@ -593,38 +597,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reward_runtime_clears_on_rollback() {
-        let mut runtime = RewardRuntime::default();
-        let (tx, _rx) = mpsc::channel();
-
-        runtime.set_start_rewards_tx(tx);
-        runtime.set_epoch_rewards_task(1, tokio::spawn(async { Ok(RewardsResult::default()) }));
-
-        assert!(runtime.start_rewards_tx.is_none());
-        assert!(runtime.epoch_rewards_task.is_none());
-        assert!(runtime.active_epoch.is_none());
-    }
-
-    #[test]
-    fn reward_runtime_keeps_same_epoch_work_and_rewinds_tracker() {
+    async fn reward_runtime_reinstates_task_on_epoch_boundary_rollback() {
         let mut runtime = RewardRuntime::default();
 
-        runtime.rollback_to(&block_info(10, 12, false));
+        let mut rewards = BTreeMap::new();
+        rewards.insert(
+            PoolId::default(),
+            vec![RewardDetail {
+                account: StakeAddress::default(),
+                rtype: RewardType::Member,
+                amount: 500,
+                pool: PoolId::default(),
+                registered: true,
+            }],
+        );
 
-        assert_eq!(runtime.active_epoch, Some(10));
-    }
+        runtime.previous_rewards = Some(RewardsResult {
+            epoch: 2,
+            total_paid: 1,
+            total_unpaid: 0,
+            rewards,
+            spo_rewards: Vec::new(),
+        });
+        runtime.active_epoch_slot = Some(500000);
+        runtime.active_epoch = Some(2);
 
-    #[test]
-    fn reward_runtime_clears_if_rollback_crosses_rewards_epoch_boundary() {
-        let mut runtime = RewardRuntime::default();
-        let (tx, _rx) = mpsc::channel();
+        runtime.rollback_to(&block_info(1, 0, true));
 
-        runtime.set_start_rewards_tx(tx);
-
-        runtime.rollback_to(&block_info(10, 0, true));
-
-        assert!(runtime.start_rewards_tx.is_none());
-        assert!(runtime.active_epoch.is_none());
+        assert!(runtime.epoch_rewards_task.is_some());
+        assert_eq!(runtime.active_epoch, Some(1));
     }
 
     #[tokio::test]
