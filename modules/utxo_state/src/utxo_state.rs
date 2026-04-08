@@ -305,7 +305,7 @@ impl UTXOState {
             _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
         let snapshot_store = store.clone();
-        let mut state = State::new(store, address_delta_publish_mode);
+        let mut state = State::new(store, address_delta_publish_mode, &config);
 
         // Create address delta publisher and pass it observations
         let deltas_publisher =

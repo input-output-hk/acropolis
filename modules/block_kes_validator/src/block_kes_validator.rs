@@ -10,7 +10,7 @@ use acropolis_common::{
         RawBlockMessage, SPOStateMessage, SnapshotMessage, SnapshotStateMessage,
         StateTransitionMessage,
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, StoreType},
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -254,6 +254,8 @@ impl BlockKesValidator {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "block_kes_validator",
             StateHistoryStore::default_block_store(),
+            &config,
+            StoreType::Block,
         )));
 
         // Start run task

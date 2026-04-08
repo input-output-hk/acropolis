@@ -1,7 +1,7 @@
 use acropolis_common::BlockInfo;
 
 /// Epoch summary emitted by midnight-state logging runtime.
-#[derive(Clone, Default, Debug, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct StatsSummary {
     pub indexed_night_utxo_creations: usize,
     pub indexed_night_utxo_spends: usize,
@@ -25,7 +25,7 @@ impl StatsSummary {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 pub struct EpochTotals {
     // Contains the cumulative summary
     cumulative: StatsSummary,

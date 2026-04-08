@@ -5,10 +5,12 @@
 # ============================================================================
 [global.startup]
 network-name = "mainnet"
-startup-mode = "genesis"   # Options: "genesis" | "snapshot"
+startup-mode = "snapshot"   # Options: "genesis" | "snapshot"
 sync-mode = "mithril"      # Options: "mithril" | "upstream"
 block-flow-mode = "direct" # Options: "direct" | "consensus"
 topic = "cardano.sequence.start"
+dump-state-block = 10823159
+dump-state-epoch = 509
 
 # ============================================================================
 # Bootstrap Module Configurations
@@ -29,6 +31,16 @@ download-max-age = "never"
 pause = "none"
 # Stop constraint likewise
 stop = "none"
+# Block to induce a rollback at
+rollback-at-block = 10823209
+# Number of blocks to rollback (max is k)
+blocks-to-rollback = 250
+
+[monitor]
+output = "monitor.json" # Write to a file named monitor.json
+frequency_secs = 5.0
+
+
 
 [module.snapshot-bootstrapper]
 epoch = 507
@@ -184,10 +196,6 @@ drep-state-topic = "cardano.drep.state"
 spdd-retention-epochs = 0
 spdd-db-path = "./fjall-spdd"
 spdd-clear-on-start = true
-# Verify against captured CSV
-verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
-verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
-verify-spdd-files = "../../modules/accounts_state/test-data/spdd.mainnet.{}.csv"
 
 [module.assets-state]
 # Enables /assets endpoint

@@ -25,6 +25,7 @@ use acropolis_common::{
         },
         utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
     },
+    serialization::{serialize_imbl_hashmap_deterministic, serialize_std_hashmap_deterministic},
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
     InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
@@ -46,7 +47,7 @@ const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 
 /// State for rewards calculation
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct EpochSnapshots {
     /// Latest snapshot (epoch i)
     pub mark: Arc<EpochSnapshot>,
@@ -67,7 +68,7 @@ impl EpochSnapshots {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PendingRewardsPlan {
     rewarded_epoch: u64,
     rewarded_era: Era,
@@ -76,7 +77,7 @@ pub struct PendingRewardsPlan {
 }
 
 /// Overall state - stored per block
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct State {
     /// Map of active SPOs by pool ID
     spos: OrdMap<PoolId, PoolRegistration>,
@@ -107,6 +108,7 @@ pub struct State {
     pool_refunds: Vec<(PoolId, StakeAddress)>,
 
     /// Proposal deposits to apply to DRep delegation distribution
+    #[serde(serialize_with = "serialize_std_hashmap_deterministic")]
     proposal_deposits: HashMap<StakeAddress, Lovelace>,
 
     /// Proposal refunds to apply next epoch (list of reward accounts to refund to)
@@ -135,11 +137,13 @@ pub struct State {
     /// Pending MIRs from reserves to be applied at epoch boundary
     /// Key is stake address, value is the amount to add (or in Alonzo+, accumulated sum)
     /// Pre-Alonzo: last value wins (override). Alonzo+: values are summed.
+    #[serde(serialize_with = "serialize_imbl_hashmap_deterministic")]
     pending_mir_reserves: ImHashMap<StakeAddress, i64>,
 
     /// Pending MIRs from treasury to be applied at epoch boundary
     /// Key is stake address, value is the amount to add (or in Alonzo+, accumulated sum)
     /// Pre-Alonzo: last value wins (override). Alonzo+: values are summed.
+    #[serde(serialize_with = "serialize_imbl_hashmap_deterministic")]
     pending_mir_treasury: ImHashMap<StakeAddress, i64>,
 }
 
@@ -2121,7 +2125,7 @@ mod tests {
     use acropolis_common::messages::BootstrapPotDeltas;
     use acropolis_common::queries::accounts::AccountsStateQueryResponse;
     use acropolis_common::queries::errors::QueryError;
-    use acropolis_common::state_history::{StateHistory, StateHistoryStore};
+    use acropolis_common::state_history::{StateHistory, StateHistoryStore, StoreType};
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
         Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds,
@@ -2878,8 +2882,12 @@ mod tests {
 
     #[test]
     fn state_history_and_undo_log_restore_stake_addresses_on_rollback() {
-        let mut history =
-            StateHistory::<State>::new("AccountsState", StateHistoryStore::default_block_store());
+        let mut history = StateHistory::<State>::new(
+            "AccountsState",
+            StateHistoryStore::default_block_store(),
+            &Config::default(),
+            StoreType::Block,
+        );
         let mut runtime = crate::runtime::AccountsRuntime::default();
         let mut state = State::default();
         let mut ctx = create_validation_context();

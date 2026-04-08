@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{ProtocolParamsMessage, SPOStateMessage},
+    serialization::{serialize_imbl_hashmap_deterministic, serialize_std_hashset_deterministic},
     validation::{KesValidationError, ValidationError},
     BlockInfo, PoolId,
 };
@@ -12,15 +13,17 @@ use tracing::error;
 
 use crate::ouroboros;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct State {
     /// Tracks the latest operational certificate counter for each pool
+    #[serde(serialize_with = "serialize_imbl_hashmap_deterministic")]
     pub ocert_counters: ImblHashMap<PoolId, u64>,
 
     pub slots_per_kes_period: Option<u64>,
 
     pub max_kes_evolutions: Option<u64>,
 
+    #[serde(serialize_with = "serialize_std_hashset_deterministic")]
     pub active_spos: HashSet<PoolId>,
 }
 

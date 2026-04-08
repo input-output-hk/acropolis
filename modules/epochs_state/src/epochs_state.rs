@@ -16,7 +16,7 @@ use acropolis_common::{
         },
         errors::QueryError,
     },
-    state_history::{StateHistory, StateHistoryStore},
+    state_history::{StateHistory, StateHistoryStore, StoreType},
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -337,6 +337,8 @@ impl EpochsState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "epochs_state",
             StateHistoryStore::default_block_store(),
+            &config,
+            StoreType::Block,
         )));
         let history_query = history.clone();
 

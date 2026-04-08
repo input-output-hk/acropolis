@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use acropolis_common::{
     messages::{ProtocolParamsMessage, RawBlockMessage},
+    serialization::serialize_imbl_hashmap_deterministic,
     BlockInfo, GenesisDelegates, HeavyDelegate, PoolId,
 };
 use anyhow::Result;
@@ -9,8 +10,9 @@ use imbl::HashMap;
 
 use crate::stores::Store;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct State {
+    #[serde(serialize_with = "serialize_imbl_hashmap_deterministic")]
     pub byron_heavy_delegates: HashMap<PoolId, HeavyDelegate>,
     pub shelley_genesis_delegates: GenesisDelegates,
 }

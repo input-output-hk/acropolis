@@ -17,7 +17,7 @@ const CIP67_LABEL_333: [u8; 4] = [0x00, 0x14, 0xdf, 0x10];
 const CIP67_LABEL_444: [u8; 4] = [0x00, 0x1b, 0x4e, 0x20];
 const CIP68_LABEL_100: [u8; 4] = [0x00, 0x06, 0x43, 0xb0];
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
 pub struct AssetsStorageConfig {
     pub store_assets: bool,
     pub store_info: bool,
@@ -27,7 +27,7 @@ pub struct AssetsStorageConfig {
     pub index_by_policy: bool,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
 pub enum StoreTransactions {
     #[default]
     None,
@@ -41,7 +41,7 @@ impl StoreTransactions {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct State {
     pub config: AssetsStorageConfig,
 

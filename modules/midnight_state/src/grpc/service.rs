@@ -750,18 +750,9 @@ mod tests {
     };
 
     use acropolis_common::{
-        messages::{AddressDeltasMessage, Message, StateQuery, StateQueryResponse},
-        protocol_params::{ProtocolParams, ShelleyParams},
-        queries::blocks::{
+        Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended, Datum, DatumHash, Era, ExtendedAddressDelta, KeyHash, NetworkId, PolicyId, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, SpentUTxOExtended, StakeAddress, StakeCredential, TxHash, TxIdentifier, UTxOIdentifier, ValueMap, messages::{AddressDeltasMessage, Message, StateQuery, StateQueryResponse}, protocol_params::{ProtocolParams, ShelleyParams}, queries::{blocks::{
             BlockInfo as QueryBlockInfo, BlocksStateQuery, BlocksStateQueryResponse,
-        },
-        queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse},
-        rational_number::RationalNumber,
-        state_history::{StateHistory, StateHistoryStore},
-        Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
-        Datum, DatumHash, Era, ExtendedAddressDelta, KeyHash, NetworkId, PolicyId, ShelleyAddress,
-        ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, SpentUTxOExtended, StakeAddress,
-        StakeCredential, TxHash, TxIdentifier, UTxOIdentifier, ValueMap,
+        }, spdd::{SPDDStateQuery, SPDDStateQueryResponse}}, rational_number::RationalNumber, state_history::{StateHistory, StateHistoryStore, StoreType}
     };
     use caryatid_sdk::{async_trait, Context, MessageBus, Subscription};
     use config::Config;
@@ -1048,7 +1039,12 @@ mod tests {
     where
         B: MessageBus<Message> + 'static,
     {
-        let mut history = StateHistory::new("midnight-state", StateHistoryStore::Unbounded);
+        let mut history = StateHistory::new(
+            "midnight-state",
+            StateHistoryStore::Unbounded,
+            &Config::default(),
+            StoreType::Block,
+        );
         history.commit(block_number, state);
 
         let (_, startup_watch) = tokio::sync::watch::channel(true);

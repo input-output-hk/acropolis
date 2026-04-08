@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crate::PoolId;
 use anyhow::anyhow;
 use bech32::{Bech32, Hrp};
-use serde::{ser::SerializeMap, Deserialize, Serializer};
+use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use serde_with::{ser::SerializeAsWrap, DeserializeAs, SerializeAs};
 
 pub struct SerializeMapAs<KAs, VAs>(std::marker::PhantomData<(KAs, VAs)>);
@@ -157,4 +157,71 @@ impl Bech32WithHrp for [u8] {
 
         Ok(data.to_vec())
     }
+}
+
+pub fn serialize_imbl_hashmap_deterministic<S, K, V>(
+    map: &imbl::HashMap<K, V>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    K: Ord + Serialize,
+    V: Serialize,
+{
+    let mut items: Vec<(&K, &V)> = map.iter().collect();
+    items.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+    let mut map_ser = serializer.serialize_map(Some(items.len()))?;
+    for (k, v) in items {
+        map_ser.serialize_entry(k, v)?;
+    }
+    map_ser.end()
+}
+
+pub fn serialize_std_hashmap_deterministic<S, K, V>(
+    map: &std::collections::HashMap<K, V>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    K: Ord + Serialize,
+    V: Serialize,
+{
+    let mut items: Vec<(&K, &V)> = map.iter().collect();
+
+    items.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+    let mut map_ser = serializer.serialize_map(Some(items.len()))?;
+    for (k, v) in items {
+        map_ser.serialize_entry(k, v)?;
+    }
+    map_ser.end()
+}
+
+pub fn serialize_imbl_hashset_deterministic<S, T>(
+    set: &imbl::HashSet<T>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: Ord + Serialize,
+{
+    let mut items: Vec<&T> = set.iter().collect();
+    items.sort();
+
+    items.serialize(serializer)
+}
+
+pub fn serialize_std_hashset_deterministic<S, T>(
+    set: &std::collections::HashSet<T>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: Ord + Serialize,
+{
+    let mut items: Vec<&T> = set.iter().collect();
+    items.sort();
+
+    items.serialize(serializer)
 }

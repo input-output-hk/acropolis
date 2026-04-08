@@ -1,7 +1,7 @@
 use acropolis_common::{Datum, Epoch};
 use imbl::OrdMap;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 pub struct ParametersState {
     /// Ariadne parameters keyed by epoch
     pub permissioned_candidates: OrdMap<Epoch, Datum>,
