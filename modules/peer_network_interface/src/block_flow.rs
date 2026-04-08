@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use acropolis_common::BlockHash;
 use acropolis_common::messages::{
@@ -38,17 +39,19 @@ impl BlockFlowHandler {
         context: Arc<Context<Message>>,
         events_sender: mpsc::Sender<NetworkEvent>,
     ) -> Result<Self> {
+        let security_param_k = Arc::new(AtomicU64::new(SECURITY_PARAMETER_K));
+
         let params_subscription = context.subscribe(&config.protocol_params_topic).await?;
-        context.run(Self::forward_protocol_params_to_events(
+        context.run(Self::watch_protocol_params(
             params_subscription,
-            events_sender.clone(),
+            Arc::clone(&security_param_k),
         ));
 
         match block_flow_mode {
             BlockFlowMode::Direct => {
                 info!("Block flow mode: Direct (auto-fetch)");
                 Ok(BlockFlowHandler::Direct {
-                    chain: ChainState::new(),
+                    chain: ChainState::new(Arc::clone(&security_param_k)),
                 })
             }
             BlockFlowMode::Consensus => {
@@ -64,29 +67,38 @@ impl BlockFlowHandler {
                 Ok(BlockFlowHandler::Consensus(ConsensusFlowState::new(
                     context,
                     config.consensus_topic.clone(),
+                    security_param_k,
                 )))
             }
         }
     }
 
-    async fn forward_protocol_params_to_events(
+    /// Set the initial security parameter from genesis values.
+    /// Should be called once after genesis values are available, before sync starts.
+    pub fn set_genesis_security_param(&self, k: u64) {
+        match self {
+            BlockFlowHandler::Direct { chain } => {
+                chain.security_param_k.store(k, Ordering::Release)
+            }
+            BlockFlowHandler::Consensus(state) => {
+                state.security_param_k.store(k, Ordering::Release)
+            }
+        }
+    }
+
+    async fn watch_protocol_params(
         mut subscription: Box<dyn Subscription<Message>>,
-        events_sender: mpsc::Sender<NetworkEvent>,
+        security_param_k: Arc<AtomicU64>,
     ) {
         while let Ok((_, msg)) = subscription.read().await {
-            let k = match msg.as_ref() {
-                Message::Cardano((_, CardanoMessage::ProtocolParams(params))) => {
+            if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) = msg.as_ref() {
+                let new_k =
                     params.params.shelley.as_ref().map(|s| s.security_param as u64).or_else(|| {
                         params.params.byron.as_ref().map(|b| b.protocol_consts.k as u64)
-                    })
+                    });
+                if let Some(new_k) = new_k {
+                    security_param_k.store(new_k, Ordering::Release);
                 }
-                _ => None,
-            };
-            if let Some(k) = k
-                && events_sender.send(NetworkEvent::SecurityParamUpdate { k }).await.is_err()
-            {
-                error!("event channel closed");
-                return;
             }
         }
         error!("protocol params subscription closed");
@@ -247,16 +259,11 @@ impl BlockFlowHandler {
     /// Reset state for a new sync point.
     pub fn handle_sync_reset(&mut self) {
         match self {
-            BlockFlowHandler::Direct { chain } => *chain = ChainState::new(),
+            BlockFlowHandler::Direct { chain } => {
+                let k = Arc::clone(&chain.security_param_k);
+                *chain = ChainState::new(k);
+            }
             BlockFlowHandler::Consensus(state) => state.handle_sync_reset(),
-        }
-    }
-
-    /// Update the security parameter k used for deque capping.
-    pub fn update_security_param(&mut self, k: u64) {
-        match self {
-            BlockFlowHandler::Direct { chain } => chain.update_security_param(k),
-            BlockFlowHandler::Consensus(state) => state.update_security_param(k),
         }
     }
 
@@ -544,11 +551,15 @@ pub struct ConsensusFlowState {
     blocks_published_count: u64,
     headers: HashMap<(u64, BlockHash), Header>,
     published_points: VecDeque<SpecificPoint>,
-    security_param_k: u64,
+    security_param_k: Arc<AtomicU64>,
 }
 
 impl ConsensusFlowState {
-    fn new(context: Arc<Context<Message>>, topic: String) -> Self {
+    fn new(
+        context: Arc<Context<Message>>,
+        topic: String,
+        security_param_k: Arc<AtomicU64>,
+    ) -> Self {
         Self {
             context,
             topic,
@@ -557,18 +568,7 @@ impl ConsensusFlowState {
             blocks_published_count: 0,
             headers: HashMap::new(),
             published_points: VecDeque::new(),
-            security_param_k: SECURITY_PARAMETER_K,
-        }
-    }
-
-    fn update_security_param(&mut self, k: u64) {
-        if k != self.security_param_k {
-            info!(
-                old_k = self.security_param_k,
-                new_k = k,
-                "Updating ConsensusFlowState security parameter"
-            );
-            self.security_param_k = k;
+            security_param_k,
         }
     }
 
@@ -654,7 +654,8 @@ impl ConsensusFlowState {
                         slot: header.slot,
                         hash: header.hash,
                     });
-                    while self.published_points.len() > self.security_param_k as usize {
+                    let k = self.security_param_k.load(Ordering::Acquire) as usize;
+                    while self.published_points.len() > k {
                         self.published_points.pop_front();
                     }
                     *published_blocks += 1;
@@ -707,6 +708,10 @@ mod tests {
     const BLOCK_HASH_C: BlockHash = BlockHash::new([3; 32]);
     const BLOCK_HASH_D: BlockHash = BlockHash::new([4; 32]);
     const BLOCK_HASH_E: BlockHash = BlockHash::new([5; 32]);
+
+    fn make_test_chain_state() -> ChainState {
+        ChainState::new(Arc::new(AtomicU64::new(SECURITY_PARAMETER_K)))
+    }
 
     fn point(slot: u64, hash: BlockHash) -> Point {
         Point::Specific(slot, hash.to_vec())
@@ -852,7 +857,7 @@ mod tests {
     #[test]
     fn direct_mode_tracks_and_returns_announcers() {
         let mut handler = BlockFlowHandler::Direct {
-            chain: ChainState::new(),
+            chain: make_test_chain_state(),
         };
         handler.set_preferred_upstream(Some(PEER_1));
 
@@ -875,7 +880,7 @@ mod tests {
     #[test]
     fn direct_mode_block_announcers_query() {
         let mut handler = BlockFlowHandler::Direct {
-            chain: ChainState::new(),
+            chain: make_test_chain_state(),
         };
 
         let header = Header {
@@ -1074,7 +1079,7 @@ mod tests {
     #[test]
     fn direct_mode_block_rejected_announcers_is_empty() {
         let mut handler = BlockFlowHandler::Direct {
-            chain: ChainState::new(),
+            chain: make_test_chain_state(),
         };
         let announcers = handler.block_rejected_announcers(BLOCK_HASH_A);
         assert!(
@@ -1187,7 +1192,8 @@ mod tests {
         let bus = Arc::new(MockBus::<Message>::new(&config));
         let (_tx, rx) = watch::channel(true);
         let context = Arc::new(Context::new(config, bus, rx));
-        ConsensusFlowState::new(context, "test.consensus.offers".to_string())
+        let k = Arc::new(AtomicU64::new(SECURITY_PARAMETER_K));
+        ConsensusFlowState::new(context, "test.consensus.offers".to_string(), k)
     }
 
     fn hash_for_slot(slot: u64) -> BlockHash {
@@ -1231,7 +1237,7 @@ mod tests {
     #[test]
     fn consensus_published_points_capped_at_k() {
         let mut state = make_test_consensus_state();
-        let k = state.security_param_k;
+        let k = state.security_param_k.load(Ordering::Acquire);
 
         for slot in 1..=(k + 100) {
             state.published_points.push_back(SpecificPoint {
@@ -1274,8 +1280,9 @@ mod tests {
         let bus = Arc::new(MockBus::<Message>::new(&config));
         let (_tx, rx) = watch::channel(true);
         let context = Arc::new(Context::new(config, bus, rx));
+        let k = Arc::new(AtomicU64::new(SECURITY_PARAMETER_K));
 
-        let mut state = ConsensusFlowState::new(context, "test.topic".to_string());
+        let mut state = ConsensusFlowState::new(context, "test.topic".to_string(), k);
         for slot in 100..=120u64 {
             state.published_points.push_back(SpecificPoint {
                 slot,

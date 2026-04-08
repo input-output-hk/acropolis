@@ -54,7 +54,7 @@ impl PeerNetworkInterface {
 
         let (events_sender, events) = mpsc::channel(1024); // TODO: This might be way too small
 
-        let mut flow_handler = BlockFlowHandler::new(
+        let flow_handler = BlockFlowHandler::new(
             &cfg,
             block_flow_mode,
             context.clone(),
@@ -71,7 +71,7 @@ impl PeerNetworkInterface {
                 cfg.genesis_values.clone().expect("genesis values not found")
             };
 
-            flow_handler.update_security_param(genesis_values.security_param);
+            flow_handler.set_genesis_security_param(genesis_values.security_param);
 
             let mut upstream_cache = None;
             let mut last_epoch = None;

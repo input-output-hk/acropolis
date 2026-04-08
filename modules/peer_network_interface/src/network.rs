@@ -284,9 +284,6 @@ impl NetworkManager {
                     self.handle_disconnect(peer);
                 }
             }
-            NetworkEvent::SecurityParamUpdate { k } => {
-                self.flow_handler.update_security_param(k);
-            }
         }
 
         Ok(())
@@ -695,10 +692,6 @@ pub enum NetworkEvent {
     PeersDiscovered {
         from_peer: PeerId,
         addresses: Vec<String>,
-    },
-    /// Updated security parameter k from protocol parameters.
-    SecurityParamUpdate {
-        k: u64,
     },
 }
 
