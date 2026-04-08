@@ -288,7 +288,8 @@ impl EpochsState {
             }
 
             // Commit the new state
-            if let Some(block_info) = ctx.get_current_block_opt() {
+            if primary.message().is_some() {
+                let block_info = primary.block_info();
                 if block_info.intent.do_validation() {
                     ctx.publish().await;
                 }

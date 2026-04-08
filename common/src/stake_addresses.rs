@@ -20,7 +20,7 @@ use tracing::error;
 
 /// State of an individual stake address
 #[serde_as]
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressState {
     /// Is it registered (or only used in addresses)?
     pub registered: bool,
@@ -111,6 +111,14 @@ impl StakeAddressMap {
             self.remove_drep_delegate(&stake_address, old_drep);
             self.add_drep_delegate(&stake_address, current_drep.as_ref());
         }
+        old_stake_address
+    }
+
+    #[inline]
+    pub fn remove(&mut self, stake_address: &StakeAddress) -> Option<StakeAddressState> {
+        let old_stake_address = self.inner.remove(stake_address);
+        let old_drep = old_stake_address.as_ref().and_then(|s| s.delegated_drep.as_ref());
+        self.remove_drep_delegate(stake_address, old_drep);
         old_stake_address
     }
 
@@ -216,6 +224,16 @@ impl StakeAddressMap {
         delegators
     }
 
+    /// Get the stake addresses delegated to a pool.
+    pub fn get_pool_delegator_addresses(&self, pool_operator: &PoolId) -> Vec<StakeAddress> {
+        self.inner
+            .iter()
+            .filter_map(|(stake_address, sas)| {
+                (sas.delegated_spo.as_ref() == Some(pool_operator)).then_some(stake_address.clone())
+            })
+            .collect()
+    }
+
     /// Get DRep Delegators with live_stakes
     pub fn get_drep_delegators(&self, drep: &DRepChoice) -> Vec<(StakeAddress, u64)> {
         // Find stake addresses delegated to drep
@@ -235,6 +253,21 @@ impl StakeAddressMap {
             .collect();
 
         delegators
+    }
+
+    /// Get the stake addresses currently delegated to the given DRep credential.
+    pub fn get_drep_delegator_addresses(
+        &self,
+        drep_credential: &DRepCredential,
+    ) -> Vec<StakeAddress> {
+        self.inner
+            .iter()
+            .filter_map(|(stake_address, sas)| {
+                (sas.delegated_drep.as_ref().and_then(DRepChoice::to_credential).as_ref()
+                    == Some(drep_credential))
+                .then_some(stake_address.clone())
+            })
+            .collect()
     }
 
     /// Map stake_keys to their utxo_value
