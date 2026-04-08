@@ -23,7 +23,6 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::{Mutex, MutexGuard};
 use tracing::{error, info, info_span, Instrument};
-use acropolis_common::calculations::epoch_to_first_slot_with_shelley_params;
 use acropolis_common::state_history::{StateHistory, StateHistoryStore};
 
 mod alonzo_babbage_voting;
@@ -239,7 +238,7 @@ impl GovernanceState {
         let history: Arc<Mutex<StateHistory<State>>> =
             Arc::new(Mutex::new(StateHistory::<State>::new(
                 "governance_state",
-                StateHistoryStore::Unbounded,
+                StateHistoryStore::default_block_store(),
             )));
 
         // Wait for snapshot bootstrap if subscription is provided
@@ -336,7 +335,7 @@ impl GovernanceState {
             verification_output_file: config.verification_output_file.clone(),
             verify_votes_files: config.verify_votes_files.clone(),
         };
-        
+
         loop {
             let mut state = history.lock().await.get_or_init_with(State::default);
 
@@ -385,26 +384,20 @@ impl GovernanceState {
                     );
 
                     if blk_g.new_epoch {
-                        match vld.consume_sync(
+                        if let Some(params) = vld.consume_rollback_optoin(
                             "param_reader",
                             readers.param_reader.read_with_rollbacks().await,
                         )? {
-                            RollbackWrapper::Normal((blk_g, params)) => {
-                                vld.handle(
-                                    "handle_protocol_parameters",
-                                    state.handle_protocol_parameters(&params).await,
-                                );
+                            vld.handle(
+                                "handle_protocol_parameters",
+                                state.handle_protocol_parameters(&params).await,
+                            );
 
-                                if blk_g.epoch > 0 {
-                                    Self::process_drep_spo(&mut vld, &mut state, &mut readers)
-                                        .await?;
-                                }
-
-                                vld.handle("advance_epoch", state.advance_epoch(&blk_g));
+                            if blk_g.epoch > 0 {
+                                Self::process_drep_spo(&mut vld, &mut state, &mut readers).await?;
                             }
-                            RollbackWrapper::Rollback(_) => {
 
-                            }
+                            vld.handle("advance_epoch", state.advance_epoch(&blk_g));
                         }
                     }
                 } else {
@@ -419,8 +412,11 @@ impl GovernanceState {
             }
             .await?;
 
-            if primary.do_validation() {
-                vld.publish().await;
+            if primary.message().is_some() {
+                if primary.do_validation() {
+                    vld.publish().await;
+                }
+                history.lock().await.commit(primary.block_info().number, state);
             }
         }
     }
