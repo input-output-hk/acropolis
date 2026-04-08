@@ -1,6 +1,9 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
-use crate::rewards::calculate_rewards;
+use crate::rewards::{
+    apply_registration_changes, apply_registration_changes_filtered, calculate_rewards,
+    wait_for_rewards_start_signal,
+};
 use crate::runtime::{BlockStakeAddressUndoRecorder, RewardRuntime, StakeAddressUndoHistory};
 use crate::verifier::Verifier;
 use acropolis_common::caryatid::ValidationContext;
@@ -70,10 +73,14 @@ impl EpochSnapshots {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PendingRewardsPlan {
-    rewarded_epoch: u64,
-    rewarded_era: Era,
-    shelley_params: ShelleyParams,
-    stake_rewards: Lovelace,
+    pub rewarded_epoch: u64,
+    pub rewarded_era: Era,
+    pub shelley_params: ShelleyParams,
+    pub stake_rewards: Lovelace,
+    pub performance: Arc<EpochSnapshot>,
+    pub existing_registrations: HashSet<StakeAddress>,
+    pub existing_deregistrations: HashSet<StakeAddress>,
+    pub staking: Arc<EpochSnapshot>,
 }
 
 /// Overall state - stored per block
@@ -137,33 +144,6 @@ pub struct State {
 }
 
 impl State {
-    fn wait_for_rewards_start_signal(
-        start_rewards_rx: std::sync::mpsc::Receiver<Vec<RegistrationChange>>,
-    ) -> Result<Vec<RegistrationChange>> {
-        let changes =
-            start_rewards_rx.recv().map_err(|_| anyhow!("Rewards calculation start cancelled"))?;
-
-        Ok(changes)
-    }
-
-    fn pending_rewards_result_from_plan(
-        &self,
-        rewards_runtime: &mut RewardRuntime,
-    ) -> Result<Option<crate::rewards::RewardsResult>> {
-        if let Some(plan) = rewards_runtime.get_rewards_plan() {
-            info!(
-                rewarded_epoch = plan.rewarded_epoch,
-                "Recomputing pending rewards synchronously from rollback-safe plan"
-            );
-            Ok(Some(self.calculate_pending_rewards_from_plan(
-                &plan,
-                rewards_runtime.get_stability_window_slot(),
-            )?))
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Bootstrap state from snapshot data (consumes the message to avoid cloning)
     pub fn bootstrap(&mut self, bootstrap_msg: AccountsBootstrapMessage) -> Result<()> {
         let num_accounts = bootstrap_msg.accounts.len();
@@ -331,10 +311,6 @@ impl State {
 
     fn append_registration_change(&mut self, change: RegistrationChange) {
         self.current_epoch_registration_changes.push(change.clone());
-    }
-
-    pub(crate) fn current_epoch_registration_changes(&self) -> &[RegistrationChange] {
-        &self.current_epoch_registration_changes
     }
 
     pub(crate) fn rollback_stake_addresses(
@@ -751,12 +727,12 @@ impl State {
         // handle the Shelley bug part!
         let mut registrations: HashSet<StakeAddress> = HashSet::new();
         let mut deregistrations: HashSet<StakeAddress> = HashSet::new();
-        Self::apply_registration_changes(
+        apply_registration_changes(
             &self.epoch_snapshots.set.registration_changes,
             &mut registrations,
             &mut deregistrations,
         );
-        Self::apply_registration_changes(
+        apply_registration_changes(
             &self.epoch_snapshots.mark.registration_changes,
             &mut registrations,
             &mut deregistrations,
@@ -775,6 +751,10 @@ impl State {
             rewarded_era,
             shelley_params: shelley_params.clone(),
             stake_rewards: monetary_change.stake_rewards,
+            performance: performance.clone(),
+            staking: staking.clone(),
+            existing_registrations: registrations.clone(),
+            existing_deregistrations: deregistrations.clone(),
         });
 
         let (start_rewards_tx, start_rewards_rx) =
@@ -786,12 +766,12 @@ impl State {
             epoch,
             spawn_blocking(move || {
                 // Wait for start signal (sent at stability_window_slot into epoch)
-                let current_changes = Self::wait_for_rewards_start_signal(start_rewards_rx)?;
+                let current_changes = wait_for_rewards_start_signal(start_rewards_rx)?;
 
                 // Apply current epoch registration changes up to the stability window.
                 // In Cardano, addrsRew is captured at the stability window, not the epoch boundary.
                 // Accounts that deregister before the stability window won't receive rewards.
-                Self::apply_registration_changes_filtered(
+                apply_registration_changes_filtered(
                     &current_changes,
                     &mut registrations,
                     &mut deregistrations,
@@ -882,94 +862,6 @@ impl State {
         };
 
         Ok(total_lovelace)
-    }
-
-    /// Apply a registration change set to registration/deregistration lists
-    /// registrations gets all registrations still in effect at the end of the changes
-    /// deregistrations likewise for net deregistrations
-    fn apply_registration_changes(
-        changes: &Vec<RegistrationChange>,
-        registrations: &mut HashSet<StakeAddress>,
-        deregistrations: &mut HashSet<StakeAddress>,
-    ) {
-        Self::apply_registration_changes_filtered(changes, registrations, deregistrations, None);
-    }
-
-    fn pending_rewards_registrations(
-        &self,
-        stability_window_slot: u64,
-    ) -> (HashSet<StakeAddress>, HashSet<StakeAddress>) {
-        let mut registrations: HashSet<StakeAddress> = HashSet::new();
-        let mut deregistrations: HashSet<StakeAddress> = HashSet::new();
-
-        Self::apply_registration_changes(
-            &self.epoch_snapshots.set.registration_changes,
-            &mut registrations,
-            &mut deregistrations,
-        );
-        Self::apply_registration_changes(
-            &self.epoch_snapshots.mark.registration_changes,
-            &mut registrations,
-            &mut deregistrations,
-        );
-        Self::apply_registration_changes_filtered(
-            &self.current_epoch_registration_changes,
-            &mut registrations,
-            &mut deregistrations,
-            Some(stability_window_slot),
-        );
-
-        (registrations, deregistrations)
-    }
-
-    fn calculate_pending_rewards_from_plan(
-        &self,
-        plan: &PendingRewardsPlan,
-        stability_window_slot: u64,
-    ) -> Result<crate::rewards::RewardsResult> {
-        let (registrations, deregistrations) =
-            self.pending_rewards_registrations(stability_window_slot);
-
-        calculate_rewards(
-            plan.rewarded_epoch,
-            plan.rewarded_era,
-            self.epoch_snapshots.mark.clone(),
-            self.epoch_snapshots.go.clone(),
-            &plan.shelley_params,
-            plan.stake_rewards,
-            &registrations,
-            &deregistrations,
-        )
-    }
-
-    /// Apply a registration change set with optional epoch_slot filtering.
-    /// If max_epoch_slot is Some, only changes with epoch_slot <= max_epoch_slot are applied.
-    /// This is used to replicate Cardano's Shelley-era bug where `addrsRew` is captured at 4k/5.
-    fn apply_registration_changes_filtered(
-        changes: &Vec<RegistrationChange>,
-        registrations: &mut HashSet<StakeAddress>,
-        deregistrations: &mut HashSet<StakeAddress>,
-        max_epoch_slot: Option<u64>,
-    ) {
-        for change in changes {
-            // Skip changes that happened after the stability window
-            if let Some(max_slot) = max_epoch_slot {
-                if change.epoch_slot > max_slot {
-                    continue;
-                }
-            }
-
-            match change.kind {
-                RegistrationChangeKind::Registered => {
-                    registrations.insert(change.address.clone());
-                    deregistrations.remove(&change.address);
-                }
-                RegistrationChangeKind::Deregistered => {
-                    registrations.remove(&change.address);
-                    deregistrations.insert(change.address.clone());
-                }
-            };
-        }
     }
 
     /// Notify of a new block — triggers rewards calculation once we reach the stability window
@@ -1345,9 +1237,6 @@ impl State {
 
         // Skip rewards calculation on first epoch after bootstrap
         if skip_rewards {
-            // Snapshot bootstrap already materialized the prior epoch's reward effects,
-            // so any leftover async reward work must be discarded rather than paid later.
-            rewards_runtime.clear_on_rollback();
             info!("Skipping rewards calculation on first epoch after bootstrap");
             return Ok((spo_rewards, reward_deltas));
         }
@@ -1361,16 +1250,14 @@ impl State {
                     Some(rewards_result)
                 }
                 Ok(Err(error)) => {
-                    error!("Rewards calculation task failed: {error:#}");
-                    self.pending_rewards_result_from_plan(rewards_runtime)?
+                    anyhow::bail!("Rewards calculation task failed: {error:#}");
                 }
                 Err(error) => {
-                    error!("Rewards calculation task join failed: {error:#}");
-                    self.pending_rewards_result_from_plan(rewards_runtime)?
+                    anyhow::bail!("Rewards calculation task failed: {error:#}");
                 }
             }
         } else {
-            self.pending_rewards_result_from_plan(rewards_runtime)?
+            None
         };
 
         if let Some(rewards_result) = rewards_result {
@@ -2236,7 +2123,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel::<Vec<RegistrationChange>>();
         drop(tx);
 
-        let error = State::wait_for_rewards_start_signal(rx).unwrap_err();
+        let error = wait_for_rewards_start_signal(rx).unwrap_err();
         assert!(error.to_string().contains("start cancelled"));
     }
 

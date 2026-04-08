@@ -5,6 +5,7 @@ use acropolis_common::{
     protocol_params::ShelleyParams, rational_number::RationalNumber, Era, Lovelace, PoolId,
     RewardType, SPORewards, StakeAddress,
 };
+use acropolis_common::{RegistrationChange, RegistrationChangeKind};
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
@@ -484,4 +485,55 @@ fn calculate_spo_rewards(
     }
 
     rewards
+}
+
+pub fn wait_for_rewards_start_signal(
+    start_rewards_rx: std::sync::mpsc::Receiver<Vec<RegistrationChange>>,
+) -> Result<Vec<RegistrationChange>> {
+    let changes = start_rewards_rx
+        .recv()
+        .map_err(|_| anyhow::anyhow!("Rewards calculation start cancelled"))?;
+
+    Ok(changes)
+}
+
+/// Apply a registration change set to registration/deregistration lists
+/// registrations gets all registrations still in effect at the end of the changes
+/// deregistrations likewise for net deregistrations
+pub fn apply_registration_changes(
+    changes: &Vec<RegistrationChange>,
+    registrations: &mut HashSet<StakeAddress>,
+    deregistrations: &mut HashSet<StakeAddress>,
+) {
+    apply_registration_changes_filtered(changes, registrations, deregistrations, None);
+}
+
+/// Apply a registration change set with optional epoch_slot filtering.
+/// If max_epoch_slot is Some, only changes with epoch_slot <= max_epoch_slot are applied.
+/// This is used to replicate Cardano's Shelley-era bug where `addrsRew` is captured at 4k/5.
+pub fn apply_registration_changes_filtered(
+    changes: &Vec<RegistrationChange>,
+    registrations: &mut HashSet<StakeAddress>,
+    deregistrations: &mut HashSet<StakeAddress>,
+    max_epoch_slot: Option<u64>,
+) {
+    for change in changes {
+        // Skip changes that happened after the stability window
+        if let Some(max_slot) = max_epoch_slot {
+            if change.epoch_slot > max_slot {
+                continue;
+            }
+        }
+
+        match change.kind {
+            RegistrationChangeKind::Registered => {
+                registrations.insert(change.address.clone());
+                deregistrations.remove(&change.address);
+            }
+            RegistrationChangeKind::Deregistered => {
+                registrations.remove(&change.address);
+                deregistrations.insert(change.address.clone());
+            }
+        };
+    }
 }

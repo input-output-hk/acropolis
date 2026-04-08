@@ -295,10 +295,7 @@ impl AccountsState {
                     primary.block_info().number,
                 );
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
-                runtime.rewards.rollback_to(
-                    primary.block_info(),
-                    state.current_epoch_registration_changes(),
-                );
+                runtime.rewards.rollback_to(primary.block_info());
 
                 let rollback_message = primary
                     .rollback_message()
