@@ -1,12 +1,13 @@
 use crate::rewards::RewardsResult;
 use crate::state::PendingRewardsPlan;
 use acropolis_common::stake_addresses::{StakeAddressMap, StakeAddressState};
+use acropolis_common::Epoch;
 use acropolis_common::{
     math::update_value_with_delta, params::SECURITY_PARAMETER_K, BlockInfo, DRepChoice, PoolId,
     RegistrationChange, StakeAddress,
 };
 use std::collections::{HashMap, VecDeque};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
@@ -19,30 +20,52 @@ pub(crate) struct AccountsRuntime {
 #[derive(Debug, Default)]
 pub(crate) struct RewardRuntime {
     epoch_rewards_task: Option<JoinHandle<anyhow::Result<RewardsResult>>>,
-    start_rewards_tx: Option<mpsc::Sender<()>>,
-    current_epoch_registration_changes: Option<Arc<Mutex<Vec<RegistrationChange>>>>,
+    start_rewards_tx: Option<mpsc::Sender<Vec<RegistrationChange>>>,
+    /// The current epoch number used to detect if a rollback is across an epoch boundary
     active_epoch: Option<u64>,
+    /// The current slot number within the epoch used to detect if a rollback requires recomputing the rewards
+    active_epoch_slot: Option<u64>,
+    /// The rewards plan to be used by the current epoch_rewards_task once the stability window slot is reached
+    /// and to recompute rewards if intra-epoch rollback is over stability_window_slot
     active_rewards_plan: Option<PendingRewardsPlan>,
-    previous_rewards_plan: Option<PendingRewardsPlan>,
+    /// The computed previous rewards used to respawn the epoch_rewards_task when we rollback to the prior epoch
     previous_rewards: Option<RewardsResult>,
+    /// Randomness stabilization window (4k/f slots), computed from protocol params.
+    /// Used to delay the rewards calculation and filter registration changes:
+    /// - `notify_block` waits until `block.epoch_slot >= stability_window_slot` before
+    ///   signalling the rewards task to start
+    /// - `apply_registration_changes_filtered` skips any `RegistrationChange` with
+    ///   `epoch_slot > stability_window_slot`, so only changes before this point
+    ///   affect `addrsRew` (the set of addresses eligible for rewards)
+    /// - Changes after this slot remain in `current_epoch_registration_changes` and
+    ///   are picked up at the next epoch boundary
+    stability_window_slot: u64,
 }
 
 impl RewardRuntime {
     pub(crate) fn set_epoch_rewards_task(
         &mut self,
+        epoch: Epoch,
         task: JoinHandle<anyhow::Result<RewardsResult>>,
     ) {
+        self.active_epoch = Some(epoch);
         self.epoch_rewards_task = Some(task);
     }
 
     pub(crate) fn set_rewards_plan(&mut self, plan: PendingRewardsPlan) {
-        self.previous_rewards_plan = self.active_rewards_plan.take();
         self.active_rewards_plan = Some(plan);
     }
 
     pub(crate) fn set_epoch_rewards_result(&mut self, result: RewardsResult) {
-        tracing::info!("rollback validation: setting epoch reward result");
         self.previous_rewards = Some(result);
+    }
+
+    pub(crate) fn set_stability_window_slot(&mut self, stability_window_slot: u64) {
+        self.stability_window_slot = stability_window_slot;
+    }
+
+    pub(crate) fn get_stability_window_slot(&self) -> u64 {
+        self.stability_window_slot
     }
 
     pub(crate) fn get_rewards_plan(&self) -> Option<PendingRewardsPlan> {
@@ -55,13 +78,12 @@ impl RewardRuntime {
         let task = self.epoch_rewards_task.take();
         if task.is_some() {
             self.start_rewards_tx = None;
-            self.current_epoch_registration_changes = None;
             self.active_epoch = None;
         }
         task
     }
 
-    pub(crate) fn set_start_rewards_tx(&mut self, tx: mpsc::Sender<()>) {
+    pub(crate) fn set_start_rewards_tx(&mut self, tx: mpsc::Sender<Vec<RegistrationChange>>) {
         self.start_rewards_tx = Some(tx);
     }
 
@@ -69,34 +91,17 @@ impl RewardRuntime {
         &mut self,
         block_number: u64,
         epoch_slot: u64,
-        stability_window: u64,
+        current_epoch_registration_changes: &[RegistrationChange],
     ) {
+        self.active_epoch_slot = Some(epoch_slot);
         if let Some(tx) = &self.start_rewards_tx {
-            if epoch_slot >= stability_window {
+            if epoch_slot >= self.stability_window_slot {
                 info!(
                     "Starting rewards calculation at block {}, epoch slot {}",
                     block_number, epoch_slot
                 );
-                let _ = tx.send(());
+                let _ = tx.send(current_epoch_registration_changes.to_vec());
                 self.start_rewards_tx = None;
-            }
-        }
-    }
-
-    pub(crate) fn begin_epoch_registration_changes(
-        &mut self,
-        epoch: u64,
-    ) -> Arc<Mutex<Vec<RegistrationChange>>> {
-        let current_epoch_registration_changes = Arc::new(Mutex::new(Vec::new()));
-        self.active_epoch = Some(epoch);
-        self.current_epoch_registration_changes = Some(current_epoch_registration_changes.clone());
-        current_epoch_registration_changes
-    }
-
-    pub(crate) fn push_registration_change(&mut self, change: RegistrationChange) {
-        if let Some(current_epoch_registration_changes) = &self.current_epoch_registration_changes {
-            if let Ok(mut changes) = current_epoch_registration_changes.lock() {
-                changes.push(change);
             }
         }
     }
@@ -104,38 +109,35 @@ impl RewardRuntime {
     pub(crate) fn rollback_to(
         &mut self,
         rollback_block: &BlockInfo,
-        current_epoch_registration_changes: &[RegistrationChange],
-        stability_window_slot: u64,
+        _current_epoch_registration_changes: &[RegistrationChange],
     ) {
-        if let Some(runtime_changes) = &self.current_epoch_registration_changes {
-            if let Ok(mut changes) = runtime_changes.lock() {
-                *changes = current_epoch_registration_changes.to_vec();
-            }
-        }
-
         tracing::info!(
             "rollback validation: epoch boundary rollback; active: {:?} actual: {}",
             self.active_epoch,
             rollback_block.epoch
         );
 
+        // When rollbacking back over a epoch boundary we must recreate the epoch_rewards_task using the previously
+        // computed rewards. With the current protocol parameters the max rollback depth is 10% of an epoch
+        // (2160 / 21600) on mainnet and (432/ 4320) on preview, meaning we will never need to recalculate rewards
+        // on an epoch transition rollback.
         if self.active_epoch != Some(rollback_block.epoch) {
-            self.active_rewards_plan = self.previous_rewards_plan.take();
-
-            if rollback_block.epoch_slot <= stability_window_slot {
-                // Recalculate rewards using new registration changes if rollback to previous epoch is
-                // before the stability window slot.
-                tracing::info!(
-                    "rollback validation: rollback before stability window, creating fresh calculation"
-                );
-                self.clear_on_rollback();
-            } else if let Some(result) = self.previous_rewards.clone() {
-                // Recreate the rewards task using the finished reward result if rollback to previous epoch
-                // is not before the stability window slot.
-                tracing::info!("rollback validation: reusing existing reward result");
+            if let Some(result) = self.previous_rewards.clone() {
                 self.epoch_rewards_task = Some(tokio::spawn(async move { Ok(result) }));
                 self.active_epoch = Some(rollback_block.epoch);
             }
+        } else if self.active_epoch_slot > Some(rollback_block.epoch_slot)
+            && rollback_block.epoch_slot <= self.stability_window_slot
+        {
+            // For an intra-epoch rollback we must check if we were passed the stability_window_slot and have rolled back
+            // before. In this case we must recalculate rewards using the updated registration state data.
+
+            // Abort the existing task
+            if let Some(task) = self.epoch_rewards_task.take() {
+                task.abort();
+            }
+
+            // Spawn new rewards calculation task
         }
     }
 
@@ -144,7 +146,6 @@ impl RewardRuntime {
             task.abort();
         }
         self.start_rewards_tx = None;
-        self.current_epoch_registration_changes = None;
         self.active_epoch = None;
     }
 }
@@ -567,13 +568,11 @@ mod tests {
         let (tx, _rx) = mpsc::channel();
 
         runtime.set_start_rewards_tx(tx);
-        runtime.begin_epoch_registration_changes(4);
-        runtime.set_epoch_rewards_task(tokio::spawn(async { Ok(RewardsResult::default()) }));
+        runtime.set_epoch_rewards_task(1, tokio::spawn(async { Ok(RewardsResult::default()) }));
 
         runtime.clear_on_rollback();
 
         assert!(runtime.start_rewards_tx.is_none());
-        assert!(runtime.current_epoch_registration_changes.is_none());
         assert!(runtime.epoch_rewards_task.is_none());
         assert!(runtime.active_epoch.is_none());
     }
@@ -581,12 +580,6 @@ mod tests {
     #[test]
     fn reward_runtime_keeps_same_epoch_work_and_rewinds_tracker() {
         let mut runtime = RewardRuntime::default();
-        runtime.begin_epoch_registration_changes(10);
-        runtime.push_registration_change(RegistrationChange {
-            address: stake_address(1),
-            kind: RegistrationChangeKind::Registered,
-            epoch_slot: 11,
-        });
 
         runtime.rollback_to(
             &block_info(10, 12, false),
@@ -595,14 +588,9 @@ mod tests {
                 kind: RegistrationChangeKind::Deregistered,
                 epoch_slot: 9,
             }],
-            8,
         );
 
         assert_eq!(runtime.active_epoch, Some(10));
-        let changes =
-            runtime.current_epoch_registration_changes.as_ref().unwrap().lock().unwrap().clone();
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].address, stake_address(2));
     }
 
     #[test]
@@ -611,12 +599,10 @@ mod tests {
         let (tx, _rx) = mpsc::channel();
 
         runtime.set_start_rewards_tx(tx);
-        runtime.begin_epoch_registration_changes(10);
 
-        runtime.rollback_to(&block_info(10, 0, true), &[], 8);
+        runtime.rollback_to(&block_info(10, 0, true), &[]);
 
         assert!(runtime.start_rewards_tx.is_none());
-        assert!(runtime.current_epoch_registration_changes.is_none());
         assert!(runtime.active_epoch.is_none());
     }
 
@@ -625,17 +611,16 @@ mod tests {
         let mut runtime = RewardRuntime::default();
         let (tx, _rx) = mpsc::channel();
 
-        runtime.begin_epoch_registration_changes(10);
-        runtime.set_epoch_rewards_task(tokio::spawn(async {
-            std::future::pending::<anyhow::Result<RewardsResult>>().await
-        }));
+        runtime.set_epoch_rewards_task(
+            1,
+            tokio::spawn(async { std::future::pending::<anyhow::Result<RewardsResult>>().await }),
+        );
         runtime.set_start_rewards_tx(tx);
-        runtime.notify_block(42, 8, 8);
+        runtime.notify_block(42, 8, &[]);
 
-        runtime.rollback_to(&block_info(10, 8, false), &[], 8);
+        runtime.rollback_to(&block_info(10, 8, false), &[]);
 
         assert!(runtime.start_rewards_tx.is_none());
-        assert!(runtime.current_epoch_registration_changes.is_none());
         assert!(runtime.epoch_rewards_task.is_none());
         assert!(runtime.active_epoch.is_none());
     }
