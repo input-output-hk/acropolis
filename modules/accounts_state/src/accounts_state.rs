@@ -298,7 +298,6 @@ impl AccountsState {
                 runtime.rewards.rollback_to(
                     primary.block_info(),
                     state.current_epoch_registration_changes(),
-                    state.rewards_stability_window_slot(),
                 );
 
                 let rollback_message = primary
@@ -521,7 +520,6 @@ impl AccountsState {
                         block_info.epoch_slot,
                         block_info.era,
                         &mut ctx,
-                        &mut runtime.rewards,
                         &mut stake_address_undo,
                     ) {
                         Ok(updates) => ctx.handle(
