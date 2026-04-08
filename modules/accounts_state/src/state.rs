@@ -68,7 +68,7 @@ impl EpochSnapshots {
 }
 
 #[derive(Debug, Clone)]
-struct PendingRewardsPlan {
+pub struct PendingRewardsPlan {
     rewarded_epoch: u64,
     rewarded_era: Era,
     shelley_params: ShelleyParams,
@@ -115,11 +115,6 @@ pub struct State {
     /// Addresses registration changes in current epoch
     current_epoch_registration_changes: Vec<RegistrationChange>,
 
-    /// Rollback-safe description of the rewards that should be applied at the
-    /// next epoch transition. The async task remains runtime-owned, but the
-    /// deterministic inputs needed to recompute on replay must survive rollbacks.
-    pending_rewards_plan: Option<PendingRewardsPlan>,
-
     /// DReps mapped to all accounts that have ever delegated to them
     /// Required to properly replay PV9 in which there was a DRep deregistration
     /// bug causing all accounts that have ever delegated to the DRep to have their
@@ -156,13 +151,16 @@ impl State {
         Ok(())
     }
 
-    fn pending_rewards_result_from_plan(&self) -> Result<Option<crate::rewards::RewardsResult>> {
-        if let Some(plan) = self.pending_rewards_plan.as_ref() {
+    fn pending_rewards_result_from_plan(
+        &self,
+        plan: Option<PendingRewardsPlan>,
+    ) -> Result<Option<crate::rewards::RewardsResult>> {
+        if let Some(plan) = plan {
             info!(
                 rewarded_epoch = plan.rewarded_epoch,
                 "Recomputing pending rewards synchronously from rollback-safe plan"
             );
-            Ok(Some(self.calculate_pending_rewards_from_plan(plan)?))
+            Ok(Some(self.calculate_pending_rewards_from_plan(&plan)?))
         } else {
             Ok(None)
         }
@@ -782,7 +780,7 @@ impl State {
             era
         };
 
-        self.pending_rewards_plan = Some(PendingRewardsPlan {
+        rewards_runtime.set_rewards_plan(PendingRewardsPlan {
             rewarded_epoch: epoch - 1,
             rewarded_era,
             shelley_params: shelley_params.clone(),
@@ -1346,7 +1344,6 @@ impl State {
             // Snapshot bootstrap already materialized the prior epoch's reward effects,
             // so any leftover async reward work must be discarded rather than paid later.
             rewards_runtime.clear_on_rollback();
-            self.pending_rewards_plan = None;
             info!("Skipping rewards calculation on first epoch after bootstrap");
             return Ok((spo_rewards, reward_deltas));
         }
@@ -1355,18 +1352,21 @@ impl State {
         // have the original async task, so fall back to recomputing from rollback-safe inputs.
         let rewards_result = if let Some(task) = rewards_runtime.take_epoch_rewards_task() {
             match task.await {
-                Ok(Ok(rewards_result)) => Some(rewards_result),
+                Ok(Ok(rewards_result)) => {
+                    rewards_runtime.set_epoch_rewards_result(rewards_result.clone());
+                    Some(rewards_result)
+                }
                 Ok(Err(error)) => {
                     error!("Rewards calculation task failed: {error:#}");
-                    self.pending_rewards_result_from_plan()?
+                    self.pending_rewards_result_from_plan(rewards_runtime.get_rewards_plan())?
                 }
                 Err(error) => {
                     error!("Rewards calculation task join failed: {error:#}");
-                    self.pending_rewards_result_from_plan()?
+                    self.pending_rewards_result_from_plan(rewards_runtime.get_rewards_plan())?
                 }
             }
         } else {
-            self.pending_rewards_result_from_plan()?
+            self.pending_rewards_result_from_plan(rewards_runtime.get_rewards_plan())?
         };
 
         if let Some(rewards_result) = rewards_result {
@@ -2830,12 +2830,6 @@ mod tests {
                 ..StakeAddressState::default()
             },
         );
-        state.pending_rewards_plan = Some(PendingRewardsPlan {
-            rewarded_epoch: 1,
-            rewarded_era: Era::Shelley,
-            shelley_params: acropolis_common::protocol_params::ShelleyParams::default(),
-            stake_rewards: 0,
-        });
 
         let mut rewards = BTreeMap::new();
         rewards.insert(
@@ -2868,7 +2862,6 @@ mod tests {
             .unwrap();
         assert!(spo_rewards.is_empty());
         assert!(reward_deltas.is_empty());
-        assert!(state.pending_rewards_plan.is_none());
 
         let (_, reward_deltas) = state
             .complete_previous_epoch_rewards_calculation(
