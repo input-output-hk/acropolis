@@ -43,6 +43,9 @@ fn system_time_to_posix_milliseconds(time: &SystemTime) -> u64 {
         .expect("POSIX time in milliseconds exceeds u64 range!")
 }
 
+/// TODO:
+/// For pre conway era, when only upper bound is set as Finite
+/// that is inclusive.
 fn encode_bound<'a>(
     bound: Option<&SystemTime>,
     is_lower: bool,
@@ -62,7 +65,7 @@ fn encode_bound<'a>(
         None => (
             // NegInf for lower bound, PosInf for upper bound
             constr(arena, if is_lower { 0 } else { 2 }, vec![]),
-            // Infinite is always exclusive by convention: true
+            // Infinite is always inclusive
             true.to_plutus_data(arena, version)?,
         ),
     };
