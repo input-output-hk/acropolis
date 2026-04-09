@@ -343,17 +343,21 @@ pub struct RedeemerPointer {
     pub index: u32,
 }
 
+/// !IMPORTANT
+/// Ledger order is different from Plutus Data constructor Order for Script Purpose
+/// This is Ledger Order.
+/// Plutus Data Constructor Order takes Mint before Spend.
 #[derive(Debug)]
 pub enum ScriptPurpose {
-    Spending(UTxOIdentifier),
-    Minting(PolicyId),
-    Rewarding(StakeCredential),
-    Certifying(TxCertificateWithPos),
-    Voting(Voter),
-    Proposing(usize, ProposalProcedure),
+    Spend(UTxOIdentifier),
+    Mint(PolicyId),
+    Reward(StakeCredential),
+    Certify(TxCertificateWithPos),
+    Vote(Voter),
+    Propose(usize, ProposalProcedure),
 }
 
-/// Get Scripts needed from UTxOs being spend
+/// Get Scripts needed from UTxOs being spent
 /// Return a list of (RedeemerPointer, ScriptHash) pairs
 /// NOTE:
 /// Inputs must be sorted lexicographically by UTxO identifier
