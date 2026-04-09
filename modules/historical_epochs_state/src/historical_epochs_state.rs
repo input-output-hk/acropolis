@@ -4,7 +4,7 @@
 use crate::immutable_historical_epochs_state::ImmutableHistoricalEpochsState;
 use crate::state::{HistoricalEpochsStateConfig, State};
 use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper};
-use acropolis_common::configuration::{StartupMode, get_bool_flag, get_string_flag};
+use acropolis_common::configuration::{get_bool_flag, get_string_flag, StartupMode};
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::{
     EpochActivityMessage, ProtocolParamsMessage, RawBlockMessage, StateQuery,

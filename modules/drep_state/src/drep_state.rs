@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
-    configuration::{StartupMode, get_bool_flag, get_string_flag},
+    configuration::{get_bool_flag, get_string_flag, StartupMode},
     declare_cardano_reader,
     messages::{
         CardanoMessage, GovernanceProceduresMessage, Message, ProtocolParamsMessage,
