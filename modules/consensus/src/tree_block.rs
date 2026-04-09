@@ -39,6 +39,10 @@ pub struct TreeBlock {
     pub children: Vec<BlockHash>,
     /// Current lifecycle status.
     pub status: BlockValidationStatus,
+    /// True for the synthetic root inserted when starting from genesis (Origin).
+    /// Its block number is a placeholder; sequential-number validation is skipped
+    /// for any block whose parent has this flag set.
+    pub is_genesis_root: bool,
 }
 
 impl TreeBlock {
@@ -58,6 +62,7 @@ impl TreeBlock {
             parent,
             children: Vec::new(),
             status,
+            is_genesis_root: false,
         }
     }
 }
