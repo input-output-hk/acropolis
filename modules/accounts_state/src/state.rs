@@ -1237,8 +1237,7 @@ impl State {
             return Ok((spo_rewards, reward_deltas));
         }
 
-        // Check previous epoch rewards calculation is done. On rollback replay we may no longer
-        // have the original async task, so fall back to recomputing from rollback-safe inputs.
+        // Check previous epoch rewards calculation is done.
         let rewards_result = if let Some(task) = rewards_runtime.take_epoch_rewards_task() {
             match task.await {
                 Ok(Ok(rewards_result)) => {
@@ -1248,8 +1247,8 @@ impl State {
                 Ok(Err(error)) => {
                     anyhow::bail!("Rewards calculation task failed: {error:#}");
                 }
-                Err(error) => {
-                    anyhow::bail!("Rewards calculation task failed: {error:#}");
+                Err(join_error) => {
+                    anyhow::bail!("Rewards task join failed (panic/cancel/abort): {join_error:#}");
                 }
             }
         } else {

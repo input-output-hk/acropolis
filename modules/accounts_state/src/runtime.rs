@@ -106,7 +106,7 @@ impl RewardRuntime {
     }
 
     pub(crate) fn rollback_to(&mut self, rollback_block: &BlockInfo) {
-        // When rollbacking back over a epoch boundary we must recreate the epoch_rewards_task using the previously
+        // When rolling back over an epoch boundary we must recreate the epoch_rewards_task using the previously
         // computed rewards. With the current protocol parameters the max rollback depth is 10% of an epoch
         // (2160 / 21600) on mainnet and (432 / 4320) on preview, meaning we will never need to recalculate rewards
         // on an epoch transition rollback.
