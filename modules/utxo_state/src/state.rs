@@ -490,6 +490,10 @@ impl State {
         );
     }
 
+    /// TODO:
+    /// We are storing pots in utxo_state for LEDGER rule validation
+    /// ConwayTreasuryValueMismatch: Which validates transaction's treasury value
+    /// is same as the one from accounts_state.
     pub fn handle_pots(&mut self, pots: Pots) {
         self.pots = pots;
     }
