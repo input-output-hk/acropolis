@@ -459,15 +459,9 @@ impl State {
         stake_addresses.get_account_balances_sum(stake_keys)
     }
 
-    /// Log statistics
-    fn log_stats(&self) {
-        info!(num_stake_addresses = self.stake_addresses.lock().unwrap().len());
-    }
-
     /// Background tick
-    pub async fn tick(&self) -> Result<()> {
-        self.log_stats();
-        Ok(())
+    pub fn tick(&self) {
+        info!(num_stake_addresses = self.stake_addresses.lock().unwrap().len());
     }
 
     /// Query utxo_state for the total lovelace of AVVM UTxOs cancelled at the Allegra boundary.

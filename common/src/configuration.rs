@@ -6,6 +6,18 @@ pub const CONFIG_KEY_STARTUP_MODE: &str = "startup.startup-mode";
 pub const CONFIG_KEY_SYNC_MODE: &str = "startup.sync-mode";
 pub const CONFIG_KEY_BLOCK_FLOW_MODE: &str = "startup.block-flow-mode";
 
+pub fn get_bool_flag(config: &Config, key: (&str, bool)) -> bool {
+    config.get_bool(key.0).unwrap_or(key.1)
+}
+
+pub fn get_string_flag(config: &Config, key: (&str, &str)) -> String {
+    config.get_string(key.0).unwrap_or_else(|_| key.1.to_string())
+}
+
+pub fn get_u64_flag(config: &Config, key: (&str, u64)) -> u64 {
+    config.get_int(key.0).ok().and_then(|v| u64::try_from(v).ok()).unwrap_or(key.1)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SyncMode {
