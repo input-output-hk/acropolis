@@ -443,20 +443,20 @@ fn encode_script_purpose<'a>(
     version: PlutusVersion,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     match purpose {
-        ScriptPurpose::Minting(policy_id) => {
+        ScriptPurpose::Mint(policy_id) => {
             let p = policy_id.to_plutus_data(arena, version)?;
             Ok(constr(arena, 0, vec![p]))
         }
-        ScriptPurpose::Spending(utxo_id) => {
+        ScriptPurpose::Spend(utxo_id) => {
             let u = utxo_id.to_plutus_data(arena, version)?;
             Ok(constr(arena, 1, vec![u]))
         }
-        ScriptPurpose::Rewarding(cred) => {
+        ScriptPurpose::Reward(cred) => {
             let c = cred.to_plutus_data(arena, version)?;
             let staking = constr(arena, 0, vec![c]);
             Ok(constr(arena, 2, vec![staking]))
         }
-        ScriptPurpose::Certifying(cert_with_pos) => {
+        ScriptPurpose::Certify(cert_with_pos) => {
             let c = cert_with_pos.cert.to_plutus_data(arena, version)?;
             Ok(constr(arena, 3, vec![c]))
         }
@@ -475,11 +475,11 @@ fn encode_script_info<'a>(
     version: PlutusVersion,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     match purpose {
-        ScriptPurpose::Minting(policy_id) => {
+        ScriptPurpose::Mint(policy_id) => {
             let p = policy_id.to_plutus_data(arena, version)?;
             Ok(constr(arena, 0, vec![p]))
         }
-        ScriptPurpose::Spending(utxo_id) => {
+        ScriptPurpose::Spend(utxo_id) => {
             let u = utxo_id.to_plutus_data(arena, version)?;
             let maybe_datum = match datum {
                 Some(cbor_bytes) => {
@@ -490,20 +490,20 @@ fn encode_script_info<'a>(
             };
             Ok(constr(arena, 1, vec![u, maybe_datum]))
         }
-        ScriptPurpose::Rewarding(cred) => {
+        ScriptPurpose::Reward(cred) => {
             let c = cred.to_plutus_data(arena, version)?;
             Ok(constr(arena, 2, vec![c]))
         }
-        ScriptPurpose::Certifying(cert_with_pos) => {
+        ScriptPurpose::Certify(cert_with_pos) => {
             let idx = cert_with_pos.cert_index.to_plutus_data(arena, version)?;
             let c = cert_with_pos.cert.to_plutus_data(arena, version)?;
             Ok(constr(arena, 3, vec![idx, c]))
         }
-        ScriptPurpose::Voting(voter) => {
+        ScriptPurpose::Vote(voter) => {
             let v = voter.to_plutus_data(arena, version)?;
             Ok(constr(arena, 4, vec![v]))
         }
-        ScriptPurpose::Proposing(idx, proposal) => {
+        ScriptPurpose::Propose(idx, proposal) => {
             let idx = idx.to_plutus_data(arena, version)?;
             let p = proposal.to_plutus_data(arena, version)?;
             Ok(constr(arena, 5, vec![idx, p]))
@@ -565,15 +565,17 @@ fn encode_redeemer_key<'a>(
     version: PlutusVersion,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     match purpose {
-        ScriptPurpose::Minting(policy_id) => {
+        // This is because Plutus Data Constructor Order
+        // is different from Ledger ScriptPurpose Order.
+        ScriptPurpose::Mint(policy_id) => {
             let p = policy_id.to_plutus_data(arena, version)?;
             Ok(constr(arena, 0, vec![p]))
         }
-        ScriptPurpose::Spending(utxo_id) => {
+        ScriptPurpose::Spend(utxo_id) => {
             let u = utxo_id.to_plutus_data(arena, version)?;
             Ok(constr(arena, 1, vec![u]))
         }
-        ScriptPurpose::Rewarding(cred) => match version {
+        ScriptPurpose::Reward(cred) => match version {
             PlutusVersion::V1 | PlutusVersion::V2 => {
                 // V1/V2: StakingCredential.StakingHash(cred)
                 let c = cred.to_plutus_data(arena, version)?;
@@ -586,7 +588,7 @@ fn encode_redeemer_key<'a>(
                 Ok(constr(arena, 2, vec![c]))
             }
         },
-        ScriptPurpose::Certifying(cert_with_pos) => match version {
+        ScriptPurpose::Certify(cert_with_pos) => match version {
             PlutusVersion::V1 | PlutusVersion::V2 => {
                 let c = cert_with_pos.cert.to_plutus_data(arena, version)?;
                 Ok(constr(arena, 3, vec![c]))
@@ -598,11 +600,11 @@ fn encode_redeemer_key<'a>(
                 Ok(constr(arena, 3, vec![idx, c]))
             }
         },
-        ScriptPurpose::Voting(voter) => {
+        ScriptPurpose::Vote(voter) => {
             let v = voter.to_plutus_data(arena, version)?;
             Ok(constr(arena, 4, vec![v]))
         }
-        ScriptPurpose::Proposing(idx, proposal) => {
+        ScriptPurpose::Propose(idx, proposal) => {
             let i = idx.to_plutus_data(arena, version)?;
             let p = proposal.to_plutus_data(arena, version)?;
             Ok(constr(arena, 5, vec![i, p]))
@@ -634,7 +636,7 @@ fn build_script_purpose(
                     index,
                 },
             ))?;
-            Ok(ScriptPurpose::Spending(*utxo_id))
+            Ok(ScriptPurpose::Spend(*utxo_id))
         }
         RedeemerTag::Mint => {
             let (policy_id, _) =
@@ -642,7 +644,7 @@ fn build_script_purpose(
                     tag: tag.clone(),
                     index,
                 }))?;
-            Ok(ScriptPurpose::Minting(*policy_id))
+            Ok(ScriptPurpose::Mint(*policy_id))
         }
         RedeemerTag::Reward => {
             let withdrawal =
@@ -650,9 +652,7 @@ fn build_script_purpose(
                     tag: tag.clone(),
                     index,
                 }))?;
-            Ok(ScriptPurpose::Rewarding(
-                withdrawal.address.credential.clone(),
-            ))
+            Ok(ScriptPurpose::Reward(withdrawal.address.credential.clone()))
         }
         RedeemerTag::Cert => {
             let cert = certificates.get(idx).ok_or(ScriptContextError::MissingScript(
@@ -661,7 +661,7 @@ fn build_script_purpose(
                     index,
                 },
             ))?;
-            Ok(ScriptPurpose::Certifying(cert.clone()))
+            Ok(ScriptPurpose::Certify(cert.clone()))
         }
         RedeemerTag::Vote => {
             let vp = voting_procedures.ok_or(ScriptContextError::MissingValidationData(
@@ -674,7 +674,7 @@ fn build_script_purpose(
                     tag: tag.clone(),
                     index,
                 }))?;
-            Ok(ScriptPurpose::Voting((*voter).clone()))
+            Ok(ScriptPurpose::Vote((*voter).clone()))
         }
         RedeemerTag::Propose => {
             let proposals = proposal_procedures.ok_or(
@@ -685,7 +685,7 @@ fn build_script_purpose(
                     tag: tag.clone(),
                     index,
                 }))?;
-            Ok(ScriptPurpose::Proposing(idx, proposal.clone()))
+            Ok(ScriptPurpose::Propose(idx, proposal.clone()))
         }
     }
 }
