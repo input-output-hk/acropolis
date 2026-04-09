@@ -2,6 +2,7 @@
 //! Stores historical DRep delegation distributions
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper},
+    configuration::{get_bool_flag, get_string_flag},
     declare_cardano_reader,
     messages::{CardanoMessage, DRepStakeDistributionMessage, Message, StateTransitionMessage},
     rest_helper::handle_rest_with_query_parameters,
@@ -65,12 +66,10 @@ impl DRDDState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let handle_drdd_topic = config
-            .get_string(DEFAULT_HANDLE_DRDD_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.1.to_string());
+        let handle_drdd_topic = get_string_flag(&config, DEFAULT_HANDLE_DRDD_TOPIC);
         info!("Creating request handler on '{}'", handle_drdd_topic);
 
-        let store_drdd = config.get_bool(DEFAULT_STORE_DRDD.0).unwrap_or(DEFAULT_STORE_DRDD.1);
+        let store_drdd = get_bool_flag(&config, DEFAULT_STORE_DRDD);
 
         let history_opt = if store_drdd {
             let history = Arc::new(Mutex::new(StateHistory::<State>::new(

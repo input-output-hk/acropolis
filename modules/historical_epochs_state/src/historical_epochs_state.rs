@@ -4,7 +4,7 @@
 use crate::immutable_historical_epochs_state::ImmutableHistoricalEpochsState;
 use crate::state::{HistoricalEpochsStateConfig, State};
 use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper};
-use acropolis_common::configuration::StartupMode;
+use acropolis_common::configuration::{StartupMode, get_bool_flag, get_string_flag};
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::{
     EpochActivityMessage, ProtocolParamsMessage, RawBlockMessage, StateQuery,
@@ -157,19 +157,14 @@ impl HistoricalEpochsState {
         let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         // Query topic
-        let historical_epochs_query_topic = config
-            .get_string(DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC.1.to_string());
+        let historical_epochs_query_topic =
+            get_string_flag(&config, DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC);
         info!("Creating query handler on '{historical_epochs_query_topic}'");
 
         // Configuration
         let cfg = HistoricalEpochsStateConfig {
-            db_path: config
-                .get_string(DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH.0)
-                .unwrap_or(DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH.1.to_string()),
-            clear_on_start: config
-                .get_bool(DEFAULT_CLEAR_ON_START.0)
-                .unwrap_or(DEFAULT_CLEAR_ON_START.1),
+            db_path: get_string_flag(&config, DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH),
+            clear_on_start: get_bool_flag(&config, DEFAULT_CLEAR_ON_START),
         };
 
         // Initalize state

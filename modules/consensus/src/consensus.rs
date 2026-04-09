@@ -7,7 +7,7 @@ pub mod tree_error;
 pub mod tree_observer;
 
 use acropolis_common::{
-    configuration::BlockFlowMode,
+    configuration::{get_bool_flag, get_string_flag, get_u64_flag, BlockFlowMode},
     messages::{
         BlockRejectedMessage, BlockWantedMessage, CardanoMessage, ConsensusMessage, Message,
         RawBlockMessage, StateTransitionMessage,
@@ -28,12 +28,17 @@ use tracing::{debug, error, info, info_span, warn, Instrument};
 use tree_error::ConsensusTreeError;
 use tree_observer::ConsensusTreeObserver;
 
-const DEFAULT_BLOCKS_AVAILABLE_TOPIC: &str = "cardano.block.available";
-const DEFAULT_BLOCKS_PROPOSED_TOPIC: &str = "cardano.block.proposed";
-const DEFAULT_CONSENSUS_OFFERS_TOPIC: &str = "cardano.consensus.offers";
-const DEFAULT_CONSENSUS_WANTS_TOPIC: &str = "cardano.consensus.wants";
-const DEFAULT_VALIDATION_TIMEOUT: i64 = 60; // seconds
-const DEFAULT_SECURITY_PARAMETER: u64 = 2160; // TODO: This should come from the protocol params message security_param
+const DEFAULT_BLOCKS_AVAILABLE_TOPIC: (&str, &str) =
+    ("blocks-available-topic", "cardano.block.available");
+const DEFAULT_BLOCKS_PROPOSED_TOPIC: (&str, &str) =
+    ("blocks-proposed-topic", "cardano.block.proposed");
+const DEFAULT_CONSENSUS_OFFERS_TOPIC: (&str, &str) =
+    ("consensus-offers-topic", "cardano.consensus.offers");
+const DEFAULT_CONSENSUS_WANTS_TOPIC: (&str, &str) =
+    ("consensus-wants-topic", "cardano.consensus.wants");
+const DEFAULT_FORCE_VALIDATION: (&str, bool) = ("force-validation", true);
+const DEFAULT_VALIDATION_TIMEOUT: (&str, u64) = ("validation-timeout", 60); // seconds
+const DEFAULT_SECURITY_PARAMETER: (&str, u64) = ("security-parameter", 2160); // TODO: This should come from the protocol params message security_param
 
 /// Events emitted by the consensus tree observer, queued for async publishing.
 enum ObserverEvent {
@@ -154,24 +159,16 @@ impl Consensus {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let blocks_available_topic = config
-            .get_string("blocks-available-topic")
-            .unwrap_or(DEFAULT_BLOCKS_AVAILABLE_TOPIC.to_string());
+        let blocks_available_topic = get_string_flag(&config, DEFAULT_BLOCKS_AVAILABLE_TOPIC);
         info!("Subscribing to blocks on '{blocks_available_topic}'");
 
-        let blocks_proposed_topic = config
-            .get_string("blocks-proposed-topic")
-            .unwrap_or(DEFAULT_BLOCKS_PROPOSED_TOPIC.to_string());
+        let blocks_proposed_topic = get_string_flag(&config, DEFAULT_BLOCKS_PROPOSED_TOPIC);
         info!("Publishing proposed blocks on '{blocks_proposed_topic}'");
 
-        let consensus_offers_topic = config
-            .get_string("consensus-offers-topic")
-            .unwrap_or(DEFAULT_CONSENSUS_OFFERS_TOPIC.to_string());
+        let consensus_offers_topic = get_string_flag(&config, DEFAULT_CONSENSUS_OFFERS_TOPIC);
         info!("Subscribing to consensus offers on '{consensus_offers_topic}'");
 
-        let consensus_wants_topic = config
-            .get_string("consensus-wants-topic")
-            .unwrap_or(DEFAULT_CONSENSUS_WANTS_TOPIC.to_string());
+        let consensus_wants_topic = get_string_flag(&config, DEFAULT_CONSENSUS_WANTS_TOPIC);
 
         let validator_topics: Vec<String> =
             config.get::<Vec<String>>("validators").unwrap_or_default();
@@ -182,17 +179,14 @@ impl Consensus {
         let flow_mode = BlockFlowMode::from_config(&config);
         info!("Consensus flow mode: {flow_mode}");
 
-        let validation_timeout = Duration::from_secs(
-            config.get_int("validation-timeout").unwrap_or(DEFAULT_VALIDATION_TIMEOUT) as u64,
-        );
+        let validation_timeout =
+            Duration::from_secs(get_u64_flag(&config, DEFAULT_VALIDATION_TIMEOUT));
         info!("Validation timeout {validation_timeout:?}");
 
-        let force_validation = config.get_bool("force-validation").unwrap_or(true);
+        let force_validation = get_bool_flag(&config, DEFAULT_FORCE_VALIDATION);
         info!("Force validation and chain selection: {force_validation}");
 
-        let security_parameter = config
-            .get_int("security-parameter")
-            .unwrap_or(DEFAULT_SECURITY_PARAMETER as i64) as u64;
+        let security_parameter = get_u64_flag(&config, DEFAULT_SECURITY_PARAMETER);
         info!("Security parameter k={security_parameter}");
 
         // Subscribe for incoming blocks (BlockAvailable)
@@ -1041,7 +1035,7 @@ mod tests {
 
         let event_queue: EventQueue = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut tree = ConsensusTree::new(
-            DEFAULT_SECURITY_PARAMETER,
+            DEFAULT_SECURITY_PARAMETER.1,
             Box::new(QueuingConsensusTreeObserver {
                 events: event_queue.clone(),
             }),
@@ -1056,8 +1050,8 @@ mod tests {
 
         ConsensusRuntime {
             context,
-            blocks_proposed_topic: DEFAULT_BLOCKS_PROPOSED_TOPIC.to_string(),
-            consensus_wants_topic: DEFAULT_CONSENSUS_WANTS_TOPIC.to_string(),
+            blocks_proposed_topic: DEFAULT_BLOCKS_PROPOSED_TOPIC.1.to_string(),
+            consensus_wants_topic: DEFAULT_CONSENSUS_WANTS_TOPIC.1.to_string(),
             event_queue,
             pending_post_rollback_marker: None,
             tree,

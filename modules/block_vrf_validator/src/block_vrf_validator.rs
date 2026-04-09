@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{get_string_flag, StartupMode},
     declare_cardano_reader,
     messages::{
         AccountsBootstrapMessage, CardanoMessage, Message, ProtocolParamsMessage, RawBlockMessage,
@@ -270,20 +270,16 @@ impl BlockVrfValidator {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Publish topics
-        let validation_vrf_publisher_topic = config
-            .get_string(DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC.0)
-            .unwrap_or(DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC.1.to_string());
+        let validation_vrf_publisher_topic =
+            get_string_flag(&config, DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC);
         info!("Creating validation VRF publisher on '{validation_vrf_publisher_topic}'");
 
         // Subscribe topics
-        let bootstrapped_subscribe_topic = config
-            .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
+        let bootstrapped_subscribe_topic =
+            get_string_flag(&config, DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC);
         info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
 
-        let snapshot_subscribe_topic = config
-            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+        let snapshot_subscribe_topic = get_string_flag(&config, DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC);
 
         // Subscribers
         let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
