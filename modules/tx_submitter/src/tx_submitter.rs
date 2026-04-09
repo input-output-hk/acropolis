@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use acropolis_common::{
     commands::transactions::{TransactionsCommand, TransactionsCommandResponse},
+    configuration::{get_string_flag, get_u64_flag},
     messages::{Command, CommandResponse, Message},
 };
 use anyhow::{Context as _, Result, bail};
@@ -16,6 +17,10 @@ use tokio::sync::RwLock;
 use tracing::warn;
 
 use crate::{peer::PeerConnection, tx::Transaction};
+
+const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.txs.submit");
+// TODO: Read magic number from genesis message
+const DEFAULT_MAGIC_NUMBER: (&str, u64) = ("magic-number", 764824073);
 
 #[module(
     message_type(Message),
@@ -83,9 +88,8 @@ struct SubmitterConfig {
 }
 impl SubmitterConfig {
     pub fn parse(config: &Config) -> Result<Self> {
-        let subscribe_topic =
-            config.get_string("subscribe-topic").unwrap_or("cardano.txs.submit".to_string());
-        let magic = config.get("magic-number").unwrap_or(764824073);
+        let subscribe_topic = get_string_flag(config, DEFAULT_SUBSCRIBE_TOPIC);
+        let magic = get_u64_flag(config, DEFAULT_MAGIC_NUMBER);
         Ok(Self {
             subscribe_topic,
             magic,

@@ -49,7 +49,8 @@ const DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC: (&str, &str) =
     ("publish-tx-validation-topic", "cardano.validation.tx");
 
 const CIP25_METADATA_LABEL: u64 = 721;
-const DEFAULT_NETWORK_NAME: &str = "mainnet";
+// TODO: Read network name from genesis message
+const DEFAULT_NETWORK_NAME: (&str, &str) = ("startup.network-name", "mainnet");
 
 /// Tx unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -409,11 +410,7 @@ impl TxUnpacker {
             None => None,
         };
 
-        let network_id = match config
-            .get_string("startup.network-name")
-            .unwrap_or(DEFAULT_NETWORK_NAME.to_string())
-            .as_ref()
-        {
+        let network_id = match get_string_flag(&config, DEFAULT_NETWORK_NAME).as_ref() {
             "mainnet" => NetworkId::Mainnet,
             _ => NetworkId::Testnet,
         };

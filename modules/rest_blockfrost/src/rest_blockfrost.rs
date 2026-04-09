@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, future::Future, sync::Arc};
 
+use acropolis_common::configuration::get_string_flag;
 use acropolis_common::rest_error::RESTError;
 use acropolis_common::{
     messages::{Message, RESTResponse},
@@ -805,7 +806,7 @@ fn register_handler<F, Fut>(
         + 'static,
     Fut: Future<Output = Result<RESTResponse, RESTError>> + Send + 'static,
 {
-    let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
+    let topic_name = get_string_flag(&context.config, topic);
     info!("Creating request handler on '{}'", topic_name);
 
     handle_rest_with_path_parameter(context.clone(), &topic_name, move |params| {
@@ -831,7 +832,7 @@ fn register_handler_with_query<F, Fut>(
         + 'static,
     Fut: Future<Output = Result<RESTResponse, RESTError>> + Send + 'static,
 {
-    let topic_name = context.config.get_string(topic.0).unwrap_or_else(|_| topic.1.to_string());
+    let topic_name = get_string_flag(&context.config, topic);
     info!("Creating request handler on '{}'", topic_name);
 
     handle_rest_with_path_and_query_parameters(

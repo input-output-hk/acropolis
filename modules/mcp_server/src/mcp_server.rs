@@ -13,7 +13,10 @@ use caryatid_sdk::{module, Context};
 use config::Config;
 use tracing::info;
 
-use acropolis_common::messages::Message;
+use acropolis_common::{
+    configuration::{get_bool_flag, get_string_flag, get_u64_flag},
+    messages::Message,
+};
 
 mod resources;
 mod server;
@@ -22,9 +25,11 @@ mod tools;
 use server::AcropolisMCPServer;
 
 /// Default MCP server address
-const DEFAULT_MCP_ADDRESS: &str = "127.0.0.1";
+const DEFAULT_MCP_ADDRESS: (&str, &str) = ("address", "127.0.0.1");
 /// Default MCP server port
-const DEFAULT_MCP_PORT: u16 = 4341;
+const DEFAULT_MCP_PORT: (&str, u64) = ("port", 4341);
+/// Default enabled status
+const DEFAULT_ENABLED: (&str, bool) = ("enabled", false);
 
 #[module(
     message_type(Message),
@@ -37,7 +42,7 @@ impl MCPServer {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Check if MCP server is enabled in config (under [module.mcp-server])
         // Note: `config` is already scoped to the module's config section
-        let enabled = config.get_bool("enabled").unwrap_or(false);
+        let enabled = get_bool_flag(&config, DEFAULT_ENABLED);
 
         if !enabled {
             info!("MCP server is disabled in configuration");
@@ -45,9 +50,8 @@ impl MCPServer {
         }
 
         // Get address and port from module config
-        let address =
-            config.get_string("address").unwrap_or_else(|_| DEFAULT_MCP_ADDRESS.to_string());
-        let port = config.get_int("port").map(|p| p as u16).unwrap_or(DEFAULT_MCP_PORT);
+        let address = get_string_flag(&config, DEFAULT_MCP_ADDRESS);
+        let port: u16 = get_u64_flag(&config, DEFAULT_MCP_PORT).try_into()?;
 
         info!("Initializing MCP server on {}:{}", address, port);
 
