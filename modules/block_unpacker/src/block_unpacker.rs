@@ -1,7 +1,10 @@
 //! Acropolis Block unpacker module for Caryatid
 //! Unpacks block bodies into transactions
 
-use acropolis_common::messages::{CardanoMessage, Message, RawTxsMessage, StateTransitionMessage};
+use acropolis_common::{
+    configuration::get_string_flag,
+    messages::{CardanoMessage, Message, RawTxsMessage, StateTransitionMessage},
+};
 use anyhow::Result;
 use caryatid_sdk::{module, Context};
 use config::Config;
@@ -9,8 +12,8 @@ use pallas::ledger::traverse::MultiEraBlock;
 use std::sync::Arc;
 use tracing::{debug, error, info, info_span, Instrument};
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.block.proposed";
-const DEFAULT_PUBLISH_TOPIC: &str = "cardano.txs";
+const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.block.proposed");
+const DEFAULT_PUBLISH_TOPIC: (&str, &str) = ("publish-topic", "cardano.txs");
 
 /// Block unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -26,12 +29,10 @@ impl BlockUnpacker {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Subscribe for block body messages
         // Get configuration
-        let subscribe_topic =
-            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
+        let subscribe_topic = get_string_flag(&config, DEFAULT_SUBSCRIBE_TOPIC);
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let publish_topic =
-            config.get_string("publish-topic").unwrap_or(DEFAULT_PUBLISH_TOPIC.to_string());
+        let publish_topic = get_string_flag(&config, DEFAULT_PUBLISH_TOPIC);
         info!("Publishing on '{publish_topic}'");
 
         let mut subscription = context.subscribe(&subscribe_topic).await?;

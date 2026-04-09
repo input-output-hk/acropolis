@@ -9,6 +9,7 @@ use crate::{
 };
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper},
+    configuration::{get_bool_flag, get_string_flag},
     declare_cardano_reader,
     messages::{
         AddressDeltasMessage, AssetDeltasMessage, CardanoMessage, Message, StateQuery,
@@ -209,14 +210,6 @@ impl AssetsState {
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        fn get_bool_flag(config: &Config, key: (&str, bool)) -> bool {
-            config.get_bool(key.0).unwrap_or(key.1)
-        }
-
-        fn get_string_flag(config: &Config, key: (&str, &str)) -> String {
-            config.get_string(key.0).unwrap_or_else(|_| key.1.to_string())
-        }
-
         fn get_transactions_flag(config: &Config, key: (&str, &str)) -> StoreTransactions {
             let val = get_string_flag(config, key);
             match val.as_str() {

@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper, ValidationContext};
-use acropolis_common::configuration::StartupMode;
+use acropolis_common::configuration::{get_string_flag, StartupMode};
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::{
     EpochActivityMessage, GovernanceProceduresMessage, ProtocolParamsMessage, RawBlockMessage,
@@ -541,35 +541,25 @@ impl SPOState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
 
-        let clock_tick_subscribe_topic = config
-            .get_string(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.1.to_string());
+        let clock_tick_subscribe_topic =
+            get_string_flag(&config, DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC);
         info!("Creating subscriber on '{clock_tick_subscribe_topic}'");
 
-        let snapshot_topic = config
-            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+        let snapshot_topic = get_string_flag(&config, DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC);
 
         // Publish Topics
-        let spo_state_publish_topic = config
-            .get_string(DEFAULT_SPO_STATE_PUBLISH_TOPIC.0)
-            .unwrap_or(DEFAULT_SPO_STATE_PUBLISH_TOPIC.1.to_string());
+        let spo_state_publish_topic = get_string_flag(&config, DEFAULT_SPO_STATE_PUBLISH_TOPIC);
         info!("Creating SPO state publisher on '{spo_state_publish_topic}'");
 
-        let pool_registration_updates_publish_topic = config
-            .get_string(DEFAULT_POOL_REGISTRATION_UPDATES_PUBLISH_TOPIC.0)
-            .unwrap_or(DEFAULT_POOL_REGISTRATION_UPDATES_PUBLISH_TOPIC.1.to_string());
+        let pool_registration_updates_publish_topic =
+            get_string_flag(&config, DEFAULT_POOL_REGISTRATION_UPDATES_PUBLISH_TOPIC);
         info!("Creating pool registration updates publisher on '{pool_registration_updates_publish_topic}'");
 
-        let validation_publish_topic = config
-            .get_string(DEFAULT_VALIDATION_PUBLISH_TOPIC.0)
-            .unwrap_or(DEFAULT_VALIDATION_PUBLISH_TOPIC.1.to_string());
+        let validation_publish_topic = get_string_flag(&config, DEFAULT_VALIDATION_PUBLISH_TOPIC);
         info!("Validation outcome topic publisher on '{validation_publish_topic}'");
 
         // query topic
-        let pools_query_topic = config
-            .get_string(DEFAULT_POOLS_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_POOLS_QUERY_TOPIC.1.to_string());
+        let pools_query_topic = get_string_flag(&config, DEFAULT_POOLS_QUERY_TOPIC);
         info!("Creating query handler on '{}'", pools_query_topic);
 
         // store config

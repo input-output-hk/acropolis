@@ -2,7 +2,7 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use acropolis_common::{
-    configuration::StartupMode,
+    configuration::{get_string_flag, get_u64_flag, StartupMode},
     genesis_values::GenesisValues,
     hash::Hash,
     messages::{
@@ -25,12 +25,18 @@ use std::borrow::Cow;
 use std::sync::Arc;
 use tracing::{error, info, info_span, Instrument};
 
-const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
-const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: &str = "cardano.utxo.deltas";
-const DEFAULT_PUBLISH_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
-const DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC: &str = "cardano.genesis.utxos";
-const DEFAULT_COMPLETION_TOPIC: &str = "cardano.sequence.bootstrapped";
-const DEFAULT_NETWORK_NAME: &str = "mainnet";
+const DEFAULT_STARTUP_TOPIC: (&str, &str) = ("startup-topic", "cardano.sequence.start");
+const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: (&str, &str) =
+    ("publish-utxo-deltas-topic", "cardano.utxo.deltas");
+const DEFAULT_PUBLISH_POT_DELTAS_TOPIC: (&str, &str) =
+    ("publish-pot-deltas-topic", "cardano.pot.deltas");
+const DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC: (&str, &str) =
+    ("publish-genesis-utxos-topic", "cardano.genesis.utxos");
+const DEFAULT_COMPLETION_TOPIC: (&str, &str) =
+    ("completion-topic", "cardano.sequence.bootstrapped");
+const DEFAULT_NETWORK_NAME: (&str, &str) = ("startup.network-name", "mainnet");
+const DEFAULT_SHELLEY_START_EPOCH: (&str, u64) = ("shelley-start-epoch", 0);
+const DEFAULT_FIRST_BLOCK_ERA: (&str, &str) = ("first-block-era", "byron");
 
 // Include genesis data (downloaded by build.rs)
 const MAINNET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-byron-genesis.json");
@@ -74,8 +80,7 @@ pub struct GenesisBootstrapper;
 impl GenesisBootstrapper {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let startup_topic =
-            config.get_string("startup-topic").unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
+        let startup_topic = get_string_flag(&config, DEFAULT_STARTUP_TOPIC);
         info!("Creating startup subscriber on '{startup_topic}'");
 
         let snapshot_bootstrap = StartupMode::from_config(config.as_ref()).is_snapshot();
@@ -89,14 +94,10 @@ impl GenesisBootstrapper {
             async {
                 info!("Received startup message");
 
-                let completion_topic = config
-                    .get_string("completion-topic")
-                    .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
+                let completion_topic = get_string_flag(&config, DEFAULT_COMPLETION_TOPIC);
                 info!("Completing with '{completion_topic}'");
 
-                let network_name = config
-                    .get_string("startup.network-name")
-                    .unwrap_or(DEFAULT_NETWORK_NAME.to_string());
+                let network_name = get_string_flag(&config, DEFAULT_NETWORK_NAME);
 
                 let (byron_genesis_bytes, shelley_genesis_bytes, shelley_start_epoch, first_block_era):
                     (Cow<'static, [u8]>, Cow<'static, [u8]>, u64, Era) = match network_name.as_ref()
@@ -133,20 +134,17 @@ impl GenesisBootstrapper {
                                     Ok(data) => data,
                                     Err(e) => { error!("Cannot read shelley genesis file {sp}: {e}"); return; }
                                 };
-                                let shelley_start_epoch = config.get::<u64>("shelley-start-epoch").unwrap_or(0);
-                                let first_block_era = config.get_string("first-block-era")
-                                    .ok()
-                                    .and_then(|s| match s.as_ref() {
-                                        "byron" => Some(Era::Byron),
-                                        "shelley" => Some(Era::Shelley),
-                                        "allegra" => Some(Era::Allegra),
-                                        "mary" => Some(Era::Mary),
-                                        "alonzo" => Some(Era::Alonzo),
-                                        "babbage" => Some(Era::Babbage),
-                                        "conway" => Some(Era::Conway),
-                                        _ => None,
-                                    })
-                                    .unwrap_or(Era::Byron);
+                                let shelley_start_epoch = get_u64_flag(&config,DEFAULT_SHELLEY_START_EPOCH);
+                                let first_block_era = match get_string_flag(&config, DEFAULT_FIRST_BLOCK_ERA).as_str() {
+                                    "byron" => Era::Byron,
+                                    "shelley" => Era::Shelley,
+                                    "allegra" => Era::Allegra,
+                                    "mary" => Era::Mary,
+                                    "alonzo" => Era::Alonzo,
+                                    "babbage" => Era::Babbage,
+                                    "conway" => Era::Conway,
+                                    _ => Era::Byron,
+                                };
                                 (Cow::Owned(byron), Cow::Owned(shelley), shelley_start_epoch, first_block_era)
                             }
                             _ => {
@@ -186,19 +184,13 @@ impl GenesisBootstrapper {
                 };
 
                 if !snapshot_bootstrap {
-                    let publish_utxo_deltas_topic = config
-                        .get_string("publish-utxo-deltas-topic")
-                        .unwrap_or(DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC.to_string());
+                    let publish_utxo_deltas_topic = get_string_flag(&config, DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC);
                     info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
 
-                    let publish_pot_deltas_topic = config
-                        .get_string("publish-pot-deltas-topic")
-                        .unwrap_or(DEFAULT_PUBLISH_POT_DELTAS_TOPIC.to_string());
+                    let publish_pot_deltas_topic = get_string_flag(&config, DEFAULT_PUBLISH_POT_DELTAS_TOPIC);
                     info!("Publishing pot deltas on '{publish_pot_deltas_topic}'");
 
-                    let publish_genesis_utxos_topic = config
-                        .get_string("publish-genesis-utxos-topic")
-                        .unwrap_or(DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC.to_string());
+                    let publish_genesis_utxos_topic = get_string_flag(&config, DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC);
                     info!("Publishing genesis transactions on '{publish_genesis_utxos_topic}'");
 
                     let mut utxo_deltas_message = UTXODeltasMessage { deltas: Vec::new() };
