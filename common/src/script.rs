@@ -282,9 +282,9 @@ impl Datum {
 )]
 pub enum RedeemerTag {
     #[n(0)]
-    Mint,
-    #[n(1)]
     Spend,
+    #[n(1)]
+    Mint,
     #[n(2)]
     Cert,
     #[n(3)]
