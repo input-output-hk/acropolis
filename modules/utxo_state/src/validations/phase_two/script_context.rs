@@ -547,8 +547,7 @@ fn encode_redeemers_map<'a>(
         })
         .collect::<Result<_, ScriptContextError>>()?;
 
-    // Sort by PlutusPurpose constructor order (Mint < Spend < Cert < Reward
-    // < Vote < Propose), then by index within each tag.
+    // Sort by ScriptPurpose (ledger order)
     entries.sort_by_key(|(sort_key, _, _)| *sort_key);
 
     let pairs = entries.into_iter().map(|(_, k, v)| (k, v)).collect();
