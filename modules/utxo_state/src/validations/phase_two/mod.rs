@@ -15,6 +15,7 @@ mod input;
 mod script_context;
 mod time_range;
 mod to_plutus_data;
+mod utils;
 mod value;
 
 pub use evaluate::{build_scripts_table, evaluate_scripts};

@@ -1,0 +1,77 @@
+{
+  "protocol_params": {
+    "alonzo": {
+      "plutus_v1_cost_model": [
+        100788, 420, 1, 1, 1000, 173, 0, 1, 1000, 59957, 4, 1, 11183, 32,
+        201305, 8356, 4, 16000, 100, 16000, 100, 16000, 100, 16000, 100, 16000,
+        100, 16000, 100, 100, 100, 16000, 100, 94375, 32, 132994, 32, 61462, 4,
+        72010, 178, 0, 1, 22151, 32, 91189, 769, 4, 2, 85848, 228465, 122, 0, 1,
+        1, 1000, 42921, 4, 2, 24548, 29498, 38, 1, 898148, 27279, 1, 51775, 558,
+        1, 39184, 1000, 60594, 1, 141895, 32, 83150, 32, 15299, 32, 76049, 1,
+        13169, 4, 22100, 10, 28999, 74, 1, 28999, 74, 1, 43285, 552, 1, 44749,
+        541, 1, 33852, 32, 68246, 32, 72362, 32, 7243, 32, 7391, 32, 11546, 32,
+        85848, 228465, 122, 0, 1, 1, 90434, 519, 0, 1, 74433, 32, 85848, 228465,
+        122, 0, 1, 1, 85848, 228465, 122, 0, 1, 1, 270652, 22588, 4, 1457325,
+        64566, 4, 20467, 1, 4, 0, 141992, 32, 100788, 420, 1, 1, 81663, 32,
+        59498, 32, 20142, 32, 24588, 32, 20744, 32, 25933, 32, 24623, 32,
+        53384111, 14333, 10
+      ]
+    }
+  },
+  "utxos": {
+    "1aa2d4a82752efa79a9e9d6fffa788f657ec67225ac73cb42aaf3e23eb420061#0": {
+      "address": "addr1w9qzpelu9hn45pefc0xr4ac4kdxeswq7pndul2vuj59u8tqaxdznu",
+      "value": {
+        "lovelace": 6815643012,
+        "assets": [
+          {
+            "unit": "0029cb7c88c7567b63d1a512c0ed626aa169688ec980730c0473b91370202a05",
+            "quantity": "1"
+          },
+          {
+            "unit": "04b95368393c821f180deee8229fbd941baaf9bd748ebcdbf7adbb147273455247",
+            "quantity": "3732808602315"
+          }
+        ]
+      },
+      "datum": {
+        "Hash": "7120e452d29a25d3943d58c0920a45ec24fc331acf6a943fc3bdf14c9b727fb2"
+      },
+      "script_ref": null
+    },
+    "5035d6b73c56d8f39db6ae325dc2138e044b5c33801df337e15121be52919c1c#0": {
+      "address": "addr1wxaptpmxcxawvr3pzlhgnpmzz3ql43n2tc8mn3av5kx0yzs09tqh8",
+      "value": {
+        "lovelace": 134438712,
+        "assets": []
+      },
+      "datum": {
+        "Hash": "26948a5dd4d2aaacd0751653f710cca23a6c7810983c19caea0b368705d11c07"
+      },
+      "script_ref": null
+    },
+    "59dbdc743993aa6bfbdb6ec4f73502cd5e05deb6500a419ccfcba07f98113a55#5": {
+      "address": "addr1vyj37la3r7z0s9jnaedhdggd6206xmk8w9a2le5ffyxt0eqgecgvn",
+      "value": {
+        "lovelace": 24500000,
+        "assets": []
+      },
+      "datum": null,
+      "script_ref": null
+    },
+    "5081c0545c0ade58cf9d5ec67e0c749d79f082dff2814860dcb732aae562158c#8": {
+      "address": "addr1vyj37la3r7z0s9jnaedhdggd6206xmk8w9a2le5ffyxt0eqgecgvn",
+      "value": {
+        "lovelace": 2000000,
+        "assets": [
+          {
+            "unit": "e8a447d4e19016ca2aa74d20b4c4de87adb1f21dfb5493bf2d7281a673636f6f706572202a0b",
+            "quantity": "1"
+          }
+        ]
+      },
+      "datum": null,
+      "script_ref": null
+    }
+  }
+}
