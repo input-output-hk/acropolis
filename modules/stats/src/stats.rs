@@ -1,4 +1,4 @@
-use acropolis_common::messages::Message;
+use acropolis_common::{configuration::get_string_flag, messages::Message};
 use anyhow::Result;
 use caryatid_sdk::{module, Context};
 use config::Config;
@@ -13,9 +13,8 @@ pub struct Stats;
 
 impl Stats {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let clock_tick_subscribe_topic = config
-            .get_string(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.1.to_string());
+        let clock_tick_subscribe_topic =
+            get_string_flag(&config, DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC);
         info!("Creating subscriber on '{clock_tick_subscribe_topic}'");
         let mut clock_tick_subscription = context.subscribe(&clock_tick_subscribe_topic).await?;
         context.run(async move {

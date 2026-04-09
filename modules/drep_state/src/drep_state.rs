@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{get_bool_flag, get_string_flag, StartupMode},
     declare_cardano_reader,
     messages::{
         CardanoMessage, GovernanceProceduresMessage, Message, ProtocolParamsMessage,
@@ -62,7 +62,7 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 
 // Publisher topic
-const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
+const DEFAULT_DREP_STATE_TOPIC: (&str, &str) = ("publish-drep-state-topic", "cardano.drep.state");
 
 const DEFAULT_VALIDATION_OUTPUT_TOPIC: (&str, &str) =
     ("validation-output-topic", "cardano.validation.drep");
@@ -298,14 +298,6 @@ impl DRepState {
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        fn get_bool_flag(config: &Config, key: (&str, bool)) -> bool {
-            config.get_bool(key.0).unwrap_or(key.1)
-        }
-
-        fn get_string_flag(config: &Config, key: (&str, &str)) -> String {
-            config.get_string(key.0).unwrap_or_else(|_| key.1.to_string())
-        }
-
         // Get configuration flags and topis
         let storage_config = DRepStorageConfig {
             store_info: get_bool_flag(&config, DEFAULT_STORE_INFO),
@@ -318,9 +310,7 @@ impl DRepState {
         let is_bootstrap_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         // Subscribe for snapshot messages if bootstrapping from snapshot
-        let snapshot_subscribe_topic = config
-            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+        let snapshot_subscribe_topic = get_string_flag(&config, DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC);
 
         let subscriptions = DRepSubscriptions {
             snapshot: if is_bootstrap_mode {
@@ -334,9 +324,7 @@ impl DRepState {
             params_reader: ParamReader::new(&context, &config).await?,
         };
 
-        let drep_state_topic = config
-            .get_string("publish-drep-state-topic")
-            .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
+        let drep_state_topic = get_string_flag(&config, DEFAULT_DREP_STATE_TOPIC);
         info!("Creating DRep state publisher on '{drep_state_topic}'");
 
         let drep_query_topic = get_string_flag(&config, DEFAULT_DREPS_QUERY_TOPIC);

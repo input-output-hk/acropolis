@@ -18,6 +18,16 @@ pub fn get_u64_flag(config: &Config, key: (&str, u64)) -> u64 {
     config.get_int(key.0).ok().and_then(|v| u64::try_from(v).ok()).unwrap_or(key.1)
 }
 
+pub fn conf_enum<'a, T: Deserialize<'a>>(config: &Config, keydef: (&str, T)) -> anyhow::Result<T> {
+    if config.get_string(keydef.0).is_ok() {
+        config
+            .get::<T>(keydef.0)
+            .map_err(|e| anyhow::anyhow!("cannot parse {} value: {e}", keydef.0))
+    } else {
+        Ok(keydef.1)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SyncMode {
