@@ -78,6 +78,7 @@ pub struct Transaction {
     pub reference_inputs: Vec<UTxOIdentifier>,
     pub fee: u64,
     pub donation: Option<u64>,
+    pub treasury_value: Option<u64>,
     pub created_reference_scripts: Vec<(ScriptHash, ReferenceScript)>,
     // Transaction total collateral that is moved to fee pot
     // only added since Babbage era
@@ -115,6 +116,7 @@ impl Transaction {
             reference_inputs,
             fee,
             donation,
+            treasury_value,
             created_reference_scripts,
             stated_total_collateral,
             is_valid,
@@ -139,6 +141,7 @@ impl Transaction {
             reference_inputs,
             fee,
             donation,
+            treasury_value,
             created_reference_scripts: None,
             stated_total_collateral,
             is_valid,
@@ -196,6 +199,9 @@ pub struct TxUTxODeltas {
 
     // Transaction donation (added from Conway era)
     pub donation: Option<u64>,
+
+    // Transaction Treasury Value (added from Conway era)
+    pub treasury_value: Option<u64>,
 
     // Transaction total collateral
     pub stated_total_collateral: Option<u64>,

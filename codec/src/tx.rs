@@ -120,6 +120,13 @@ pub fn map_transaction_donation(tx: &MultiEraTx) -> Option<u64> {
     }
 }
 
+pub fn map_transaction_treasury_value(tx: &MultiEraTx) -> Option<u64> {
+    match tx {
+        MultiEraTx::Conway(conway) => conway.transaction_body.treasury_value,
+        _ => None,
+    }
+}
+
 pub fn map_metadatum(metadatum: &PallasMetadatum) -> Metadatum {
     match metadatum {
         PallasMetadatum::Int(pallas_primitives::Int(i)) => Metadatum::Int(i128::from(*i)),
@@ -207,6 +214,7 @@ pub fn map_transaction(
     let is_valid = tx.is_valid();
 
     let donation = map_transaction_donation(tx);
+    let treasury_value = map_transaction_treasury_value(tx);
 
     let mut certs = Vec::new();
     let mut withdrawals = Vec::new();
@@ -338,6 +346,7 @@ pub fn map_transaction(
         reference_inputs,
         fee,
         donation,
+        treasury_value,
         created_reference_scripts,
         stated_total_collateral,
         is_valid,

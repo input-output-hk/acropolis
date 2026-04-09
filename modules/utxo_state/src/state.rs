@@ -490,10 +490,6 @@ impl State {
         );
     }
 
-    pub fn get_current_treasury(&self) -> u64 {
-        self.pots.treasury
-    }
-
     pub fn handle_pots(&mut self, pots: Pots) {
         self.pots = pots;
     }
@@ -918,7 +914,6 @@ impl State {
                     protocol_params,
                     genesis_values,
                     &cost_models,
-                    self.get_current_treasury(),
                     &|script_hash| self.lookup_reference_script(script_hash),
                     block.era,
                 ) {

@@ -33,12 +33,11 @@ pub fn validate_tx_phase_two(
     cost_models: &CostModels,
     scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
     scripts_provided: &HashMap<ScriptHash, ScriptLang>,
-    current_treasury_amount: u64,
     lookup_reference_script: &dyn Fn(&ScriptHash) -> Option<ReferenceScript>,
 ) -> Result<(), Phase2ValidationError> {
     let scripts_table = build_scripts_table(tx_deltas, utxos, lookup_reference_script);
 
-    let tx_info = TxInfo::new(tx_deltas, utxos, genesis_values, current_treasury_amount)?;
+    let tx_info = TxInfo::new(tx_deltas, utxos, genesis_values)?;
 
     let script_contexts = build_script_contexts(&tx_info, scripts_needed, scripts_provided)?;
 

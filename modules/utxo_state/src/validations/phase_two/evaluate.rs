@@ -451,8 +451,7 @@ mod tests {
         let scripts_table = build_scripts_table(&tx_deltas, &ctx.utxos, lookup_ref_script);
 
         let genesis_values = GenesisValues::mainnet();
-        let tx_info =
-            TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values, ctx.treasury_amount).unwrap();
+        let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
         let scripts_needed = crate::utils::get_scripts_needed(&tx_deltas, &ctx.utxos);
         let scripts_provided = crate::utils::get_scripts_provided(&tx_deltas, &ctx.utxos);
         let script_contexts =
@@ -486,8 +485,7 @@ mod tests {
         let tx_deltas = mapped_tx.convert_to_utxo_deltas(true);
 
         let genesis_values = GenesisValues::mainnet();
-        let tx_info =
-            TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values, ctx.treasury_amount).unwrap();
+        let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
         let scripts_needed = crate::utils::get_scripts_needed(&tx_deltas, &ctx.utxos);
         let scripts_provided = crate::utils::get_scripts_provided(&tx_deltas, &ctx.utxos);
         let script_contexts =
