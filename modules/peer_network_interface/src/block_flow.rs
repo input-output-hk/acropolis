@@ -76,6 +76,7 @@ impl BlockFlowHandler {
     /// Set the initial security parameter from genesis values.
     /// Should be called once after genesis values are available, before sync starts.
     pub fn set_genesis_security_param(&self, k: u64) {
+        info!(k, "Security parameter k set from genesis values");
         match self {
             BlockFlowHandler::Direct { chain } => {
                 chain.security_param_k.store(k, Ordering::Release)
@@ -97,6 +98,7 @@ impl BlockFlowHandler {
                         params.params.byron.as_ref().map(|b| b.protocol_consts.k as u64)
                     });
                 if let Some(new_k) = new_k {
+                    info!(new_k, "Security parameter k set from protocol params");
                     security_param_k.store(new_k, Ordering::Release);
                 }
             }

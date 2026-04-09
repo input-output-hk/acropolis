@@ -222,8 +222,20 @@ impl Consensus {
         context.run(async move {
             let genesis_k = Self::wait_genesis_values(&mut genesis_subscription)
                 .await
-                .map(|gv| gv.security_param)
-                .unwrap_or(SECURITY_PARAMETER_K);
+                .map(|gv| {
+                    info!(
+                        k = gv.security_param,
+                        "Security parameter k set from genesis values"
+                    );
+                    gv.security_param
+                })
+                .unwrap_or_else(|e| {
+                    warn!(
+                        "Failed to receive genesis values, using default k={}: {e:#}",
+                        SECURITY_PARAMETER_K
+                    );
+                    SECURITY_PARAMETER_K
+                });
 
             let event_queue: EventQueue = Arc::new(std::sync::Mutex::new(Vec::new()));
             let observer = Box::new(QueuingConsensusTreeObserver {
@@ -294,21 +306,13 @@ impl ConsensusRuntime {
     /// `byron.protocol_consts.k` during the Byron era when shelley params
     /// have not yet been initialised.
     fn handle_protocol_params(&mut self, params: &ProtocolParamsMessage) {
-        let new_k = if let Some(shelley) = &params.params.shelley {
-            shelley.security_param as u64
-        } else if let Some(byron) = &params.params.byron {
-            byron.protocol_consts.k as u64
-        } else {
-            return;
+        let new_k = match (&params.params.shelley, &params.params.byron) {
+            (Some(shelley), _) => shelley.security_param as u64,
+            (_, Some(byron)) => byron.protocol_consts.k as u64,
+            _ => return,
         };
 
-        if new_k != self.tree.k() {
-            info!(
-                old_k = self.tree.k(),
-                new_k, "Updating security parameter from protocol params"
-            );
-            self.tree.update_k(new_k);
-        }
+        self.tree.update_k(new_k);
     }
 
     /// Main select loop for consensus flow: dispatches incoming messages to handler functions.
