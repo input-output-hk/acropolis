@@ -176,7 +176,7 @@ impl RewardRuntime {
     }
 
     fn invalidates_rewards_snapshot(&self, active_slot: u64, rollback_slot: u64) -> bool {
-        active_slot > self.stability_window_slot && rollback_slot <= self.stability_window_slot
+        active_slot >= self.stability_window_slot && rollback_slot <= self.stability_window_slot
     }
 }
 
