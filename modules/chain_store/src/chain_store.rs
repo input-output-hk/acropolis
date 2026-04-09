@@ -170,7 +170,9 @@ impl ChainStore {
 
                 if primary.is_rollback() {
                     let mut history = history.lock().await;
-                    state = history.get_rolled_back_state(primary.block_info().number);
+                    state = history.get_rolled_back_state(primary.block_info().epoch);
+
+                    // Keep the persisted store on the same rewind boundary as StateHistory.
                     store.rollback(primary.block_info())?;
                 }
 
@@ -198,10 +200,10 @@ impl ChainStore {
                     }
                 }
 
-                if primary.message().is_some() {
-                    let block_info = primary.block_info();
+                // Commit state on epoch transition
+                if let Some(epoch) = primary.epoch() {
                     let mut history = history.lock().await;
-                    history.commit(block_info.number, state);
+                    history.commit(epoch, state);
                 }
             }
         });

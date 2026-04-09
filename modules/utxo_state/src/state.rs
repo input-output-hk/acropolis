@@ -326,39 +326,36 @@ impl State {
         Ok(self.pointer_address_values.as_ref().unwrap())
     }
 
-    /// Observe a block for statistics and handle rollbacks
-    pub async fn observe_block(&mut self, block: &BlockInfo) -> Result<()> {
-        if block.status == BlockStatus::RolledBack {
-            info!(
-                slot = block.slot,
-                number = block.number,
-                "Rollback received"
-            );
-
-            // Delete all UTXOs created in or after this block
-            for key in self.volatile_created.prune_on_or_after(block.number) {
-                self.volatile_utxos.remove(&key);
-            }
-
-            // Any remaining (which were necessarily created before this block)
-            // that were spent in or after this block can be reinstated
-            self.volatile_spent.prune_on_or_after(block.number);
-
-            // Let the pruner compress the map
+    fn rollback_volatile_to(&mut self, restore_from: u64) {
+        // Delete all UTXOs created in or after the rollback boundary.
+        for key in self.volatile_created.prune_on_or_after(restore_from) {
+            self.volatile_utxos.remove(&key);
         }
 
+        // Any remaining UTXOs that were created before the rollback boundary but
+        // spent in or after it become live again once those spend markers are dropped.
+        self.volatile_spent.prune_on_or_after(restore_from);
+
+        // Any derived pointer-address cache is no longer trustworthy after the
+        // volatile UTXO view changes.
+        self.pointer_address_values = None;
+    }
+
+    /// Observe a block for statistics and handle rollbacks
+    pub async fn observe_block(&mut self, block: &BlockInfo) -> Result<()> {
         self.last_slot = block.slot;
         self.last_number = block.number;
 
-        // Add to index only if volatile or rolled-back volatile
-        // Note avoids issues with duplicate block 0, which aren't
+        // Track all replayable chain blocks through the volatile indexes so an
+        // explicit rollback can still unwind them before local pruning makes
+        // them durable. Bootstrap data is the only path written straight to
+        // the immutable store.
         match block.status {
-            BlockStatus::Volatile | BlockStatus::RolledBack => {
+            BlockStatus::Volatile | BlockStatus::Immutable | BlockStatus::RolledBack => {
                 self.volatile_created.add_block(block.number);
                 self.volatile_spent.add_block(block.number);
             }
-
-            _ => {}
+            BlockStatus::Bootstrap => {}
         }
 
         Ok(())
@@ -382,12 +379,13 @@ impl State {
                 }
 
                 match block.status {
-                    BlockStatus::Volatile | BlockStatus::RolledBack => {
+                    BlockStatus::Volatile | BlockStatus::Immutable | BlockStatus::RolledBack => {
                         // Add to volatile spent index
                         self.volatile_spent.add_utxo(input);
                     }
-                    BlockStatus::Bootstrap | BlockStatus::Immutable => {
-                        // Immutable - we can delete it immediately
+                    BlockStatus::Bootstrap => {
+                        // Bootstrap state is not replayed, so it is safe to
+                        // mutate the immutable store directly.
                         self.immutable_utxos.delete_utxo(input).await?;
                     }
                 }
@@ -417,14 +415,14 @@ impl State {
 
         // Add to volatile or immutable maps
         match block.status {
-            BlockStatus::Volatile | BlockStatus::RolledBack => {
+            BlockStatus::Volatile | BlockStatus::Immutable | BlockStatus::RolledBack => {
                 self.volatile_created.add_utxo(&key);
 
                 if self.volatile_utxos.insert(key, value).is_some() {
                     error!("Saw UTXO {} before", output.utxo_identifier);
                 }
             }
-            BlockStatus::Bootstrap | BlockStatus::Immutable => {
+            BlockStatus::Bootstrap => {
                 self.immutable_utxos.add_utxo(key, value).await?;
                 // Note we don't check for duplicates in immutable - store
                 // may double check this anyway
@@ -503,7 +501,7 @@ impl State {
     ) -> Result<()> {
         // get current reference scripts state
         let mut current_reference_scripts_state =
-            self.reference_scripts_history.get_rolled_back_state(block.number);
+            self.reference_scripts_history.get_or_init_with(ReferenceScriptsState::default);
 
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
@@ -840,14 +838,21 @@ impl State {
         Ok(spent_reference_scripts)
     }
 
-    pub async fn handle_rollback(&mut self, message: Arc<Message>) -> Result<()> {
+    pub async fn handle_rollback(&mut self, block_info: &BlockInfo, message: Arc<Message>) {
+        // Rollback BlockInfo identifies the next block to be receieved so remove the number inclusively
+        let rollback_to = block_info.number;
+        self.rollback_volatile_to(rollback_to);
+        self.reference_scripts_history.get_rolled_back_state(rollback_to);
+        self.protocol_parameters_history.get_rolled_back_state(rollback_to);
+        self.last_slot = block_info.slot;
+        self.last_number = block_info.number;
+
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.rollback(message.clone()).await;
         }
         if let Some(observer) = self.block_totals_observer.as_mut() {
             observer.rollback(message).await;
         }
-        Ok(())
     }
 
     fn spending_tx_hash(tx: &TxUTxODeltas) -> Option<TxHash> {
@@ -947,8 +952,8 @@ pub mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
-        Address, AssetName, BlockHash, BlockIntent, ByronAddress, Datum, Era, NativeAsset,
-        PolicyId, ScriptRef, TxHash, TxIdentifier, TxUTxODeltas, Value,
+        messages::Message, Address, AssetName, BlockHash, BlockIntent, ByronAddress, Datum, Era,
+        NativeAsset, PolicyId, ScriptRef, TxHash, TxIdentifier, TxUTxODeltas, Value,
     };
     use config::Config;
     use tokio::sync::Mutex;
@@ -1009,7 +1014,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn observe_output_adds_to_immutable_utxos() {
+    async fn observe_output_adds_immutable_block_utxos_to_volatile_index() {
         let mut state = new_state();
         let datum_data = vec![1, 2, 3, 4, 5];
 
@@ -1053,7 +1058,8 @@ pub mod tests {
         let deltas = UTXODeltasMessage { deltas };
 
         state.handle_utxo_deltas(&block, &deltas).await.unwrap();
-        assert_eq!(1, state.immutable_utxos.len().await.unwrap());
+        assert_eq!(1, state.volatile_utxos.len());
+        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
         let key = output.utxo_identifier;
@@ -1099,7 +1105,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn observe_input_spends_utxo() {
+    async fn observe_input_marks_immutable_block_utxo_spent_without_deleting_immutable_store() {
         let mut state = new_state();
         let output = TxOutput {
             utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
@@ -1125,14 +1131,18 @@ pub mod tests {
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
+        state.observe_block(&block1).await.unwrap();
         state.observe_output(&output, &block1).await.unwrap();
-        assert_eq!(1, state.immutable_utxos.len().await.unwrap());
+        assert_eq!(1, state.volatile_utxos.len());
+        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
         let input = output.utxo_identifier;
 
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
+        state.observe_block(&block2).await.unwrap();
         state.observe_input(&input, &block2).await.unwrap();
+        assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
     }
@@ -1170,7 +1180,7 @@ pub mod tests {
         assert_eq!(1, state.count_valid_utxos().await);
 
         let block9 = create_block(BlockStatus::RolledBack, 9, 9);
-        state.observe_block(&block9).await.unwrap();
+        state.handle_rollback(&block9, Arc::new(Message::None)).await;
 
         assert_eq!(0, state.volatile_utxos.len());
         assert_eq!(0, state.count_valid_utxos().await);
@@ -1221,10 +1231,105 @@ pub mod tests {
 
         // Roll back to 11
         let block11_2 = create_block(BlockStatus::RolledBack, 11, 11);
-        state.observe_block(&block11_2).await.unwrap();
+        state.handle_rollback(&block11_2, Arc::new(Message::None)).await;
 
         // Should be reinstated
         assert_eq!(1, state.volatile_utxos.len());
+        assert_eq!(1, state.count_valid_utxos().await);
+    }
+
+    #[tokio::test]
+    async fn explicit_rollback_removes_future_created_utxos() {
+        let mut state = new_state();
+
+        let output_10 = TxOutput {
+            utxo_identifier: UTxOIdentifier::new(TxHash::new([1; 32]), 0),
+            address: create_address(10),
+            value: Value::new(10, vec![]),
+            datum: None,
+            script_ref: None,
+        };
+        let output_11 = TxOutput {
+            utxo_identifier: UTxOIdentifier::new(TxHash::new([2; 32]), 0),
+            address: create_address(11),
+            value: Value::new(11, vec![]),
+            datum: None,
+            script_ref: None,
+        };
+
+        let block10 = create_block(BlockStatus::Volatile, 10, 10);
+        state.observe_block(&block10).await.unwrap();
+        state.observe_output(&output_10, &block10).await.unwrap();
+
+        let block11 = create_block(BlockStatus::Volatile, 11, 11);
+        state.observe_block(&block11).await.unwrap();
+        state.observe_output(&output_11, &block11).await.unwrap();
+
+        assert!(state.lookup_utxo(&output_10.utxo_identifier).await.unwrap().is_some());
+        assert!(state.lookup_utxo(&output_11.utxo_identifier).await.unwrap().is_some());
+
+        let rollback_to_11 = create_block(BlockStatus::RolledBack, 11, 11);
+        state.handle_rollback(&rollback_to_11, Arc::new(Message::None)).await;
+
+        assert!(state.lookup_utxo(&output_10.utxo_identifier).await.unwrap().is_some());
+        assert!(state.lookup_utxo(&output_11.utxo_identifier).await.unwrap().is_none());
+        assert_eq!(1, state.count_valid_utxos().await);
+    }
+
+    #[tokio::test]
+    async fn explicit_rollback_reinstates_future_spent_utxos() {
+        let mut state = new_state();
+
+        let output = TxOutput {
+            utxo_identifier: UTxOIdentifier::new(TxHash::new([3; 32]), 0),
+            address: create_address(99),
+            value: Value::new(42, vec![]),
+            datum: None,
+            script_ref: None,
+        };
+
+        let block10 = create_block(BlockStatus::Volatile, 10, 10);
+        state.observe_block(&block10).await.unwrap();
+        state.observe_output(&output, &block10).await.unwrap();
+
+        let block11 = create_block(BlockStatus::Volatile, 11, 11);
+        state.observe_block(&block11).await.unwrap();
+        state.observe_input(&output.utxo_identifier, &block11).await.unwrap();
+        assert_eq!(0, state.count_valid_utxos().await);
+
+        let rollback_to_11 = create_block(BlockStatus::RolledBack, 11, 11);
+        state.handle_rollback(&rollback_to_11, Arc::new(Message::None)).await;
+
+        assert!(state.lookup_utxo(&output.utxo_identifier).await.unwrap().is_some());
+        assert_eq!(1, state.count_valid_utxos().await);
+    }
+
+    #[tokio::test]
+    async fn explicit_rollback_reinstates_future_spent_immutable_block_utxos() {
+        let mut state = new_state();
+
+        let output = TxOutput {
+            utxo_identifier: UTxOIdentifier::new(TxHash::new([4; 32]), 0),
+            address: create_address(99),
+            value: Value::new(42, vec![]),
+            datum: None,
+            script_ref: None,
+        };
+
+        let block10 = create_block(BlockStatus::Immutable, 10, 10);
+        state.observe_block(&block10).await.unwrap();
+        state.observe_output(&output, &block10).await.unwrap();
+        assert!(state.lookup_utxo(&output.utxo_identifier).await.unwrap().is_some());
+
+        let block11 = create_block(BlockStatus::Immutable, 11, 11);
+        state.observe_block(&block11).await.unwrap();
+        state.observe_input(&output.utxo_identifier, &block11).await.unwrap();
+        assert_eq!(0, state.count_valid_utxos().await);
+
+        let rollback_to_11 = create_block(BlockStatus::RolledBack, 11, 11);
+        state.handle_rollback(&rollback_to_11, Arc::new(Message::None)).await;
+
+        assert!(state.lookup_utxo(&output.utxo_identifier).await.unwrap().is_some());
         assert_eq!(1, state.count_valid_utxos().await);
     }
 
@@ -1261,6 +1366,9 @@ pub mod tests {
             state.lookup_reference_script(&v1_script.compute_hash())
         );
 
+        let rollback2 = create_block(BlockStatus::RolledBack, 2, 2);
+        state.handle_rollback(&rollback2, Arc::new(Message::None)).await;
+
         let output = TxOutput {
             utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
             address: create_address(99),
@@ -1283,6 +1391,82 @@ pub mod tests {
         }];
         let deltas = UTXODeltasMessage { deltas };
         state.handle_utxo_deltas(&block1, &deltas).await.unwrap();
+        assert_eq!(
+            Some(v2_script.clone()),
+            state.lookup_reference_script(&v2_script.compute_hash())
+        );
+        assert_eq!(
+            None,
+            state.lookup_reference_script(&v1_script.compute_hash())
+        );
+    }
+
+    #[tokio::test]
+    async fn rolled_back_block_rewinds_reference_scripts_before_replay() {
+        let mut state = new_state();
+        let v1_script = create_plutus_v1_reference_script();
+        let v2_script = create_plutus_v2_reference_script();
+
+        let output = TxOutput {
+            utxo_identifier: UTxOIdentifier::new(TxHash::from([1; 32]), 0),
+            address: create_address(99),
+            value: Value::new(42, vec![]),
+            datum: None,
+            script_ref: Some(ScriptRef {
+                script_hash: v1_script.compute_hash(),
+                script_lang: v1_script.get_script_lang(),
+            }),
+        };
+        let block2 = create_block(BlockStatus::Volatile, 2, 2);
+        let deltas = UTXODeltasMessage {
+            deltas: vec![TxUTxODeltas {
+                consumes: vec![],
+                produces: vec![output],
+                fee: 0,
+                is_valid: true,
+                created_reference_scripts: Some(vec![(
+                    v1_script.compute_hash(),
+                    v1_script.clone(),
+                )]),
+                ..TxUTxODeltas::default()
+            }],
+        };
+        state.handle_utxo_deltas(&block2, &deltas).await.unwrap();
+        assert_eq!(
+            Some(v1_script.clone()),
+            state.lookup_reference_script(&v1_script.compute_hash())
+        );
+
+        let replay_output = TxOutput {
+            utxo_identifier: UTxOIdentifier::new(TxHash::from([2; 32]), 0),
+            address: create_address(99),
+            value: Value::new(42, vec![]),
+            datum: None,
+            script_ref: Some(ScriptRef {
+                script_hash: v2_script.compute_hash(),
+                script_lang: v2_script.get_script_lang(),
+            }),
+        };
+
+        let block9 = create_block(BlockStatus::RolledBack, 2, 2);
+        state.handle_rollback(&block9, Arc::new(Message::None)).await;
+
+        let replay_block = create_block(BlockStatus::RolledBack, 1, 1);
+        let replay_deltas = UTXODeltasMessage {
+            deltas: vec![TxUTxODeltas {
+                consumes: vec![],
+                produces: vec![replay_output],
+                fee: 0,
+                is_valid: true,
+                created_reference_scripts: Some(vec![(
+                    v2_script.compute_hash(),
+                    v2_script.clone(),
+                )]),
+                ..TxUTxODeltas::default()
+            }],
+        };
+        state.handle_utxo_deltas(&replay_block, &replay_deltas).await.unwrap();
+
         assert_eq!(
             Some(v2_script.clone()),
             state.lookup_reference_script(&v2_script.compute_hash())
@@ -1520,7 +1704,8 @@ pub mod tests {
         let deltas1 = UTXODeltasMessage { deltas };
 
         state.handle_utxo_deltas(&block1, &deltas1).await.unwrap();
-        assert_eq!(1, state.immutable_utxos.len().await.unwrap());
+        assert_eq!(1, state.volatile_utxos.len());
+        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
 
@@ -1537,6 +1722,7 @@ pub mod tests {
         let deltas2 = UTXODeltasMessage { deltas };
         state.handle_utxo_deltas(&block2, &deltas2).await.unwrap();
 
+        assert_eq!(1, state.volatile_utxos.len());
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
         assert_eq!(0, *observer.balance.lock().await);

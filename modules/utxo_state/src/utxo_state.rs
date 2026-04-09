@@ -155,16 +155,10 @@ impl UTXOState {
                 utxo_deltas_reader.read_with_rollbacks().await,
             )? {
                 RollbackWrapper::Normal((block_info, deltas)) => Some((block_info, deltas)),
-                RollbackWrapper::Rollback((_, message)) => {
-                    // TODO: Actually rollback utxo_state's volatile history
-
+                RollbackWrapper::Rollback((block_info, message)) => {
                     // Publish rollbacks downstream
                     let mut state = state.lock().await;
-                    state
-                        .handle_rollback(message)
-                        .await
-                        .inspect_err(|e| error!("Rollback handling error: {e}"))
-                        .ok();
+                    state.handle_rollback(&block_info, message).await;
 
                     None
                 }

@@ -19,7 +19,6 @@ use acropolis_common::{
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -109,7 +108,7 @@ impl AssetsState {
             // Asset deltas are the synchroniser
             let primary = PrimaryRead::from_read(asset_deltas_reader.read_with_rollbacks().await?);
 
-            if primary.is_rollback() || primary.block_info().status == BlockStatus::RolledBack {
+            if primary.is_rollback() {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
             }
 
