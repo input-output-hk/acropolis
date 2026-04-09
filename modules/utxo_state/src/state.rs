@@ -13,8 +13,8 @@ use acropolis_common::{
 };
 use acropolis_common::{
     Address, AddressDelta, CreatedUTxOExtended, Era, ExtendedAddressDelta, PoolRegistrationUpdate,
-    ReferenceScript, ScriptHash, ShelleyAddressPointer, SpentUTxOExtended, StakeRegistrationUpdate,
-    TxHash, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, ValueMap,
+    Pots, ReferenceScript, ScriptHash, ShelleyAddressPointer, SpentUTxOExtended,
+    StakeRegistrationUpdate, TxHash, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, ValueMap,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -130,6 +130,9 @@ pub struct State {
 
     /// Address delta publish mode for emitted observer deltas.
     address_delta_publish_mode: AddressDeltaPublishMode,
+
+    /// Current Pots, updated at the start of each epoch
+    pots: Pots,
 }
 
 impl State {
@@ -159,6 +162,7 @@ impl State {
             avvm_cancelled_value: None,
             pointer_address_values: None,
             address_delta_publish_mode,
+            pots: Pots::default(),
         }
     }
 
@@ -484,6 +488,14 @@ impl State {
             volatile_utxos = self.volatile_utxos.len(),
             valid_utxos = n_valid,
         );
+    }
+
+    pub fn get_current_treasury(&self) -> u64 {
+        self.pots.treasury
+    }
+
+    pub fn handle_pots(&mut self, pots: Pots) {
+        self.pots = pots;
     }
 
     /// Tick for pruning and logging
@@ -906,6 +918,7 @@ impl State {
                     protocol_params,
                     genesis_values,
                     &cost_models,
+                    self.get_current_treasury(),
                     &|script_hash| self.lookup_reference_script(script_hash),
                     block.era,
                 ) {

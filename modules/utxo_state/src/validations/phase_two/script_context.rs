@@ -43,6 +43,7 @@ impl TxInfo {
         tx_deltas: &TxUTxODeltas,
         utxos: &HashMap<UTxOIdentifier, UTXOValue>,
         genesis_values: &GenesisValues,
+        current_treasury_amount: u64,
     ) -> Result<Self, ScriptContextError> {
         let mut sorted_consumes = tx_deltas.consumes.clone();
         sorted_consumes.sort();
@@ -120,7 +121,7 @@ impl TxInfo {
             tx_id: tx_hash,
             voting_procedures: tx_deltas.voting_procedures.clone(),
             proposal_procedures: tx_deltas.proposal_procedures.clone().unwrap_or_default(),
-            current_treasury_amount: None,
+            current_treasury_amount: Some(current_treasury_amount),
             treasury_donation: tx_deltas.donation,
             redeemers,
         })
@@ -707,7 +708,7 @@ mod tests {
         let tx_deltas = build_test_deltas(&ctx, &raw_tx, era);
         let genesis_values = GenesisValues::mainnet();
 
-        let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
+        let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values, 0).unwrap();
 
         assert_eq!(tx_info.inputs.len(), 1, "should have 1 input");
         assert_eq!(tx_info.outputs.len(), 1, "should have 1 output");
@@ -728,7 +729,7 @@ mod tests {
         let tx_deltas = build_test_deltas(&ctx, &raw_tx, era);
         let genesis_values = GenesisValues::mainnet();
 
-        let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
+        let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values, 0).unwrap();
         let scripts_needed = crate::utils::get_scripts_needed(&tx_deltas, &ctx.utxos);
         let scripts_provided = crate::utils::get_scripts_provided(&tx_deltas, &ctx.utxos);
         let contexts = build_script_contexts(&tx_info, &scripts_needed, &scripts_provided).unwrap();
@@ -748,7 +749,7 @@ mod tests {
         let tx_deltas = build_test_deltas(&ctx, &raw_tx, era);
         let genesis_values = GenesisValues::mainnet();
 
-        let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
+        let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values, 0).unwrap();
         let scripts_needed = crate::utils::get_scripts_needed(&tx_deltas, &ctx.utxos);
         let scripts_provided = crate::utils::get_scripts_provided(&tx_deltas, &ctx.utxos);
         let contexts = build_script_contexts(&tx_info, &scripts_needed, &scripts_provided).unwrap();

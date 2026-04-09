@@ -119,6 +119,8 @@ pub struct TestContextJson {
     pub utxos: HashMap<String, UTxOValueJson>,
     #[serde(default, deserialize_with = "deserialize_reference_scripts")]
     pub reference_scripts: HashMap<String, ReferenceScript>,
+    #[serde(default)]
+    pub treasury_amount: u64,
 }
 
 fn deep_merge(base: &mut serde_json::Value, overlay: serde_json::Value) {
@@ -198,6 +200,7 @@ pub struct TestContext {
     pub utxos: HashMap<UTxOIdentifier, UTXOValue>,
     #[allow(dead_code)]
     pub reference_scripts: HashMap<ScriptHash, ReferenceScript>,
+    pub treasury_amount: u64,
 }
 
 impl From<TestContextJson> for TestContext {
@@ -226,6 +229,7 @@ impl From<TestContextJson> for TestContext {
                 .iter()
                 .map(|(k, v)| (ScriptHash::from_str(k).unwrap(), v.clone()))
                 .collect(),
+            treasury_amount: json.treasury_amount,
         }
     }
 }

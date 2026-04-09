@@ -25,6 +25,7 @@ pub fn validate_tx(
     protocol_params: &ProtocolParams,
     genesis_values: &GenesisValues,
     cost_models: &CostModels,
+    current_treasury_amount: u64,
     lookup_reference_script: &dyn Fn(&ScriptHash) -> Option<ReferenceScript>,
     era: Era,
 ) -> Result<(), Box<TransactionValidationError>> {
@@ -103,6 +104,7 @@ pub fn validate_tx(
             cost_models,
             &scripts_needed,
             &scripts_provided,
+            current_treasury_amount,
             lookup_reference_script,
         )
         .map_err(|e| Box::new(e.into()))?;

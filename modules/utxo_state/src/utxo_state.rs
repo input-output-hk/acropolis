@@ -12,6 +12,7 @@ use acropolis_common::{
         UTXODeltasMessage,
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+    Pots,
 };
 use caryatid_sdk::{module, Context, Subscription};
 
@@ -86,6 +87,13 @@ declare_cardano_reader!(
     PoolRegistrationUpdates,
     PoolRegistrationUpdatesMessage
 );
+declare_cardano_reader!(
+    PotsReader,
+    "pots-subscribe-topic",
+    "cardano.accounts.pots",
+    Pots,
+    Pots
+);
 
 const DEFAULT_STORE: &str = "memory";
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -128,6 +136,7 @@ impl UTXOState {
         mut params_reader: ParamsReader,
         mut pool_updates_reader: Option<PoolUpdatesReader>,
         mut stake_updates_reader: Option<StakeUpdatesReader>,
+        mut pots_reader: PotsReader,
         publish_tx_validation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
@@ -163,16 +172,24 @@ impl UTXOState {
                     None
                 }
             };
+            let is_new_epoch = deltas_msg.as_ref().map(|(b, _)| b.new_epoch).unwrap_or(true);
 
             let mut current_protocol_params = state.lock().await.get_or_init_protocol_parameters();
 
-            // Read protocol parameters if new epoch
-            if deltas_msg.as_ref().map(|(b, _)| b.new_epoch).unwrap_or(true) {
+            // Read protocol parameters and pots if new epoch
+            if is_new_epoch {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {
                     RollbackWrapper::Normal((_, params)) => {
                         current_protocol_params = params.params.clone();
+                    }
+                    RollbackWrapper::Rollback(_) => {}
+                }
+
+                match ctx.consume_sync("pots_reader", pots_reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((_, pots)) => {
+                        state.lock().await.handle_pots(pots.as_ref().clone());
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
@@ -292,6 +309,7 @@ impl UTXOState {
         };
         let utxo_deltas_reader = UTxODeltasReader::new(&context, &config).await?;
         let params_reader = ParamsReader::new(&context, &config).await?;
+        let pots_reader = PotsReader::new(&context, &config).await?;
 
         let snapshot_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
@@ -353,6 +371,7 @@ impl UTXOState {
                 params_reader,
                 pool_updates_reader,
                 stake_updates_reader,
+                pots_reader,
                 utxo_validation_publish_topic,
                 is_snapshot_mode,
             )

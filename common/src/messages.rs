@@ -405,6 +405,9 @@ pub enum CardanoMessage {
     StakeRegistrationUpdates(StakeRegistrationUpdatesMessage), // Stake registration updates
     PoolRegistrationUpdates(PoolRegistrationUpdatesMessage),   // Pool registration updates
 
+    // Pots
+    Pots(Pots), // Current Pots
+
     EraHistory(EraHistoryMessage), // Era history with system start time
 }
 

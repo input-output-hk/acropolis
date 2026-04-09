@@ -42,6 +42,7 @@ mod state;
 use stake_reward_deltas_publisher::StakeRewardDeltasPublisher;
 use state::State;
 mod monetary;
+mod pots_publisher;
 mod rewards;
 mod runtime;
 mod verifier;
@@ -49,7 +50,10 @@ mod verifier;
 use runtime::{AccountsRuntime, BlockStakeAddressUndoRecorder};
 use verifier::Verifier;
 
-use crate::spo_distribution_store::{SPDDStore, SPDDStoreConfig};
+use crate::{
+    pots_publisher::PotsPublisher,
+    spo_distribution_store::{SPDDStore, SPDDStoreConfig},
+};
 mod spo_distribution_store;
 
 // Subscriptions
@@ -124,6 +128,7 @@ const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 const DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC: &str = "cardano.stake.registration.updates";
 const DEFAULT_VALIDATION_OUTCOMES_TOPIC: &str = "cardano.validation.accounts";
+const DEFAULT_POTS_TOPIC: &str = "cardano.accounts.pots";
 
 /// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -215,6 +220,7 @@ impl AccountsState {
         mut spo_rewards_publisher: SPORewardsPublisher,
         mut stake_reward_deltas_publisher: StakeRewardDeltasPublisher,
         mut stake_registration_updates_publisher: StakeRegistrationUpdatesPublisher,
+        mut pots_publisher: PotsPublisher,
         validation_outcomes_topic: String,
         mut spos_reader: SPOReader,
         mut ea_reader: EpochActivityReader,
@@ -309,7 +315,10 @@ impl AccountsState {
                 spo_publisher.publish_message(rollback_message.clone()).await?;
                 spo_rewards_publisher.publish_message(rollback_message.clone()).await?;
                 stake_reward_deltas_publisher.publish_message(rollback_message.clone()).await?;
-                stake_registration_updates_publisher.publish_message(rollback_message).await?;
+                stake_registration_updates_publisher
+                    .publish_message(rollback_message.clone())
+                    .await?;
+                pots_publisher.publish_message(rollback_message).await?;
             } else {
                 // Notify the state of the block (used to schedule reward calculations)
                 state.notify_block(primary.block_info(), &mut runtime.rewards);
@@ -509,6 +518,12 @@ impl AccountsState {
 
                 // Clear the skip flag after first transition handling.
                 skip_first_epoch_rewards = false;
+
+                // publish current pots after handling the epoch transition, so that the published pots reflect the new epoch's state
+                ctx.handle(
+                    "publish_pots",
+                    pots_publisher.publish_pots(primary.block_info(), state.get_pots()).await,
+                );
             }
 
             // Now handle the certs_message properly
@@ -645,6 +660,10 @@ impl AccountsState {
         info!(
             "Creating stake registration updates publisher on '{stake_registration_updates_topic}'"
         );
+
+        let pots_topic =
+            config.get_string("publish-pots-topic").unwrap_or(DEFAULT_POTS_TOPIC.to_string());
+        info!("Creating pots publisher on '{pots_topic}'");
 
         let validation_outcomes_topic = config
             .get_string("validation-outcomes-topic")
@@ -911,6 +930,7 @@ impl AccountsState {
             context.clone(),
             stake_registration_updates_topic,
         );
+        let pots_publisher = PotsPublisher::new(context.clone(), pots_topic);
 
         // Subscribe
         let spos_reader = SPOReader::new(&context, &config).await?;
@@ -946,6 +966,7 @@ impl AccountsState {
                 spo_rewards_publisher,
                 stake_reward_deltas_publisher,
                 stake_registration_updates_publisher,
+                pots_publisher,
                 validation_outcomes_topic,
                 spos_reader,
                 ea_reader,

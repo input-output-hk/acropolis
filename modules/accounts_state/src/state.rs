@@ -365,7 +365,7 @@ impl State {
     }
 
     /// Get the current pot balances
-    pub fn _get_pots(&self) -> Pots {
+    pub fn get_pots(&self) -> Pots {
         self.pots.clone()
     }
 
