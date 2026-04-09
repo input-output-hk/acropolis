@@ -6,6 +6,10 @@ pub const CONFIG_KEY_STARTUP_MODE: &str = "startup.startup-mode";
 pub const CONFIG_KEY_SYNC_MODE: &str = "startup.sync-mode";
 pub const CONFIG_KEY_BLOCK_FLOW_MODE: &str = "startup.block-flow-mode";
 
+pub fn get_string_flag(config: &Config, key: (&str, &str)) -> String {
+    config.get_string(key.0).unwrap_or_else(|_| key.1.to_string())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SyncMode {
