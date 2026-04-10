@@ -24,8 +24,6 @@ pub struct InterfaceConfig {
     pub cache_dir: PathBuf,
     #[serde(flatten)]
     pub genesis_values: Option<GenesisValues>,
-    #[serde(default = "default_protocol_params_topic")]
-    pub protocol_params_topic: String,
     #[serde(default = "default_consensus_topic")]
     pub consensus_topic: String,
     #[serde(default = "default_block_wanted_topic")]
@@ -50,10 +48,6 @@ pub struct InterfaceConfig {
     pub discovery_interval_secs: u64,
     #[serde(default = "default_peer_sharing_cooldown_secs")]
     pub peer_sharing_cooldown_secs: u64,
-}
-
-fn default_protocol_params_topic() -> String {
-    "cardano.protocol.parameters".to_string()
 }
 
 fn default_consensus_topic() -> String {

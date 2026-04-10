@@ -136,7 +136,6 @@ async fn make_harness() -> TestHarness {
         node_addresses: vec![],
         cache_dir: PathBuf::from("/tmp"),
         genesis_values: None,
-        protocol_params_topic: "cardano.protocol.parameters".to_string(),
         consensus_topic: "cardano.consensus.offers".to_string(),
         block_wanted_topic: "cardano.consensus.wants".to_string(),
         target_peer_count: 15,
@@ -151,14 +150,16 @@ async fn make_harness() -> TestHarness {
         peer_sharing_cooldown_secs: 0,
     };
 
+    let block_wanted_subscription =
+        Some(context.message_bus.subscribe(&cfg.block_wanted_topic).await.unwrap());
     let flow = BlockFlowHandler::new(
         &cfg,
         BlockFlowMode::Consensus,
+        acropolis_common::params::SECURITY_PARAMETER_K,
         context.clone(),
         events_sender,
-    )
-    .await
-    .expect("BlockFlowHandler creation failed");
+        block_wanted_subscription,
+    );
 
     // BlockSink private fields are accessible here because this module is a
     // child of the crate root where BlockSink is defined.

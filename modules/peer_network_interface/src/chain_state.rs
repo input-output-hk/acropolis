@@ -1,6 +1,4 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{connection::Header, network::PeerId};
 use acropolis_common::{BlockHash, hash::Hash};
@@ -150,11 +148,11 @@ pub struct ChainState {
     rolled_back_to: Option<Header>,
     tips: HashMap<PeerId, Point>,
     waiting_for_first_message: bool,
-    pub(crate) security_param_k: Arc<AtomicU64>,
+    security_param_k: u64,
 }
 
 impl ChainState {
-    pub fn new(security_param_k: Arc<AtomicU64>) -> Self {
+    pub fn new(security_param_k: u64) -> Self {
         Self {
             preferred_upstream: None,
             blocks: BTreeMap::new(),
@@ -165,6 +163,16 @@ impl ChainState {
             waiting_for_first_message: false,
             security_param_k,
         }
+    }
+
+    pub fn handle_sync_reset(&mut self) {
+        self.preferred_upstream = None;
+        self.blocks.clear();
+        self.published_blocks.clear();
+        self.unpublished_blocks.clear();
+        self.rolled_back_to = None;
+        self.tips.clear();
+        self.waiting_for_first_message = false;
     }
 
     pub fn handle_roll_forward(&mut self, id: PeerId, header: Header) -> Vec<PeerId> {
@@ -369,7 +377,7 @@ impl ChainState {
         }
         if let Some(published) = self.unpublished_blocks.pop_front() {
             self.published_blocks.push_back(published);
-            let k = self.security_param_k.load(Ordering::Acquire) as usize;
+            let k = self.security_param_k as usize;
             while self.published_blocks.len() > k {
                 let Some(block) = self.published_blocks.pop_front() else {
                     break;
@@ -406,7 +414,7 @@ mod tests {
     use super::*;
 
     fn make_test_chain_state() -> ChainState {
-        ChainState::new(Arc::new(AtomicU64::new(SECURITY_PARAMETER_K)))
+        ChainState::new(SECURITY_PARAMETER_K)
     }
 
     fn make_block(slot: u64, desc: &str) -> (Header, Vec<u8>) {

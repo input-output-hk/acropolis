@@ -12,7 +12,7 @@ use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
         BlockRejectedMessage, BlockWantedMessage, CardanoMessage, ConsensusMessage, Message,
-        ProtocolParamsMessage, RawBlockMessage, StateTransitionMessage,
+        RawBlockMessage, StateTransitionMessage,
     },
     types::{BlockInfo, Point},
     validation::ValidationStatus,
@@ -40,8 +40,8 @@ const DEFAULT_CONSENSUS_WANTS_TOPIC: (&str, &str) =
     ("consensus-wants-topic", "cardano.consensus.wants");
 const DEFAULT_FORCE_VALIDATION: (&str, bool) = ("force-validation", true);
 const DEFAULT_VALIDATION_TIMEOUT: (&str, u64) = ("validation-timeout", 60); // seconds
-const DEFAULT_PROTOCOL_PARAMS_TOPIC: (&str, &str) = ("protocol-params-topic", "cardano.protocol.parameters");
-const DEFAULT_GENESIS_COMPLETION_TOPIC: (&str, &str) = ("genesis-completion-topic", "cardano.sequence.bootstrapped");
+const DEFAULT_GENESIS_COMPLETION_TOPIC: (&str, &str) =
+    ("genesis-completion-topic", "cardano.sequence.bootstrapped");
 
 /// Events emitted by the consensus tree observer, queued for async publishing.
 enum ObserverEvent {
@@ -189,9 +189,6 @@ impl Consensus {
         let force_validation = get_bool_flag(&config, DEFAULT_FORCE_VALIDATION);
         info!("Force validation and chain selection: {force_validation}");
 
-        let protocol_params_topic = get_string_flag(&config, DEFAULT_PROTOCOL_PARAMS_TOPIC);
-        info!("Subscribing to protocol parameters on '{protocol_params_topic}'");
-
         let genesis_completion_topic = get_string_flag(&config, DEFAULT_GENESIS_COMPLETION_TOPIC);
         info!("Subscribing to genesis completion on '{genesis_completion_topic}'");
 
@@ -205,9 +202,6 @@ impl Consensus {
         } else {
             None
         };
-
-        // Subscribe to protocol parameters
-        let protocol_params_subscription = context.subscribe(&protocol_params_topic).await?;
 
         // Subscribe to genesis completion for initial security parameter
         let mut genesis_subscription = context.subscribe(&genesis_completion_topic).await?;
@@ -260,24 +254,13 @@ impl Consensus {
             // TODO: Temporary until consensus flow fully works.
             match flow_mode {
                 BlockFlowMode::Direct => {
-                    runtime
-                        .run_direct(
-                            block_subscription,
-                            protocol_params_subscription,
-                            force_validation,
-                        )
-                        .await;
+                    runtime.run_direct(block_subscription, force_validation).await;
                 }
                 BlockFlowMode::Consensus => {
                     let consensus_subscription = consensus_subscription
                         .expect("consensus subscription missing for consensus flow mode");
                     runtime
-                        .run_consensus(
-                            block_subscription,
-                            consensus_subscription,
-                            protocol_params_subscription,
-                            force_validation,
-                        )
+                        .run_consensus(block_subscription, consensus_subscription, force_validation)
                         .await;
                 }
             }
@@ -300,27 +283,11 @@ impl Consensus {
 }
 
 impl ConsensusRuntime {
-    /// Update the security parameter from a protocol params message.
-    ///
-    /// Prefers `shelley.security_param` (Shelley+ eras). Falls back to
-    /// `byron.protocol_consts.k` during the Byron era when shelley params
-    /// have not yet been initialised.
-    fn handle_protocol_params(&mut self, params: &ProtocolParamsMessage) {
-        let new_k = match (&params.params.shelley, &params.params.byron) {
-            (Some(shelley), _) => shelley.security_param as u64,
-            (_, Some(byron)) => byron.protocol_consts.k as u64,
-            _ => return,
-        };
-
-        self.tree.update_k(new_k);
-    }
-
     /// Main select loop for consensus flow: dispatches incoming messages to handler functions.
     async fn run_consensus(
         &mut self,
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut consensus_subscription: Box<dyn Subscription<Message>>,
-        mut protocol_params_subscription: Box<dyn Subscription<Message>>,
         force_validation: bool,
     ) {
         // If force_validation is disabled, treat immutable Mithril replay blocks
@@ -394,17 +361,6 @@ impl ConsensusRuntime {
                     }
 
                     self.stats.maybe_log();
-                }
-
-                result = protocol_params_subscription.read() => {
-                    let Ok((_, message)) = result else {
-                        error!("Protocol params message read failed");
-                        return;
-                    };
-
-                    if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) = message.as_ref() {
-                        self.handle_protocol_params(params);
-                    }
                 }
             }
         }
@@ -973,7 +929,6 @@ impl ConsensusRuntime {
     async fn run_direct(
         &mut self,
         mut block_subscription: Box<dyn Subscription<Message>>,
-        mut protocol_params_subscription: Box<dyn Subscription<Message>>,
         force_validation: bool,
     ) {
         loop {
@@ -1010,17 +965,6 @@ impl ConsensusRuntime {
                         }
 
                         _ => error!("Unexpected message type: {message:?}"),
-                    }
-                }
-
-                result = protocol_params_subscription.read() => {
-                    let Ok((_, message)) = result else {
-                        error!("Protocol params message read failed");
-                        return;
-                    };
-
-                    if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) = message.as_ref() {
-                        self.handle_protocol_params(params);
                     }
                 }
             }

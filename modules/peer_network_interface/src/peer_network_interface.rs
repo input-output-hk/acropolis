@@ -45,7 +45,7 @@ impl PeerNetworkInterface {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = InterfaceConfig::try_load(&config)?;
         let block_flow_mode = BlockFlowMode::from_config(&config);
-        let genesis_complete = if cfg.genesis_values.is_none() {
+        let genesis_complete_subscription = if cfg.genesis_values.is_none() {
             Some(context.subscribe(&cfg.genesis_completion_topic).await?)
         } else {
             None
@@ -54,24 +54,33 @@ impl PeerNetworkInterface {
 
         let (events_sender, events) = mpsc::channel(1024); // TODO: This might be way too small
 
-        let flow_handler = BlockFlowHandler::new(
-            &cfg,
-            block_flow_mode,
-            context.clone(),
-            events_sender.clone(),
-        )
-        .await?;
+        let block_wanted_subscription = if block_flow_mode.is_consensus() {
+            Some(context.subscribe(&cfg.block_wanted_topic).await?)
+        } else {
+            None
+        };
 
         context.clone().run(async move {
-            let genesis_values = if let Some(mut sub) = genesis_complete {
+            let genesis_values = if let Some(mut sub) = genesis_complete_subscription {
                 Self::wait_genesis_completion(&mut sub)
                     .await
                     .expect("could not fetch genesis values")
             } else {
-                cfg.genesis_values.clone().expect("genesis values not found")
+                cfg.genesis_values.clone().unwrap_or_else(|| {
+                    unreachable!(
+                        "genesis_complete is None only when genesis_values is set in config"
+                    )
+                })
             };
 
-            flow_handler.set_genesis_security_param(genesis_values.security_param);
+            let flow_handler = BlockFlowHandler::new(
+                &cfg,
+                block_flow_mode,
+                genesis_values.security_param,
+                context.clone(),
+                events_sender.clone(),
+                block_wanted_subscription,
+            );
 
             let mut upstream_cache = None;
             let mut last_epoch = None;

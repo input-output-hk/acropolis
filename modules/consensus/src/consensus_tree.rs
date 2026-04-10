@@ -6,7 +6,7 @@
 
 use acropolis_common::BlockHash;
 use std::collections::HashMap;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::tree_block::{BlockValidationStatus, TreeBlock};
 use crate::tree_error::ConsensusTreeError;
@@ -87,15 +87,6 @@ impl ConsensusTree {
     /// Returns the security parameter k.
     pub fn k(&self) -> u64 {
         self.k
-    }
-
-    /// Update the security parameter k.
-    ///
-    /// Note: on Cardano, k is a genesis constant. No immediate pruning is performed,
-    /// existing blocks beyond the new bound are evicted on future insertions.
-    pub fn update_k(&mut self, new_k: u64) {
-        info!(new_k, "Security parameter k set from protocol params");
-        self.k = new_k;
     }
 
     /// Take the observer out for reuse (e.g. when re-creating the tree).
