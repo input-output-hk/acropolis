@@ -2,7 +2,7 @@
 //! Manages optional state data needed for Blockfrost alignment
 
 use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper};
-use acropolis_common::configuration::StartupMode;
+use acropolis_common::configuration::{get_bool_flag, get_string_flag, StartupMode};
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::{CardanoMessage, Message, StateQuery, StateQueryResponse};
 use acropolis_common::messages::{
@@ -223,45 +223,24 @@ impl HistoricalAccountsState {
         let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         // Query topics
-        let historical_accounts_query_topic = config
-            .get_string(DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC.1.to_string());
+        let historical_accounts_query_topic =
+            get_string_flag(&config, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC);
         info!(
             "Creating query handler on '{}'",
             historical_accounts_query_topic
         );
 
         let storage_config = HistoricalAccountsConfig {
-            db_path: config
-                .get_string(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.0)
-                .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.1.to_string()),
-            clear_on_start: config
-                .get_bool(DEFAULT_CLEAR_ON_START.0)
-                .unwrap_or(DEFAULT_CLEAR_ON_START.1),
-            store_rewards_history: config
-                .get_bool(DEFAULT_STORE_REWARDS_HISTORY.0)
-                .unwrap_or(DEFAULT_STORE_REWARDS_HISTORY.1),
-            store_active_stake_history: config
-                .get_bool(DEFAULT_STORE_ACTIVE_STAKE_HISTORY.0)
-                .unwrap_or(DEFAULT_STORE_ACTIVE_STAKE_HISTORY.1),
-            store_delegation_history: config
-                .get_bool(DEFAULT_STORE_DELEGATION_HISTORY.0)
-                .unwrap_or(DEFAULT_STORE_DELEGATION_HISTORY.1),
-            store_registration_history: config
-                .get_bool(DEFAULT_STORE_REGISTRATION_HISTORY.0)
-                .unwrap_or(DEFAULT_STORE_REGISTRATION_HISTORY.1),
-            store_withdrawal_history: config
-                .get_bool(DEFAULT_STORE_WITHDRAWAL_HISTORY.0)
-                .unwrap_or(DEFAULT_STORE_WITHDRAWAL_HISTORY.1),
-            store_mir_history: config
-                .get_bool(DEFAULT_STORE_MIR_HISTORY.0)
-                .unwrap_or(DEFAULT_STORE_MIR_HISTORY.1),
-            store_addresses: config
-                .get_bool(DEFAULT_STORE_ADDRESSES.0)
-                .unwrap_or(DEFAULT_STORE_ADDRESSES.1),
-            store_tx_count: config
-                .get_bool(DEFAULT_STORE_TX_COUNT.0)
-                .unwrap_or(DEFAULT_STORE_TX_COUNT.1),
+            db_path: get_string_flag(&config, DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH),
+            clear_on_start: get_bool_flag(&config, DEFAULT_CLEAR_ON_START),
+            store_rewards_history: get_bool_flag(&config, DEFAULT_STORE_REWARDS_HISTORY),
+            store_active_stake_history: get_bool_flag(&config, DEFAULT_STORE_ACTIVE_STAKE_HISTORY),
+            store_delegation_history: get_bool_flag(&config, DEFAULT_STORE_DELEGATION_HISTORY),
+            store_registration_history: get_bool_flag(&config, DEFAULT_STORE_REGISTRATION_HISTORY),
+            store_withdrawal_history: get_bool_flag(&config, DEFAULT_STORE_WITHDRAWAL_HISTORY),
+            store_mir_history: get_bool_flag(&config, DEFAULT_STORE_MIR_HISTORY),
+            store_addresses: get_bool_flag(&config, DEFAULT_STORE_ADDRESSES),
+            store_tx_count: get_bool_flag(&config, DEFAULT_STORE_TX_COUNT),
         };
 
         // Initalize state

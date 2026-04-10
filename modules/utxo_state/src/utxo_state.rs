@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{RollbackAwarePublisher, RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{get_string_flag, StartupMode},
     declare_cardano_reader,
     messages::{
         CardanoMessage, Message, PoolRegistrationUpdatesMessage, ProtocolParamsMessage,
@@ -79,12 +79,12 @@ declare_cardano_reader!(
     PoolRegistrationUpdatesMessage
 );
 
-const DEFAULT_STORE: &str = "memory";
+const DEFAULT_STORE: (&str, &str) = ("store", "memory");
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 const DEFAULT_UTXO_VALIDATION_TOPIC: (&str, &str) =
     ("utxo-validation-publish-topic", "cardano.validation.utxo");
-const DEFAULT_ADDRESS_DELTA_PUBLISH_MODE: &str = "compact";
+const DEFAULT_ADDRESS_DELTA_PUBLISH_MODE: (&str, &str) = ("address-delta-publish-mode", "compact");
 
 pub(crate) async fn publish_observer_message(
     publisher: &Option<Mutex<RollbackAwarePublisher<Message>>>,
@@ -269,24 +269,17 @@ impl UTXOState {
         let utxo_deltas_reader = UTxODeltasReader::new(&context, &config).await?;
         let params_reader = ParamsReader::new(&context, &config).await?;
 
-        let snapshot_topic = config
-            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+        let snapshot_topic = get_string_flag(&config, DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC);
         info!("Creating snapshot subscriber on '{snapshot_topic}'");
 
-        let utxos_query_topic = config
-            .get_string(DEFAULT_UTXOS_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_UTXOS_QUERY_TOPIC.1.to_string());
+        let utxos_query_topic = get_string_flag(&config, DEFAULT_UTXOS_QUERY_TOPIC);
 
-        let utxo_validation_publish_topic = config
-            .get_string(DEFAULT_UTXO_VALIDATION_TOPIC.0)
-            .unwrap_or(DEFAULT_UTXO_VALIDATION_TOPIC.1.to_string());
+        let utxo_validation_publish_topic = get_string_flag(&config, DEFAULT_UTXO_VALIDATION_TOPIC);
         info!("Creating UTxO validation publisher on '{utxo_validation_publish_topic}'");
 
-        let address_delta_publish_mode = config
-            .get_string("address-delta-publish-mode")
-            .unwrap_or_else(|_| DEFAULT_ADDRESS_DELTA_PUBLISH_MODE.to_string())
-            .parse::<AddressDeltaPublishMode>()?;
+        let address_delta_publish_mode =
+            get_string_flag(&config, DEFAULT_ADDRESS_DELTA_PUBLISH_MODE)
+                .parse::<AddressDeltaPublishMode>()?;
         info!(
             mode = ?address_delta_publish_mode,
             "Address delta publish mode"
@@ -295,7 +288,7 @@ impl UTXOState {
         let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         // Create store
-        let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
+        let store_type = get_string_flag(&config, DEFAULT_STORE);
         let store: Arc<dyn ImmutableUTXOStore> = match store_type.as_str() {
             "memory" => Arc::new(InMemoryImmutableUTXOStore::new(config.clone())),
             "dashmap" => Arc::new(DashMapImmutableUTXOStore::new(config.clone())),

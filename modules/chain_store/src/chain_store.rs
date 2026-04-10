@@ -4,6 +4,7 @@ use crate::queries::{handle_blocks_query, handle_txs_query};
 use crate::state::State;
 use crate::stores::{fjall::FjallStore, Store};
 
+use acropolis_common::configuration::get_string_flag;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
@@ -29,7 +30,7 @@ mod helpers;
 mod queries;
 mod state;
 
-const DEFAULT_STORE: &str = "fjall";
+const DEFAULT_STORE: (&str, &str) = ("store", "fjall");
 const DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC: (&str, &str) =
     ("validation-publish-topic", "cardano.validation.chainstore");
 
@@ -58,21 +59,15 @@ pub struct ChainStore;
 
 impl ChainStore {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let block_queries_topic = config
-            .get_string(DEFAULT_BLOCKS_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_BLOCKS_QUERY_TOPIC.1.to_string());
-        let txs_queries_topic = config
-            .get_string(DEFAULT_TRANSACTIONS_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_TRANSACTIONS_QUERY_TOPIC.1.to_string());
-        let validation_topic = config
-            .get_string(DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC.0)
-            .unwrap_or(DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC.1.to_string());
+        let block_queries_topic = get_string_flag(&config, DEFAULT_BLOCKS_QUERY_TOPIC);
+        let txs_queries_topic = get_string_flag(&config, DEFAULT_TRANSACTIONS_QUERY_TOPIC);
+        let validation_topic = get_string_flag(&config, DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC);
         info!("Publishing validation outcomes on '{validation_topic}'");
 
         let network_id: NetworkId =
             config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
 
-        let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
+        let store_type = get_string_flag(&config, DEFAULT_STORE);
         let store: Arc<dyn Store> = match store_type.as_str() {
             "fjall" => Arc::new(FjallStore::new(config.clone())?),
             _ => bail!("Unknown store type {store_type}"),
