@@ -1167,11 +1167,6 @@ impl State {
         stake_addresses.generate_spdd()
     }
 
-    pub fn dump_spdd_state(&self) -> HashMap<PoolId, Vec<(StakeAddress, u64)>> {
-        let stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses.dump_spdd_state()
-    }
-
     /// Derive the DRep Delegation Distribution (DRDD) - the total amount
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
     pub fn generate_drdd(&self) -> DRepDelegationDistribution {
@@ -1193,19 +1188,9 @@ impl State {
     /// If params don't change between epochs (e.g., k=500 in both 234 and 235), we still
     /// need to rotate so that `previous_protocol_parameters` reflects epoch 234's params,
     /// not stale params from when they last changed (e.g., epoch 233's k=150).
-    pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) -> Result<()> {
-        let different = match &self.protocol_parameters {
-            Some(old_params) => old_params != &params_msg.params,
-            None => true,
-        };
-
-        if different {
-            info!("New parameter set: {:?}", params_msg.params);
-        }
+    pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) {
         self.previous_protocol_parameters = self.protocol_parameters.clone();
         self.protocol_parameters = Some(params_msg.params.clone());
-
-        Ok(())
     }
 
     /// Complete the previous epoch rewards calculation
@@ -1360,7 +1345,7 @@ impl State {
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
     /// epoch
-    pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) -> Result<()> {
+    pub fn handle_spo_state(&mut self, spo_msg: &SPOStateMessage) {
         // Capture current SPOs, mapped by operator ID
         let new_spos: OrdMap<PoolId, PoolRegistration> =
             spo_msg.spos.iter().cloned().map(|spo| (spo.operator, spo)).collect();
@@ -1435,7 +1420,6 @@ impl State {
         }
 
         self.spos = new_spos;
-        Ok(())
     }
 
     /// Register a stake address, with a specified deposit if known
@@ -1842,29 +1826,30 @@ impl State {
     /// Handle pots
     pub fn handle_pot_deltas(&mut self, pot_deltas: &PotDeltasMessage) -> Result<()> {
         let pot_deltas = &pot_deltas.deltas;
-        let apply = |name: &str, pot: &mut u64, delta: i64| {
-            if let Err(e) = update_value_with_delta(pot, delta) {
-                error!("Applying {name} pot delta {delta}: {e}");
-            } else {
-                info!("Pot delta for {name} {delta} => {pot}");
-            }
+
+        let apply = |name: &str, pot: &mut u64, delta: i64| -> Result<()> {
+            update_value_with_delta(pot, delta)
+                .map_err(|e| anyhow::anyhow!("Applying {name} pot delta {delta}: {e}"))?;
+
+            info!("Pot delta for {name} {delta} => {pot}");
+            Ok(())
         };
 
         apply(
             "Treasury",
             &mut self.pots.treasury,
             pot_deltas.delta_treasury,
-        );
+        )?;
         apply(
             "Reserves",
             &mut self.pots.reserves,
             pot_deltas.delta_reserves,
-        );
+        )?;
         apply(
             "Deposits",
             &mut self.pots.deposits,
             pot_deltas.delta_deposits,
-        );
+        )?;
 
         Ok(())
     }
@@ -2139,42 +2124,40 @@ mod tests {
         let vrf_key_hash_2 = test_vrf_keyhash(0x04);
 
         // Create the SPOs
-        state
-            .handle_spo_state(&SPOStateMessage {
-                epoch: 1,
-                spos: vec![
-                    PoolRegistration {
-                        operator: spo1,
-                        vrf_key_hash: vrf_key_hash_1,
-                        pledge: 26,
-                        cost: 0,
-                        margin: Ratio {
-                            numerator: 1,
-                            denominator: 20,
-                        },
-                        reward_account: StakeAddress::default(),
-                        pool_owners: Vec::new(),
-                        relays: Vec::new(),
-                        pool_metadata: None,
+        state.handle_spo_state(&SPOStateMessage {
+            epoch: 1,
+            spos: vec![
+                PoolRegistration {
+                    operator: spo1,
+                    vrf_key_hash: vrf_key_hash_1,
+                    pledge: 26,
+                    cost: 0,
+                    margin: Ratio {
+                        numerator: 1,
+                        denominator: 20,
                     },
-                    PoolRegistration {
-                        operator: spo2,
-                        vrf_key_hash: vrf_key_hash_2,
-                        pledge: 47,
-                        cost: 10,
-                        margin: Ratio {
-                            numerator: 1,
-                            denominator: 10,
-                        },
-                        reward_account: StakeAddress::default(),
-                        pool_owners: Vec::new(),
-                        relays: Vec::new(),
-                        pool_metadata: None,
+                    reward_account: StakeAddress::default(),
+                    pool_owners: Vec::new(),
+                    relays: Vec::new(),
+                    pool_metadata: None,
+                },
+                PoolRegistration {
+                    operator: spo2,
+                    vrf_key_hash: vrf_key_hash_2,
+                    pledge: 47,
+                    cost: 10,
+                    margin: Ratio {
+                        numerator: 1,
+                        denominator: 10,
                     },
-                ],
-                retired_spos: vec![],
-            })
-            .unwrap();
+                    reward_account: StakeAddress::default(),
+                    pool_owners: Vec::new(),
+                    relays: Vec::new(),
+                    pool_metadata: None,
+                },
+            ],
+            retired_spos: vec![],
+        });
 
         // Delegate
         let addr1 = create_address(&[0x11]);
@@ -2621,7 +2604,7 @@ mod tests {
         };
         let mut state = State::default();
 
-        state.handle_parameters(&msg).unwrap();
+        state.handle_parameters(&msg);
 
         assert_eq!(
             state.protocol_parameters.unwrap().conway.unwrap().pool_voting_thresholds,
