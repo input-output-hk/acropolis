@@ -588,7 +588,7 @@ impl AccountsState {
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let accounts_cfg = AccountsConfig::load(context.clone(), &config).await?;
+        let accounts_cfg = AccountsConfig::init(context.clone(), &config).await?;
 
         // History
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -634,7 +634,7 @@ impl AccountsState {
                     Ok((_, message)) => match message.as_ref() {
                         Message::Clock(message) if message.number % 60 == 0 => {
                             if let Some(state) = history_tick.lock().await.current() {
-                                state.tick();
+                                state.log_stats();
                             }
                         }
                         _ => continue,

@@ -78,7 +78,7 @@ pub struct AccountsConfig {
 }
 
 impl AccountsConfig {
-    pub async fn load(
+    pub async fn init(
         context: Arc<Context<Message>>,
         config: &Arc<Config>,
     ) -> anyhow::Result<Self> {

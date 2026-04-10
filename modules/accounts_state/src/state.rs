@@ -418,8 +418,8 @@ impl State {
         stake_addresses.get_account_balances_sum(stake_keys)
     }
 
-    /// Background tick
-    pub fn tick(&self) {
+    /// Background stats logger
+    pub fn log_stats(&self) {
         info!(num_stake_addresses = self.stake_addresses.lock().unwrap().len());
     }
 
