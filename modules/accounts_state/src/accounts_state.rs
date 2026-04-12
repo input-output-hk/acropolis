@@ -660,7 +660,7 @@ impl AccountsState {
 
         if let Ok(verify_spdd_files) = config.get_string("verify-spdd-files") {
             info!("Verifying rewards against '{verify_spdd_files}'");
-            verifier.set_spdd_template(&verify_spdd_files);
+            verifier.set_spdd_template(&verify_spdd_files)?;
         }
 
         // History
