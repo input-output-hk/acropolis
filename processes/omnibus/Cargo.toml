@@ -38,7 +38,6 @@ acropolis_module_fake_block_injector = { path = "../../modules/fake_block_inject
 acropolis_module_mcp_server = { path = "../../modules/mcp_server" }
 acropolis_module_midnight_state = { path = "../../modules/midnight_state" }
 acropolis_module_stats = { path = "../../modules/stats" }
-acropolis_module_era_state = { path = "../../modules/era_state" }
 
 caryatid_process = { workspace = true }
 caryatid_module_clock = { workspace = true }

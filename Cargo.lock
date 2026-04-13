@@ -266,19 +266,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "acropolis_module_era_state"
-version = "0.1.0"
-dependencies = [
- "acropolis_common",
- "anyhow",
- "caryatid_sdk",
- "config",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "acropolis_module_fake_block_injector"
 version = "0.1.0"
 dependencies = [
@@ -705,7 +692,6 @@ dependencies = [
  "acropolis_module_drdd_state",
  "acropolis_module_drep_state",
  "acropolis_module_epochs_state",
- "acropolis_module_era_state",
  "acropolis_module_fake_block_injector",
  "acropolis_module_genesis_bootstrapper",
  "acropolis_module_governance_state",
