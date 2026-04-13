@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{get_bool_flag, get_string_flag, get_u64_flag, StartupMode},
     declare_cardano_reader,
     messages::{
         AccountsBootstrapMessage, CardanoMessage, EpochActivityMessage, GovernanceOutcomesMessage,
@@ -121,13 +121,27 @@ declare_cardano_reader!(
 );
 
 // Publishers
-const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
-const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
-const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
-const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
-const DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC: &str = "cardano.stake.registration.updates";
-const DEFAULT_VALIDATION_OUTCOMES_TOPIC: &str = "cardano.validation.accounts";
-const DEFAULT_POTS_TOPIC: &str = "cardano.pots";
+const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) = (
+    "publish-drep-distribution-topic",
+    "cardano.drep.distribution",
+);
+const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
+    ("publish-spo-distribution-topic", "cardano.spo.distribution");
+const DEFAULT_SPO_REWARDS_TOPIC: (&str, &str) =
+    ("publish-spo-rewards-topic", "cardano.spo.rewards");
+const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: (&str, &str) = (
+    "publish-stake-reward-deltas-topic",
+    "cardano.stake.reward.deltas",
+);
+const DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC: (&str, &str) = (
+    "publish-stake-registration-updates-topic",
+    "cardano.stake.registration.updates",
+);
+const DEFAULT_VALIDATION_OUTCOMES_TOPIC: (&str, &str) = (
+    "publish-validation-outcomes-topic",
+    "cardano.validation.accounts",
+);
+const DEFAULT_POTS_TOPIC: (&str, &str) = ("publish-pots-topic", "cardano.pots");
 
 /// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -623,64 +637,45 @@ impl AccountsState {
         // Get configuration
 
         // Subscription topics
-        let snapshot_subscribe_topic = config
-            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+        let snapshot_subscribe_topic = get_string_flag(&config, DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC);
 
         // Publishing topics
-        let drep_distribution_topic = config
-            .get_string("publish-drep-distribution-topic")
-            .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
+        let drep_distribution_topic = get_string_flag(&config, DEFAULT_DREP_DISTRIBUTION_TOPIC);
         info!("Creating DRep distribution publisher on '{drep_distribution_topic}'");
 
-        let spo_distribution_topic = config
-            .get_string("publish-spo-distribution-topic")
-            .unwrap_or(DEFAULT_SPO_DISTRIBUTION_TOPIC.to_string());
+        let spo_distribution_topic = get_string_flag(&config, DEFAULT_SPO_DISTRIBUTION_TOPIC);
         info!("Creating SPO distribution publisher on '{spo_distribution_topic}'");
 
-        let spo_rewards_topic = config
-            .get_string("publish-spo-rewards-topic")
-            .unwrap_or(DEFAULT_SPO_REWARDS_TOPIC.to_string());
+        let spo_rewards_topic = get_string_flag(&config, DEFAULT_SPO_REWARDS_TOPIC);
         info!("Creating SPO rewards publisher on '{spo_rewards_topic}'");
 
-        let stake_reward_deltas_topic = config
-            .get_string("publish-stake-reward-deltas-topic")
-            .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
+        let stake_reward_deltas_topic = get_string_flag(&config, DEFAULT_STAKE_REWARD_DELTAS_TOPIC);
         info!("Creating stake reward deltas publisher on '{stake_reward_deltas_topic}'");
 
-        let stake_registration_updates_topic = config
-            .get_string("publish-stake-registration-updates-topic")
-            .unwrap_or(DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC.to_string());
+        let stake_registration_updates_topic =
+            get_string_flag(&config, DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC);
         info!(
             "Creating stake registration updates publisher on '{stake_registration_updates_topic}'"
         );
 
-        let pots_topic =
-            config.get_string("publish-pots-topic").unwrap_or(DEFAULT_POTS_TOPIC.to_string());
+        let pots_topic = get_string_flag(&config, DEFAULT_POTS_TOPIC);
         info!("Creating pots publisher on '{pots_topic}'");
 
-        let validation_outcomes_topic = config
-            .get_string("validation-outcomes-topic")
-            .unwrap_or(DEFAULT_VALIDATION_OUTCOMES_TOPIC.to_string());
+        let validation_outcomes_topic = get_string_flag(&config, DEFAULT_VALIDATION_OUTCOMES_TOPIC);
         info!("Validation outcomes are to be published on '{validation_outcomes_topic}'");
 
         // SPDD configs
-        let spdd_db_path =
-            config.get_string(DEFAULT_SPDD_DB_PATH.0).unwrap_or(DEFAULT_SPDD_DB_PATH.1.to_string());
+        let spdd_db_path = get_string_flag(&config, DEFAULT_SPDD_DB_PATH);
         info!("SPDD database path: {spdd_db_path}");
-        let spdd_retention_epochs = config
-            .get_int(DEFAULT_SPDD_RETENTION_EPOCHS.0)
-            .unwrap_or(DEFAULT_SPDD_RETENTION_EPOCHS.1 as i64)
-            .max(0) as u64;
+
+        let spdd_retention_epochs = get_u64_flag(&config, DEFAULT_SPDD_RETENTION_EPOCHS);
         info!("SPDD retention epochs: {:?}", spdd_retention_epochs);
-        let spdd_clear_on_start =
-            config.get_bool(DEFAULT_SPDD_CLEAR_ON_START.0).unwrap_or(DEFAULT_SPDD_CLEAR_ON_START.1);
+
+        let spdd_clear_on_start = get_bool_flag(&config, DEFAULT_SPDD_CLEAR_ON_START);
         info!("SPDD clear on start: {spdd_clear_on_start}");
 
         // Query topics
-        let accounts_query_topic = config
-            .get_string(DEFAULT_ACCOUNTS_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
+        let accounts_query_topic = get_string_flag(&config, DEFAULT_ACCOUNTS_QUERY_TOPIC);
         info!("Creating query handler on '{}'", accounts_query_topic);
 
         // Create verifier and read comparison data according to config
