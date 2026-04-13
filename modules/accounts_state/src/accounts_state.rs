@@ -7,10 +7,9 @@ use acropolis_common::{
     declare_cardano_reader,
     messages::{
         AccountsBootstrapMessage, CardanoMessage, EpochActivityMessage, GovernanceOutcomesMessage,
-        GovernanceProceduresMessage, Message, PotDeltasMessage, ProtocolParamsMessage,
-        SPOStateMessage, SnapshotMessage, SnapshotStateMessage, StakeAddressDeltasMessage,
-        StateQuery, StateQueryResponse, StateTransitionMessage, TxCertificatesMessage,
-        WithdrawalsMessage,
+        GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStateMessage,
+        SnapshotMessage, SnapshotStateMessage, StakeAddressDeltasMessage, StateQuery,
+        StateQueryResponse, StateTransitionMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     queries::{
         accounts::{
@@ -20,7 +19,7 @@ use acropolis_common::{
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
-    Era,
+    Era, Pots,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -88,9 +87,9 @@ declare_cardano_reader!(
 declare_cardano_reader!(
     PotsReader,
     "pots-subscribe-topic",
-    "cardano.pot.deltas",
-    PotDeltas,
-    PotDeltasMessage
+    "cardano.pots",
+    Pots,
+    Pots
 );
 declare_cardano_reader!(
     StakeDeltasReader,
@@ -128,7 +127,7 @@ const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 const DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC: &str = "cardano.stake.registration.updates";
 const DEFAULT_VALIDATION_OUTCOMES_TOPIC: &str = "cardano.validation.accounts";
-const DEFAULT_POTS_TOPIC: &str = "cardano.accounts.pots";
+const DEFAULT_POTS_TOPIC: &str = "cardano.pots";
 
 /// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -226,7 +225,7 @@ impl AccountsState {
         mut ea_reader: EpochActivityReader,
         mut certs_reader: CertsReader,
         mut withdrawals_reader: WithdrawalsReader,
-        mut pot_deltas_reader: PotsReader,
+        mut initial_pots_reader: PotsReader,
         mut stake_deltas_reader: StakeDeltasReader,
         mut governance_procedures_reader: GovProceduresReader,
         mut governance_outcomes_reader: GovOutcomesReader,
@@ -255,13 +254,13 @@ impl AccountsState {
 
             // Initialisation messages
             {
-                match pot_deltas_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal((block_info, pot_deltas_msg)) => {
+                match initial_pots_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((block_info, initial_pots)) => {
                         let mut state = history.lock().await.get_current_state();
 
                         state
-                            .handle_pot_deltas(&pot_deltas_msg)
-                            .inspect_err(|e| error!("Pots handling error: {e:#}"))
+                            .handle_initial_pots(&initial_pots)
+                            .inspect_err(|e| error!("Initial pots handling error: {e:#}"))
                             .ok();
 
                         history.lock().await.commit(block_info.number, state);

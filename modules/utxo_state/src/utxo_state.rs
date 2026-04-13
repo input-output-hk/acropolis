@@ -90,7 +90,7 @@ declare_cardano_reader!(
 declare_cardano_reader!(
     PotsReader,
     "pots-subscribe-topic",
-    "cardano.accounts.pots",
+    "cardano.pots",
     Pots,
     Pots
 );

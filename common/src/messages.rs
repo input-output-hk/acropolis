@@ -382,7 +382,6 @@ pub enum CardanoMessage {
     TxCertificates(TxCertificatesMessage),   // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),     // Address deltas received
     Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts
-    PotDeltas(PotDeltasMessage),             // Changes to pot balances
     BlockInfoMessage(BlockTxsMessage), // Transaction Info (total count, total output, total fees in a block)
     EpochActivity(EpochActivityMessage), // Total fees and VRF keys for an epoch
     EpochNonce(Option<Nonce>),         // Epoch nonce for the current epoch

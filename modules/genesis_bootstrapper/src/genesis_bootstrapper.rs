@@ -6,12 +6,10 @@ use acropolis_common::{
     genesis_values::GenesisValues,
     hash::Hash,
     messages::{
-        BootstrapPotDeltas, CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message,
-        PotDeltasMessage, UTXODeltasMessage,
+        CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockIntent, BlockStatus, ByronAddress, Era, GenesisDelegates,
-    LovelaceDelta, MagicNumber, TxHash, TxIdentifier, TxOutput, TxUTxODeltas, UTxOIdentifier,
-    Value,
+    MagicNumber, Pots, TxHash, TxIdentifier, TxOutput, TxUTxODeltas, UTxOIdentifier, Value,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
@@ -28,8 +26,7 @@ use tracing::{error, info, info_span, Instrument};
 const DEFAULT_STARTUP_TOPIC: (&str, &str) = ("startup-topic", "cardano.sequence.start");
 const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: (&str, &str) =
     ("publish-utxo-deltas-topic", "cardano.utxo.deltas");
-const DEFAULT_PUBLISH_POT_DELTAS_TOPIC: (&str, &str) =
-    ("publish-pot-deltas-topic", "cardano.pot.deltas");
+const DEFAULT_PUBLISH_POTS_TOPIC: (&str, &str) = ("publish-pots-topic", "cardano.pots");
 const DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC: (&str, &str) =
     ("publish-genesis-utxos-topic", "cardano.genesis.utxos");
 const DEFAULT_COMPLETION_TOPIC: (&str, &str) =
@@ -187,8 +184,8 @@ impl GenesisBootstrapper {
                     let publish_utxo_deltas_topic = get_string_flag(&config, DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC);
                     info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
 
-                    let publish_pot_deltas_topic = get_string_flag(&config, DEFAULT_PUBLISH_POT_DELTAS_TOPIC);
-                    info!("Publishing pot deltas on '{publish_pot_deltas_topic}'");
+                    let publish_pots_topic = get_string_flag(&config, DEFAULT_PUBLISH_POTS_TOPIC);
+                    info!("Publishing pots on '{publish_pots_topic}'");
 
                     let publish_genesis_utxos_topic = get_string_flag(&config, DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC);
                     info!("Publishing genesis transactions on '{publish_genesis_utxos_topic}'");
@@ -241,12 +238,12 @@ impl GenesisBootstrapper {
                         .await
                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
-                    // Send the pot update message with the remaining reserves
-                    let pot_deltas = if first_block_era < Era::Shelley {
-                        BootstrapPotDeltas {
-                            delta_reserves: (initial_reserves - total_allocated) as LovelaceDelta,
-                            delta_treasury: 0,
-                            delta_deposits: 0,
+                    // Send initial pots message with the remaining reserves
+                    let initial_pots = if first_block_era < Era::Shelley {
+                        Pots {
+                            reserves: initial_reserves - total_allocated,
+                            treasury: 0,
+                            deposits: 0,
                         }
                     } else {
                         // When booting directly into Shelley (e.g. Preview), apply the first epoch's
@@ -264,28 +261,25 @@ impl GenesisBootstrapper {
                             shelley_genesis.protocol_params.rho.denominator,
                         );
 
-                        let treasury_delta = reserves_after_allocation * tau * rho;
+                        let treasury_delta = (reserves_after_allocation * tau * rho) as u64;
 
-                        BootstrapPotDeltas {
-                            delta_reserves: (initial_reserves
+                        Pots {
+                            reserves: (initial_reserves
                                 - total_allocated
-                                - treasury_delta as u64)
-                                as LovelaceDelta,
-                            delta_treasury: treasury_delta as LovelaceDelta,
-                            delta_deposits: 0,
+                                - treasury_delta),
+                            treasury: treasury_delta,
+                            deposits: 0,
                         }
                     };
 
-                    let pot_deltas_message = PotDeltasMessage { deltas: pot_deltas };
-
                     let message_enum = Message::Cardano((
                         block_info.clone(),
-                        CardanoMessage::PotDeltas(pot_deltas_message),
+                        CardanoMessage::Pots(initial_pots),
                     ));
                     context
-                        .publish(&publish_pot_deltas_topic, Arc::new(message_enum))
+                        .publish(&publish_pots_topic, Arc::new(message_enum))
                         .await
-                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        .unwrap_or_else(|e| error!("Failed to publish initial pots: {e}"));
 
                     let gen_utxos_message = Message::Cardano((
                         block_info.clone(),
@@ -296,7 +290,7 @@ impl GenesisBootstrapper {
                     context
                         .publish(&publish_genesis_utxos_topic, Arc::new(gen_utxos_message))
                         .await
-                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                        .unwrap_or_else(|e| error!("Failed to publish genesis UTXOs: {e}"));
                 }
 
                 let values = GenesisValues {
