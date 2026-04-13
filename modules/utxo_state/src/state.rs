@@ -259,8 +259,10 @@ impl State {
     }
 
     /// Look up a Reference script
-    #[allow(dead_code)]
-    pub fn lookup_reference_script(&self, script_hash: &ScriptHash) -> Option<ReferenceScript> {
+    pub fn lookup_reference_script(
+        &self,
+        script_hash: &ScriptHash,
+    ) -> Option<Arc<ReferenceScript>> {
         self.reference_scripts_history.get_current_state().lookup_reference_script(script_hash)
     }
 
@@ -1110,7 +1112,7 @@ pub mod tests {
 
         match state.lookup_reference_script(&ref_script.compute_hash()) {
             Some(reference_script) => {
-                assert_eq!(ref_script, reference_script);
+                assert_eq!(ref_script, *reference_script);
             }
             None => panic!("Reference script not found"),
         }
@@ -1375,7 +1377,7 @@ pub mod tests {
         state.handle_utxo_deltas(&block2, &deltas).await.unwrap();
         assert_eq!(
             Some(v1_script.clone()),
-            state.lookup_reference_script(&v1_script.compute_hash())
+            state.lookup_reference_script(&v1_script.compute_hash()).map(|s| (*s).clone())
         );
 
         let rollback2 = create_block(BlockStatus::RolledBack, 2, 2);
@@ -1405,11 +1407,11 @@ pub mod tests {
         state.handle_utxo_deltas(&block1, &deltas).await.unwrap();
         assert_eq!(
             Some(v2_script.clone()),
-            state.lookup_reference_script(&v2_script.compute_hash())
+            state.lookup_reference_script(&v2_script.compute_hash()).map(|s| (*s).clone())
         );
         assert_eq!(
             None,
-            state.lookup_reference_script(&v1_script.compute_hash())
+            state.lookup_reference_script(&v1_script.compute_hash()).map(|s| (*s).clone())
         );
     }
 
@@ -1446,7 +1448,7 @@ pub mod tests {
         state.handle_utxo_deltas(&block2, &deltas).await.unwrap();
         assert_eq!(
             Some(v1_script.clone()),
-            state.lookup_reference_script(&v1_script.compute_hash())
+            state.lookup_reference_script(&v1_script.compute_hash()).map(|s| (*s).clone())
         );
 
         let replay_output = TxOutput {
@@ -1481,11 +1483,11 @@ pub mod tests {
 
         assert_eq!(
             Some(v2_script.clone()),
-            state.lookup_reference_script(&v2_script.compute_hash())
+            state.lookup_reference_script(&v2_script.compute_hash()).map(|s| (*s).clone())
         );
         assert_eq!(
             None,
-            state.lookup_reference_script(&v1_script.compute_hash())
+            state.lookup_reference_script(&v1_script.compute_hash()).map(|s| (*s).clone())
         );
     }
 

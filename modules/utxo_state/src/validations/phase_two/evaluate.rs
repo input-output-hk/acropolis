@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
+
 use acropolis_common::validation::UplcMachineError;
 use acropolis_common::{
     validation::Phase2ValidationError, CostModels, ReferenceScript, ScriptHash, ScriptLang,
@@ -182,14 +183,14 @@ pub fn evaluate_raw_flat_program(flat_bytes: &[u8]) -> Result<std::time::Duratio
 pub fn build_scripts_table(
     tx_deltas: &TxUTxODeltas,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-    lookup_ref_script: impl Fn(&ScriptHash) -> Option<ReferenceScript>,
-) -> HashMap<ScriptHash, ReferenceScript> {
+    lookup_ref_script: impl Fn(&ScriptHash) -> Option<Arc<ReferenceScript>>,
+) -> HashMap<ScriptHash, Arc<ReferenceScript>> {
     let mut table = HashMap::new();
 
     // Source 1: script witnesses from the transaction
     if let Some(witnesses) = &tx_deltas.script_witnesses {
         for (hash, script) in witnesses {
-            table.insert(*hash, script.clone());
+            table.insert(*hash, Arc::new(script.clone()));
         }
     }
 
@@ -197,12 +198,12 @@ pub fn build_scripts_table(
     for input in tx_deltas.consumes.iter().chain(tx_deltas.reference_inputs.iter()) {
         if let Some(utxo) = utxos.get(input) {
             if let Some(script_ref) = &utxo.script_ref {
-                if let std::collections::hash_map::Entry::Vacant(e) =
-                    table.entry(script_ref.script_hash)
-                {
-                    if let Some(ref_script) = lookup_ref_script(&script_ref.script_hash) {
-                        e.insert(ref_script);
-                    }
+                if table.contains_key(&script_ref.script_hash) {
+                    continue;
+                }
+
+                if let Some(ref_script) = lookup_ref_script(&script_ref.script_hash) {
+                    table.insert(script_ref.script_hash, ref_script);
                 }
             }
         }
@@ -224,7 +225,7 @@ pub fn build_scripts_table(
 /// If `is_valid` is false, scripts are expected to fail (per Alonzo spec).
 pub fn evaluate_scripts(
     script_contexts: &[ScriptContext<'_>],
-    scripts_table: &HashMap<ScriptHash, ReferenceScript>,
+    scripts_table: &HashMap<ScriptHash, Arc<ReferenceScript>>,
     cost_models: &CostModels,
     is_valid: bool,
 ) -> Result<(), Phase2ValidationError> {
@@ -255,7 +256,7 @@ pub fn evaluate_scripts(
 fn evaluate_single_script(
     arena: &Arena,
     sc: &ScriptContext<'_>,
-    scripts_table: &HashMap<ScriptHash, ReferenceScript>,
+    scripts_table: &HashMap<ScriptHash, Arc<ReferenceScript>>,
     cost_models: &CostModels,
 ) -> Result<(), Phase2ValidationError> {
     let common_plutus_version = match &sc.script_lang {
@@ -274,7 +275,7 @@ fn evaluate_single_script(
         .get(&sc.script_hash)
         .ok_or(Phase2ValidationError::MissingScriptForHash(sc.script_hash))?;
 
-    let cbor_bytes = match ref_script {
+    let cbor_bytes = match ref_script.as_ref() {
         ReferenceScript::PlutusV1(bytes)
         | ReferenceScript::PlutusV2(bytes)
         | ReferenceScript::PlutusV3(bytes) => bytes,
@@ -455,7 +456,7 @@ mod tests {
             ctx.reference_scripts
                 .iter()
                 .find(|(hash, _)| **hash == *script_hash)
-                .map(|(_, reference_script)| reference_script.clone())
+                .map(|(_, reference_script)| Arc::new(reference_script.clone()))
         };
         let scripts_table = build_scripts_table(&tx_deltas, &ctx.utxos, lookup_ref_script);
 

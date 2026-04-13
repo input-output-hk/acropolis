@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use acropolis_common::{
     genesis_values::GenesisValues,
@@ -25,7 +26,7 @@ pub fn validate_tx(
     protocol_params: &ProtocolParams,
     genesis_values: &GenesisValues,
     cost_models: &CostModels,
-    lookup_reference_script: &dyn Fn(&ScriptHash) -> Option<ReferenceScript>,
+    lookup_reference_script: &dyn Fn(&ScriptHash) -> Option<Arc<ReferenceScript>>,
     era: Era,
 ) -> Result<(), Box<TransactionValidationError>> {
     let inputs = &tx_deltas.consumes;

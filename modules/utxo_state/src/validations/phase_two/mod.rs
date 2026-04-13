@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use acropolis_common::{
     genesis_values::GenesisValues, validation::Phase2ValidationError, CostModels, RedeemerPointer,
@@ -34,7 +35,7 @@ pub fn validate_tx_phase_two(
     cost_models: &CostModels,
     scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
     scripts_provided: &HashMap<ScriptHash, ScriptLang>,
-    lookup_reference_script: &dyn Fn(&ScriptHash) -> Option<ReferenceScript>,
+    lookup_reference_script: &dyn Fn(&ScriptHash) -> Option<Arc<ReferenceScript>>,
 ) -> Result<(), Phase2ValidationError> {
     let scripts_table = build_scripts_table(tx_deltas, utxos, lookup_reference_script);
 
