@@ -3,7 +3,6 @@
 use crate::address::StakeAddress;
 use crate::commands::chain_sync::ChainSyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
-use crate::era_history::EraHistory;
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
 use crate::protocol_params::{Nonce, Nonces, ProtocolParams};
@@ -360,13 +359,6 @@ pub struct SPOStateMessage {
     pub retired_spos: Vec<(PoolId, StakeAddress)>,
 }
 
-/// Era history message published at startup.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EraHistoryMessage {
-    /// Complete era history with system start time.
-    pub era_history: EraHistory,
-}
-
 /// Cardano message enum
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[allow(clippy::large_enum_variant)]
@@ -406,8 +398,6 @@ pub enum CardanoMessage {
 
     // Pots
     Pots(Pots), // Current Pots
-
-    EraHistory(EraHistoryMessage), // Era history with system start time
 }
 
 /// A new block has been announced by some peer
