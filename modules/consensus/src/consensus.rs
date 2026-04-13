@@ -932,41 +932,37 @@ impl ConsensusRuntime {
         force_validation: bool,
     ) {
         loop {
-            tokio::select! {
-                result = block_subscription.read() => {
-                    let Ok((_, message)) = result else {
-                        error!("Block message read failed");
-                        return;
+            let Ok((_, message)) = block_subscription.read().await else {
+                error!("Block message read failed");
+                return;
+            };
+
+            match message.as_ref() {
+                Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
+                    let block_info = if force_validation && self.do_validation {
+                        raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
+                    } else {
+                        raw_blk_info.clone()
                     };
 
-                    match message.as_ref() {
-                        Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
-                            let block_info = if force_validation && self.do_validation {
-                                raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
-                            } else {
-                                raw_blk_info.clone()
-                            };
-
-                            let span = info_span!("consensus", block = block_info.number);
-                            self.handle_block_available_direct(block_info, raw_block.clone())
-                                .instrument(span)
-                                .await;
-                        }
-
-                        Message::Cardano((
-                            _,
-                            CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                        )) => {
-                            self.context
-                                .message_bus
-                                .publish(&self.blocks_proposed_topic, message.clone())
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                        }
-
-                        _ => error!("Unexpected message type: {message:?}"),
-                    }
+                    let span = info_span!("consensus", block = block_info.number);
+                    self.handle_block_available_direct(block_info, raw_block.clone())
+                        .instrument(span)
+                        .await;
                 }
+
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    self.context
+                        .message_bus
+                        .publish(&self.blocks_proposed_topic, message.clone())
+                        .await
+                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
             }
         }
     }
