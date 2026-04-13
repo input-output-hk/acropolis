@@ -1,6 +1,10 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
-use crate::rewards::{calculate_rewards, RewardsResult};
+use crate::rewards::{
+    apply_registration_changes, apply_registration_changes_filtered, calculate_rewards,
+    wait_for_rewards_start_signal,
+};
+use crate::runtime::{BlockStakeAddressUndoRecorder, RewardRuntime, StakeAddressUndoHistory};
 use crate::verifier::Verifier;
 use acropolis_common::{
     caryatid::ValidationContext,
@@ -13,7 +17,7 @@ use acropolis_common::{
         ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, StateQuery,
         StateQueryResponse, TxCertificatesMessage, WithdrawalsMessage,
     },
-    protocol_params::ProtocolParams,
+    protocol_params::{ProtocolParams, ShelleyParams},
     queries::{
         accounts::OptimalPoolSizing,
         get_query_topic,
@@ -36,9 +40,9 @@ use imbl::{HashMap as ImHashMap, OrdMap, OrdSet};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     mem::take,
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex},
 };
-use tokio::task::{spawn_blocking, JoinHandle};
+use tokio::task::spawn_blocking;
 use tracing::{debug, error, info, warn, Level};
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
@@ -64,6 +68,18 @@ impl EpochSnapshots {
         self.set = self.mark.clone();
         self.mark = Arc::new(latest);
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingRewardsPlan {
+    pub rewarded_epoch: u64,
+    pub rewarded_era: Era,
+    pub shelley_params: ShelleyParams,
+    pub stake_rewards: Lovelace,
+    pub performance: Arc<EpochSnapshot>,
+    pub existing_registrations: HashSet<StakeAddress>,
+    pub existing_deregistrations: HashSet<StakeAddress>,
+    pub staking: Arc<EpochSnapshot>,
 }
 
 /// Overall state - stored per block
@@ -101,30 +117,13 @@ pub struct State {
     proposal_refunds: Vec<(StakeAddress, Lovelace)>,
 
     /// Addresses registration changes in current epoch
-    current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
-
-    /// Task for rewards calculation if necessary
-    epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
+    current_epoch_registration_changes: Vec<RegistrationChange>,
 
     /// DReps mapped to all accounts that have ever delegated to them
     /// Required to properly replay PV9 in which there was a DRep deregistration
     /// bug causing all accounts that have ever delegated to the DRep to have their
     /// delegation wiped reguardless of if they were currently delegated to the DRep.
     drep_delegators: OrdMap<DRepCredential, OrdSet<StakeAddress>>,
-
-    /// Signaller to start the above - delayed in early Shelley to replicate bug
-    start_rewards_tx: Option<mpsc::Sender<()>>,
-
-    /// Randomness stabilization window (4k/f slots), computed from protocol params.
-    /// Used to delay the rewards calculation and filter registration changes:
-    /// - `notify_block` waits until `block.epoch_slot >= stability_window_slot` before
-    ///   signalling the rewards task to start
-    /// - `apply_registration_changes_filtered` skips any `RegistrationChange` with
-    ///   `epoch_slot > stability_window_slot`, so only changes before this point
-    ///   affect `addrsRew` (the set of addresses eligible for rewards)
-    /// - Changes after this slot remain in `current_epoch_registration_changes` and
-    ///   are picked up at the next epoch boundary
-    stability_window_slot: u64,
 
     /// Pending MIRs from reserves to be applied at epoch boundary
     /// Key is stake address, value is the amount to add (or in Alonzo+, accumulated sum)
@@ -232,6 +231,88 @@ impl State {
         );
 
         Ok(())
+    }
+
+    fn mutate_stake_address<T, F>(
+        &self,
+        undo: &mut BlockStakeAddressUndoRecorder,
+        stake_address: &StakeAddress,
+        mutate: F,
+    ) -> T
+    where
+        F: FnOnce(&mut StakeAddressMap) -> T,
+    {
+        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        let previous = stake_addresses.get(stake_address);
+        let result = mutate(&mut stake_addresses);
+        let current = stake_addresses.get(stake_address);
+        undo.record_change(stake_address, previous.as_ref(), current.as_ref());
+        result
+    }
+
+    fn mutate_stake_addresses<T, I, F>(
+        &self,
+        undo: &mut BlockStakeAddressUndoRecorder,
+        stake_addresses_to_track: I,
+        mutate: F,
+    ) -> T
+    where
+        I: IntoIterator<Item = StakeAddress>,
+        F: FnOnce(&mut StakeAddressMap) -> T,
+    {
+        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        let previous_states: Vec<(StakeAddress, Option<StakeAddressState>)> =
+            stake_addresses_to_track
+                .into_iter()
+                .map(|stake_address| {
+                    let previous = stake_addresses.get(&stake_address);
+                    (stake_address, previous)
+                })
+                .collect();
+        let result = mutate(&mut stake_addresses);
+        for (stake_address, previous) in previous_states {
+            let current = stake_addresses.get(&stake_address);
+            undo.record_change(&stake_address, previous.as_ref(), current.as_ref());
+        }
+        result
+    }
+
+    fn add_reward_to_registered_account(
+        &self,
+        undo: &mut BlockStakeAddressUndoRecorder,
+        stake_address: &StakeAddress,
+        amount: Lovelace,
+    ) -> bool {
+        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        let Some(stake_address_state) = stake_addresses.get_mut(stake_address) else {
+            return false;
+        };
+
+        if !stake_address_state.registered {
+            return false;
+        }
+
+        if let Err(error) = update_value_with_delta(&mut stake_address_state.rewards, amount as i64)
+        {
+            error!("Adding reward to stake address {}: {error}", stake_address);
+            return false;
+        }
+
+        undo.record_reward_delta(stake_address, -(amount as i64));
+        true
+    }
+
+    fn append_registration_change(&mut self, change: RegistrationChange) {
+        self.current_epoch_registration_changes.push(change.clone());
+    }
+
+    pub(crate) fn rollback_stake_addresses(
+        &self,
+        undo_history: &mut StakeAddressUndoHistory,
+        index: u64,
+    ) {
+        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        undo_history.rollback_to(index, &mut stake_addresses);
     }
 
     /// Get the stake address state for a give stake key
@@ -424,6 +505,7 @@ impl State {
     pub async fn remove_pointer_address_stake(
         &mut self,
         context: Arc<Context<Message>>,
+        undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Result<()> {
         let pointer_values = self.get_pointer_address_values(context.clone()).await?;
         if pointer_values.is_empty() {
@@ -455,36 +537,41 @@ impl State {
             "Removing pointer address stake at Conway boundary"
         );
 
-        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        for (stake_addr, lovelace) in &stake_values {
-            if let Some(sas) = stake_addresses.get_mut(stake_addr) {
-                let old_value = sas.utxo_value;
-                if sas.utxo_value >= *lovelace {
-                    sas.utxo_value -= lovelace;
-                } else {
-                    warn!(
-                        stake_address = %stake_addr,
-                        utxo_value = old_value,
-                        pointer_lovelace = lovelace,
-                        "Pointer address lovelace exceeds utxo_value, setting to 0"
-                    );
-                    sas.utxo_value = 0;
+        self.mutate_stake_addresses(
+            undo,
+            stake_values.keys().cloned().collect::<Vec<_>>(),
+            |stake_addresses| {
+                for (stake_addr, lovelace) in &stake_values {
+                    if let Some(sas) = stake_addresses.get_mut(stake_addr) {
+                        let old_value = sas.utxo_value;
+                        if sas.utxo_value >= *lovelace {
+                            sas.utxo_value -= lovelace;
+                        } else {
+                            warn!(
+                                stake_address = %stake_addr,
+                                utxo_value = old_value,
+                                pointer_lovelace = lovelace,
+                                "Pointer address lovelace exceeds utxo_value, setting to 0"
+                            );
+                            sas.utxo_value = 0;
+                        }
+                        debug!(
+                            stake_address = %stake_addr,
+                            old_value,
+                            subtracted = lovelace,
+                            new_value = sas.utxo_value,
+                            "Subtracted pointer address stake"
+                        );
+                    } else {
+                        warn!(
+                            stake_address = %stake_addr,
+                            lovelace,
+                            "Pointer address resolves to unknown stake address, skipping"
+                        );
+                    }
                 }
-                debug!(
-                    stake_address = %stake_addr,
-                    old_value,
-                    subtracted = lovelace,
-                    new_value = sas.utxo_value,
-                    "Subtracted pointer address stake"
-                );
-            } else {
-                warn!(
-                    stake_address = %stake_addr,
-                    lovelace,
-                    "Pointer address resolves to unknown stake address, skipping"
-                );
-            }
-        }
+            },
+        );
 
         Ok(())
     }
@@ -507,6 +594,8 @@ impl State {
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
+        rewards_runtime: &mut RewardRuntime,
+        undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Result<Vec<StakeRewardDelta>> {
         // At the Allegra hard fork boundary, all Byron redeem (AVVM) UTxOs are cancelled
         // and their value returned to reserves. Query utxo_state for the cancelled amount,
@@ -548,8 +637,9 @@ impl State {
         // Compute the randomness stabilization window (4k/f) from Shelley genesis params.
         // This is when Cardano captures `addrsRew` and starts the rewards calculation.
         let f = &shelley_params.active_slots_coeff;
-        self.stability_window_slot =
-            4 * (shelley_params.security_param as u64) * f.denom() / f.numer();
+        rewards_runtime.set_stability_window_slot(
+            4 * (shelley_params.security_param as u64) * f.denom() / f.numer(),
+        );
 
         // First time into Shelley, fix reserves to max_supply - total_utxos
         // We need to do this because tracking fees - which increase reserves - during Byron
@@ -587,20 +677,15 @@ impl State {
             &self.pots,
             total_non_obft_blocks,
             // Take and clear registration changes
-            std::mem::take(&mut *self.current_epoch_registration_changes.lock().unwrap()),
+            std::mem::take(&mut self.current_epoch_registration_changes),
             // Pass in two-previous epoch snapshot for capture of SPO reward accounts
             self.epoch_snapshots.set.clone(),
         );
         self.epoch_snapshots.push(snapshot);
 
         // Pay the refunds after snapshot, so they don't appear in active_stake
-        reward_deltas.extend(self.pay_pool_refunds());
-        info!("Refunds (entering epoch): {}", self.proposal_refunds.len());
-        reward_deltas.extend(self.pay_proposal_refunds());
-        info!(
-            "Refunds (entering epoch, after pay): {}",
-            self.proposal_refunds.len()
-        );
+        reward_deltas.extend(self.pay_pool_refunds(undo));
+        reward_deltas.extend(self.pay_proposal_refunds(undo));
 
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
@@ -635,12 +720,12 @@ impl State {
         // handle the Shelley bug part!
         let mut registrations: HashSet<StakeAddress> = HashSet::new();
         let mut deregistrations: HashSet<StakeAddress> = HashSet::new();
-        Self::apply_registration_changes(
+        apply_registration_changes(
             &self.epoch_snapshots.set.registration_changes,
             &mut registrations,
             &mut deregistrations,
         );
-        Self::apply_registration_changes(
+        apply_registration_changes(
             &self.epoch_snapshots.mark.registration_changes,
             &mut registrations,
             &mut deregistrations,
@@ -654,56 +739,87 @@ impl State {
             era
         };
 
-        let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
-        let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
-        let stability_window_slot = self.stability_window_slot;
-        self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
-            // Wait for start signal (sent at stability_window_slot into epoch)
-            let _ = start_rewards_rx.recv();
+        rewards_runtime.set_rewards_plan(PendingRewardsPlan {
+            rewarded_epoch: epoch - 1,
+            rewarded_era,
+            shelley_params: shelley_params.clone(),
+            stake_rewards: monetary_change.stake_rewards,
+            performance: performance.clone(),
+            staking: staking.clone(),
+            existing_registrations: registrations.clone(),
+            existing_deregistrations: deregistrations.clone(),
+        });
 
-            // Apply current epoch registration changes up to the stability window.
-            // In Cardano, addrsRew is captured at the stability window, not the epoch boundary.
-            // Accounts that deregister before the stability window won't receive rewards.
-            let current_changes = current_epoch_registration_changes.lock().unwrap();
-            Self::apply_registration_changes_filtered(
-                &current_changes,
-                &mut registrations,
-                &mut deregistrations,
-                Some(stability_window_slot),
-            );
-            drop(current_changes);
+        let (start_rewards_tx, start_rewards_rx) =
+            std::sync::mpsc::channel::<Vec<RegistrationChange>>();
 
-            if tracing::enabled!(Level::DEBUG) {
-                registrations.iter().for_each(|addr| debug!(epoch, "Registration {}", addr));
-                deregistrations.iter().for_each(|addr| debug!(epoch, "Deregistration {}", addr));
-            }
+        let stability_window_slot = rewards_runtime.get_stability_window_slot();
+        self.current_epoch_registration_changes = Vec::new();
+        rewards_runtime.set_epoch_rewards_task(
+            epoch,
+            spawn_blocking(move || {
+                // Wait for start signal (sent at stability_window_slot into epoch)
+                let current_changes = wait_for_rewards_start_signal(start_rewards_rx)?;
 
-            // Calculate reward payouts for previous epoch
-            calculate_rewards(
-                epoch - 1,
-                rewarded_era,
-                performance,
-                staking,
-                &shelley_params,
-                monetary_change.stake_rewards,
-                &registrations,
-                &deregistrations,
-            )
-        }))));
+                // Apply current epoch registration changes up to the stability window.
+                // In Cardano, addrsRew is captured at the stability window, not the epoch boundary.
+                // Accounts that deregister before the stability window won't receive rewards.
+                apply_registration_changes_filtered(
+                    &current_changes,
+                    &mut registrations,
+                    &mut deregistrations,
+                    Some(stability_window_slot),
+                );
+                drop(current_changes);
+
+                if tracing::enabled!(Level::DEBUG) {
+                    registrations.iter().for_each(|addr| debug!(epoch, "Registration {}", addr));
+                    deregistrations
+                        .iter()
+                        .for_each(|addr| debug!(epoch, "Deregistration {}", addr));
+                }
+
+                // Calculate reward payouts for previous epoch
+                calculate_rewards(
+                    epoch - 1,
+                    rewarded_era,
+                    performance,
+                    staking,
+                    &shelley_params,
+                    monetary_change.stake_rewards,
+                    &registrations,
+                    &deregistrations,
+                )
+            }),
+        );
 
         // Delay starting calculation until stability window into epoch, to capture registration
         // changes that affect addrsRew, and also to put them out of reach of rollbacks
-        self.start_rewards_tx = Some(start_rewards_tx);
+        rewards_runtime.set_start_rewards_tx(start_rewards_tx);
 
         // Now retire the SPOs fully
         let retiring: OrdSet<PoolId> = self.retiring_spos.drain(..).collect();
-        {
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        let retiring_delegators = {
+            let stake_addresses = self.stake_addresses.lock().unwrap();
+            retiring
+                .iter()
+                .flat_map(|id| stake_addresses.get_pool_delegator_addresses(id))
+                .collect::<Vec<_>>()
+        };
+        self.mutate_stake_addresses(undo, retiring_delegators.clone(), |stake_addresses| {
             for id in retiring.iter() {
                 info!(epoch, "SPO {id} has retired");
-                stake_addresses.remove_all_delegations_to(id);
             }
-        }
+
+            for stake_address in &retiring_delegators {
+                if let Some(stake_state) = stake_addresses.get_mut(stake_address) {
+                    if stake_state.delegated_spo.is_some_and(|pool_id| retiring.contains(&pool_id))
+                    {
+                        stake_state.delegated_spo = None;
+                    }
+                }
+            }
+        });
 
         self.spos = self
             .spos
@@ -741,62 +857,19 @@ impl State {
         Ok(total_lovelace)
     }
 
-    /// Apply a registration change set to registration/deregistration lists
-    /// registrations gets all registrations still in effect at the end of the changes
-    /// deregistrations likewise for net deregistrations
-    fn apply_registration_changes(
-        changes: &Vec<RegistrationChange>,
-        registrations: &mut HashSet<StakeAddress>,
-        deregistrations: &mut HashSet<StakeAddress>,
-    ) {
-        Self::apply_registration_changes_filtered(changes, registrations, deregistrations, None);
-    }
-
-    /// Apply a registration change set with optional epoch_slot filtering.
-    /// If max_epoch_slot is Some, only changes with epoch_slot <= max_epoch_slot are applied.
-    /// This is used to replicate Cardano's Shelley-era bug where `addrsRew` is captured at 4k/5.
-    fn apply_registration_changes_filtered(
-        changes: &Vec<RegistrationChange>,
-        registrations: &mut HashSet<StakeAddress>,
-        deregistrations: &mut HashSet<StakeAddress>,
-        max_epoch_slot: Option<u64>,
-    ) {
-        for change in changes {
-            // Skip changes that happened after the stability window
-            if let Some(max_slot) = max_epoch_slot {
-                if change.epoch_slot > max_slot {
-                    continue;
-                }
-            }
-
-            match change.kind {
-                RegistrationChangeKind::Registered => {
-                    registrations.insert(change.address.clone());
-                    deregistrations.remove(&change.address);
-                }
-                RegistrationChangeKind::Deregistered => {
-                    registrations.remove(&change.address);
-                    deregistrations.insert(change.address.clone());
-                }
-            };
-        }
-    }
-
     /// Notify of a new block — triggers rewards calculation once we reach the stability window
-    pub fn notify_block(&mut self, block: &BlockInfo) {
-        if let Some(tx) = &self.start_rewards_tx {
-            if block.epoch_slot >= self.stability_window_slot {
-                info!(
-                    "Starting rewards calculation at block {}, epoch slot {}",
-                    block.number, block.epoch_slot
-                );
-                let _ = tx.send(());
-                self.start_rewards_tx = None;
-            }
-        }
+    pub fn notify_block(&mut self, block: &BlockInfo, rewards_runtime: &mut RewardRuntime) {
+        rewards_runtime.notify_block(
+            block.number,
+            block.epoch_slot,
+            &self.current_epoch_registration_changes,
+        );
     }
 
-    fn pay_proposal_refunds(&mut self) -> Vec<StakeRewardDelta> {
+    fn pay_proposal_refunds(
+        &mut self,
+        undo: &mut BlockStakeAddressUndoRecorder,
+    ) -> Vec<StakeRewardDelta> {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
         let refunds = take(&mut self.proposal_refunds);
@@ -820,15 +893,22 @@ impl State {
                 self.proposal_deposits.remove(&reward_account);
             }
 
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            if stake_addresses.is_registered(&reward_account) {
+            let was_registered =
+                self.mutate_stake_address(undo, &reward_account, |stake_addresses| {
+                    if stake_addresses.is_registered(&reward_account) {
+                        stake_addresses.add_to_reward(&reward_account, deposit);
+                        true
+                    } else {
+                        false
+                    }
+                });
+            if was_registered {
                 reward_deltas.push(StakeRewardDelta {
                     stake_address: reward_account.clone(),
                     delta: deposit,
                     reward_type: RewardType::ProposalRefund,
                     pool: PoolId::default(),
                 });
-                stake_addresses.add_to_reward(&reward_account, deposit);
             } else {
                 warn!(
                     "Reward account {} deregistered - paying refund to treasury",
@@ -842,7 +922,10 @@ impl State {
     }
 
     /// Pay pool refunds
-    fn pay_pool_refunds(&mut self) -> Vec<StakeRewardDelta> {
+    fn pay_pool_refunds(
+        &mut self,
+        undo: &mut BlockStakeAddressUndoRecorder,
+    ) -> Vec<StakeRewardDelta> {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
         // Get pool deposit amount from parameters, or default
@@ -865,15 +948,22 @@ impl State {
         // Send them their deposits back
         for (pool, stake_address) in refunds {
             // If their reward account has been deregistered, it goes to Treasury
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            if stake_addresses.is_registered(&stake_address) {
+            let was_registered =
+                self.mutate_stake_address(undo, &stake_address, |stake_addresses| {
+                    if stake_addresses.is_registered(&stake_address) {
+                        stake_addresses.add_to_reward(&stake_address, deposit);
+                        true
+                    } else {
+                        false
+                    }
+                });
+            if was_registered {
                 reward_deltas.push(StakeRewardDelta {
                     stake_address: stake_address.clone(),
                     delta: deposit,
                     reward_type: RewardType::PoolRefund,
                     pool,
                 });
-                stake_addresses.add_to_reward(&stake_address, deposit);
             } else {
                 warn!(
                     "SPO reward account {} deregistered - paying refund to treasury",
@@ -973,7 +1063,7 @@ impl State {
     /// is a no-op because `take()` replaces the pending maps with empty maps on the first call.
     ///
     /// Only registered accounts receive MIRs; deregistered accounts' MIRs stay in the source pot.
-    pub fn apply_pending_mirs(&mut self) {
+    pub fn apply_pending_mirs(&mut self, undo: &mut BlockStakeAddressUndoRecorder) {
         // Apply MIRs from reserves
         if !self.pending_mir_reserves.is_empty() {
             let mut total_applied: i64 = 0;
@@ -981,29 +1071,32 @@ impl State {
             let count = self.pending_mir_reserves.len();
 
             for (stake_address, value) in take(&mut self.pending_mir_reserves) {
-                let mut stake_addresses = self.stake_addresses.lock().unwrap();
-
                 // Only apply MIR if the account is registered
                 // If account deregistered before epoch boundary, MIR stays in reserves
-                if let Some(sas) = stake_addresses.get_mut(&stake_address) {
-                    if sas.registered {
-                        if let Err(e) = update_value_with_delta(&mut sas.rewards, value) {
-                            error!("MIR apply to stake address {}: {e}", stake_address);
-                            continue;
+                let applied = self.mutate_stake_address(undo, &stake_address, |stake_addresses| {
+                    if let Some(sas) = stake_addresses.get_mut(&stake_address) {
+                        if sas.registered {
+                            if let Err(e) = update_value_with_delta(&mut sas.rewards, value) {
+                                error!("MIR apply to stake address {}: {e}", stake_address);
+                                return false;
+                            }
+                            return true;
                         }
-
-                        if let Err(e) = update_value_with_delta(&mut self.pots.reserves, -value) {
-                            error!("MIR apply from reserves: {e}");
-                        }
-
-                        total_applied += value;
-                    } else {
-                        debug!(
-                            "MIR not applied to deregistered account {}, {} stays in reserves",
-                            stake_address, value
-                        );
-                        total_not_registered += value;
+                        return false;
                     }
+                    false
+                });
+                if applied {
+                    if let Err(e) = update_value_with_delta(&mut self.pots.reserves, -value) {
+                        error!("MIR apply from reserves: {e}");
+                    }
+                    total_applied += value;
+                } else if self.get_stake_state(&stake_address).is_some() {
+                    debug!(
+                        "MIR not applied to deregistered account {}, {} stays in reserves",
+                        stake_address, value
+                    );
+                    total_not_registered += value;
                 } else {
                     debug!(
                         "MIR not applied to unknown account {}, {} stays in reserves",
@@ -1026,29 +1119,32 @@ impl State {
             let count = self.pending_mir_treasury.len();
 
             for (stake_address, value) in take(&mut self.pending_mir_treasury) {
-                let mut stake_addresses = self.stake_addresses.lock().unwrap();
-
                 // Only apply MIR if the account is registered
                 // If account deregistered before epoch boundary, MIR stays in treasury
-                if let Some(sas) = stake_addresses.get_mut(&stake_address) {
-                    if sas.registered {
-                        if let Err(e) = update_value_with_delta(&mut sas.rewards, value) {
-                            error!("MIR apply to stake address {}: {e}", stake_address);
-                            continue;
+                let applied = self.mutate_stake_address(undo, &stake_address, |stake_addresses| {
+                    if let Some(sas) = stake_addresses.get_mut(&stake_address) {
+                        if sas.registered {
+                            if let Err(e) = update_value_with_delta(&mut sas.rewards, value) {
+                                error!("MIR apply to stake address {}: {e}", stake_address);
+                                return false;
+                            }
+                            return true;
                         }
-
-                        if let Err(e) = update_value_with_delta(&mut self.pots.treasury, -value) {
-                            error!("MIR apply from treasury: {e}");
-                        }
-
-                        total_applied += value;
-                    } else {
-                        debug!(
-                            "MIR not applied to deregistered account {}, {} stays in treasury",
-                            stake_address, value
-                        );
-                        total_not_registered += value;
+                        return false;
                     }
+                    false
+                });
+                if applied {
+                    if let Err(e) = update_value_with_delta(&mut self.pots.treasury, -value) {
+                        error!("MIR apply from treasury: {e}");
+                    }
+                    total_applied += value;
+                } else if self.get_stake_state(&stake_address).is_some() {
+                    debug!(
+                        "MIR not applied to deregistered account {}, {} stays in treasury",
+                        stake_address, value
+                    );
+                    total_not_registered += value;
                 } else {
                     debug!(
                         "MIR not applied to unknown account {}, {} stays in treasury",
@@ -1125,6 +1221,8 @@ impl State {
         &mut self,
         verifier: &Verifier,
         skip_rewards: bool,
+        rewards_runtime: &mut RewardRuntime,
+        undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Result<(Vec<(PoolId, SPORewards)>, Vec<StakeRewardDelta>)> {
         // Collect stake addresses reward deltas
         let mut spo_rewards: Vec<(PoolId, SPORewards)> = Vec::new();
@@ -1136,72 +1234,74 @@ impl State {
             return Ok((spo_rewards, reward_deltas));
         }
 
-        // Check previous epoch rewards calculation is done
-        let mut task = {
-            match self.epoch_rewards_task.lock() {
-                Ok(mut task) => task.take(),
-                Err(_) => {
-                    error!("Failed to lock epoch rewards task");
-                    None
+        // Check previous epoch rewards calculation is done.
+        let rewards_result = if let Some(task) = rewards_runtime.take_epoch_rewards_task() {
+            match task.await {
+                Ok(Ok(rewards_result)) => {
+                    rewards_runtime.set_epoch_rewards_result(rewards_result.clone());
+                    Some(rewards_result)
+                }
+                Ok(Err(error)) => {
+                    anyhow::bail!("Rewards calculation task failed: {error:#}");
+                }
+                Err(join_error) => {
+                    anyhow::bail!("Rewards task join failed (panic/cancel/abort): {join_error:#}");
                 }
             }
+        } else {
+            None
         };
 
-        // If rewards have been calculated, save the results
-        if let Some(task) = task.take() {
-            if let Ok(Ok(rewards_result)) = task.await {
-                // Pay the rewards
-                let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                let mut filtered_rewards_result = rewards_result.clone();
-                for (spo, rewards) in rewards_result.rewards {
-                    for reward in rewards {
-                        if stake_addresses.is_registered(&reward.account) {
-                            stake_addresses.add_to_reward(&reward.account, reward.amount);
-                            reward_deltas.push(StakeRewardDelta {
-                                stake_address: reward.account.clone(),
-                                delta: reward.amount,
-                                reward_type: reward.rtype.clone(),
-                                pool: reward.pool,
-                            });
-                        } else {
-                            debug!(
-                                "Reward account {} deregistered - paying reward {} to treasury",
-                                reward.account, reward.amount
-                            );
-                            self.pots.treasury += reward.amount;
+        if let Some(rewards_result) = rewards_result {
+            // Pay the rewards
+            let mut filtered_rewards_result = rewards_result.clone();
+            for (spo, rewards) in rewards_result.rewards {
+                for reward in rewards {
+                    if self.add_reward_to_registered_account(undo, &reward.account, reward.amount) {
+                        reward_deltas.push(StakeRewardDelta {
+                            stake_address: reward.account.clone(),
+                            delta: reward.amount,
+                            reward_type: reward.rtype.clone(),
+                            pool: reward.pool,
+                        });
+                    } else {
+                        debug!(
+                            "Reward account {} deregistered - paying reward {} to treasury",
+                            reward.account, reward.amount
+                        );
+                        self.pots.treasury += reward.amount;
 
-                            // Remove from filtered version for comparison and result
-                            if let Some(rewards) = filtered_rewards_result.rewards.get_mut(&spo) {
-                                rewards.retain(|r| r.account != reward.account);
-                            }
+                        // Remove from filtered version for comparison and result
+                        if let Some(rewards) = filtered_rewards_result.rewards.get_mut(&spo) {
+                            rewards.retain(|r| r.account != reward.account);
+                        }
 
-                            // Only subtract from spo_rewards if it was originally counted
-                            // (reward.registered was true in calculate_rewards)
-                            if let Some((_, spor)) = filtered_rewards_result
-                                .spo_rewards
-                                .iter_mut()
-                                .find(|(fspo, _)| *fspo == spo)
-                            {
-                                spor.total_rewards -= reward.amount;
-                                if reward.rtype == RewardType::Leader {
-                                    spor.operator_rewards -= reward.amount;
-                                }
+                        // Only subtract from spo_rewards if it was originally counted
+                        // (reward.registered was true in calculate_rewards)
+                        if let Some((_, spor)) = filtered_rewards_result
+                            .spo_rewards
+                            .iter_mut()
+                            .find(|(fspo, _)| *fspo == spo)
+                        {
+                            spor.total_rewards -= reward.amount;
+                            if reward.rtype == RewardType::Leader {
+                                spor.operator_rewards -= reward.amount;
                             }
                         }
                     }
                 }
-
-                // Verify them
-                verifier.verify_rewards(&filtered_rewards_result);
-
-                // save SPO rewards
-                spo_rewards = filtered_rewards_result.spo_rewards.clone();
-
-                // Adjust the reserves - subtract total paid and unpaid
-                // (unpaid rewards are added to treasury in the payment loop above)
-                self.pots.reserves -= rewards_result.total_paid + rewards_result.total_unpaid;
             }
-        };
+
+            // Verify them
+            verifier.verify_rewards(&filtered_rewards_result);
+
+            // save SPO rewards
+            spo_rewards = filtered_rewards_result.spo_rewards.clone();
+
+            // Adjust the reserves - subtract total paid and unpaid
+            // (unpaid rewards are added to treasury in the payment loop above)
+            self.pots.reserves -= rewards_result.total_paid + rewards_result.total_unpaid;
+        }
 
         Ok((spo_rewards, reward_deltas))
     }
@@ -1216,6 +1316,8 @@ impl State {
         ea_msg: &EpochActivityMessage,
         block_info: &BlockInfo,
         verifier: &Verifier,
+        rewards_runtime: &mut RewardRuntime,
+        undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Result<Vec<StakeRewardDelta>> {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
@@ -1250,6 +1352,8 @@ impl State {
                 ea_msg.total_fees,
                 spo_blocks,
                 verifier,
+                rewards_runtime,
+                undo,
             )
             .await?,
         );
@@ -1345,11 +1449,13 @@ impl State {
         deposit: Option<Lovelace>,
         epoch_slot: u64,
         ctx: &mut ValidationContext,
+        undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Option<StakeRegistrationOutcome> {
         debug!("Register stake address {stake_address}");
         // Stake addresses can be registered after being used in UTXOs
-        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        if stake_addresses.register_stake_address(stake_address) {
+        if self.mutate_stake_address(undo, stake_address, |stake_addresses| {
+            stake_addresses.register_stake_address(stake_address)
+        }) {
             // Account for the deposit
             let deposit = match deposit {
                 Some(deposit) => deposit,
@@ -1366,7 +1472,7 @@ impl State {
             self.pots.deposits += deposit;
 
             // Add to registration changes only on success (consistent with deregister)
-            self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
+            self.append_registration_change(RegistrationChange {
                 address: stake_address.clone(),
                 kind: RegistrationChangeKind::Registered,
                 epoch_slot,
@@ -1391,12 +1497,14 @@ impl State {
         refund: Option<Lovelace>,
         epoch_slot: u64,
         ctx: &mut ValidationContext,
+        undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Option<StakeRegistrationOutcome> {
         debug!("Deregister stake address {stake_address}");
 
         // Check if it existed
-        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        if stake_addresses.deregister_stake_address(stake_address) {
+        if self.mutate_stake_address(undo, stake_address, |stake_addresses| {
+            stake_addresses.deregister_stake_address(stake_address)
+        }) {
             // Account for the deposit, if registered before
             // TODO:
             // Need to store deposit amount per stake address
@@ -1417,7 +1525,7 @@ impl State {
             self.pots.deposits -= refund_amount;
 
             // Add to registration changes with epoch_slot from the block
-            self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
+            self.append_registration_change(RegistrationChange {
                 address: stake_address.clone(),
                 kind: RegistrationChangeKind::Deregistered,
                 epoch_slot,
@@ -1436,10 +1544,16 @@ impl State {
     }
 
     /// Record a stake delegation
-    fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId) {
-        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+    fn record_stake_delegation(
+        &mut self,
+        stake_address: &StakeAddress,
+        spo: &PoolId,
+        undo: &mut BlockStakeAddressUndoRecorder,
+    ) {
         debug!("Delegation of {} to {}", stake_address, spo);
-        stake_addresses.record_stake_delegation(stake_address, spo);
+        self.mutate_stake_address(undo, stake_address, |stake_addresses| {
+            stake_addresses.record_stake_delegation(stake_address, spo);
+        });
     }
 
     /// Record a DRep registration
@@ -1452,11 +1566,13 @@ impl State {
         &mut self,
         stake_address: &StakeAddress,
         drep: &DRepChoice,
+        undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Result<()> {
-        let previous_drep = {
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            stake_addresses.record_drep_delegation(stake_address, drep)?
-        };
+        let mut previous_drep = Ok(None);
+        self.mutate_stake_address(undo, stake_address, |stake_addresses| {
+            previous_drep = stake_addresses.record_drep_delegation(stake_address, drep);
+        });
+        let previous_drep = previous_drep?;
 
         // In PV9 there are 2 cases we need to handle on delegation:
         // 1. Delegated to a real DRep
@@ -1482,7 +1598,11 @@ impl State {
     }
 
     /// Record a DRep deregistration
-    fn record_drep_deregistration(&mut self, drep: &DRepCredential) {
+    fn record_drep_deregistration(
+        &mut self,
+        drep: &DRepCredential,
+        undo: &mut BlockStakeAddressUndoRecorder,
+    ) {
         self.dreps.remove(drep);
 
         // In PV9 we need to remove the current delegation of all accounts that have ever delegated to
@@ -1490,16 +1610,24 @@ impl State {
         // the DRep).
         if self.is_chang() {
             if let Some(delegators) = self.drep_delegators.remove(drep) {
-                let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                stake_addresses.remove_delegators_from_drep(delegators);
+                self.mutate_stake_addresses(
+                    undo,
+                    delegators.iter().cloned().collect::<Vec<_>>(),
+                    |stake_addresses| {
+                        stake_addresses.remove_delegators_from_drep(delegators);
+                    },
+                );
             }
         } else {
             // Clear PV9 historical delegators map if not empty
             if !self.drep_delegators.is_empty() {
                 self.drep_delegators = OrdMap::new()
             }
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            stake_addresses.deregister_drep(drep);
+            let delegators =
+                self.stake_addresses.lock().unwrap().get_drep_delegator_addresses(drep);
+            self.mutate_stake_addresses(undo, delegators, |stake_addresses| {
+                stake_addresses.deregister_drep(drep);
+            });
         }
     }
 
@@ -1513,6 +1641,7 @@ impl State {
         epoch_slot: u64,
         era: Era,
         ctx: &mut ValidationContext,
+        undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Result<Vec<StakeRegistrationUpdate>> {
         let mut stake_registration_updates: Vec<StakeRegistrationUpdate> = Vec::new();
 
@@ -1525,7 +1654,9 @@ impl State {
 
             match &tx_cert.cert {
                 TxCertificate::StakeRegistration(reg) => {
-                    if let Some(outcome) = self.register_stake_address(reg, None, epoch_slot, ctx) {
+                    if let Some(outcome) =
+                        self.register_stake_address(reg, None, epoch_slot, ctx, undo)
+                    {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
@@ -1535,7 +1666,7 @@ impl State {
 
                 TxCertificate::StakeDeregistration(dreg) => {
                     if let Some(outcome) =
-                        self.deregister_stake_address(dreg, None, epoch_slot, ctx)
+                        self.deregister_stake_address(dreg, None, epoch_slot, ctx, undo)
                     {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1554,6 +1685,7 @@ impl State {
                         Some(reg.deposit),
                         epoch_slot,
                         ctx,
+                        undo,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1568,6 +1700,7 @@ impl State {
                         Some(dreg.refund),
                         epoch_slot,
                         ctx,
+                        undo,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1577,16 +1710,24 @@ impl State {
                 }
 
                 TxCertificate::StakeDelegation(delegation) => {
-                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
+                    self.record_stake_delegation(
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        undo,
+                    );
                 }
 
                 TxCertificate::VoteDelegation(delegation) => {
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep, undo)?;
                 }
 
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
-                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
+                    self.record_stake_delegation(
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        undo,
+                    );
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep, undo)?;
                 }
 
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
@@ -1595,13 +1736,18 @@ impl State {
                         Some(delegation.deposit),
                         epoch_slot,
                         ctx,
+                        undo,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
                         });
                     }
-                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
+                    self.record_stake_delegation(
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        undo,
+                    );
                 }
 
                 TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
@@ -1610,13 +1756,14 @@ impl State {
                         Some(delegation.deposit),
                         epoch_slot,
                         ctx,
+                        undo,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
                         });
                     }
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep, undo)?;
                 }
 
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
@@ -1625,6 +1772,7 @@ impl State {
                         Some(delegation.deposit),
                         epoch_slot,
                         ctx,
+                        undo,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1632,8 +1780,12 @@ impl State {
                         });
                     }
 
-                    self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
+                    self.record_stake_delegation(
+                        &delegation.stake_address,
+                        &delegation.operator,
+                        undo,
+                    );
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep, undo)?;
                 }
 
                 TxCertificate::DRepRegistration(reg) => {
@@ -1641,7 +1793,7 @@ impl State {
                 }
 
                 TxCertificate::DRepDeregistration(dereg) => {
-                    self.record_drep_deregistration(&dereg.credential);
+                    self.record_drep_deregistration(&dereg.credential, undo);
                 }
 
                 _ => (),
@@ -1656,16 +1808,18 @@ impl State {
         &mut self,
         withdrawals_msg: &WithdrawalsMessage,
         ctx: &mut ValidationContext,
+        undo: &mut BlockStakeAddressUndoRecorder,
     ) {
         for withdrawal in withdrawals_msg.withdrawals.iter() {
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
             debug!(
                 "Withdrawal: from {}, tx {}, amount {}",
                 withdrawal.address, withdrawal.tx_identifier, withdrawal.value
             );
             ctx.handle(
                 "process_withdrawal",
-                stake_addresses.process_withdrawal(withdrawal),
+                self.mutate_stake_address(undo, &withdrawal.address, |stake_addresses| {
+                    stake_addresses.process_withdrawal(withdrawal)
+                }),
             );
         }
     }
@@ -1675,13 +1829,15 @@ impl State {
         &mut self,
         deltas_msg: &StakeAddressDeltasMessage,
         ctx: &mut ValidationContext,
+        undo: &mut BlockStakeAddressUndoRecorder,
     ) {
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
             ctx.handle(
                 "process_stake_delta",
-                stake_addresses.process_stake_delta(delta),
+                self.mutate_stake_address(undo, &delta.stake_address, |stake_addresses| {
+                    stake_addresses.process_stake_delta(delta)
+                }),
             );
         }
     }
@@ -1728,6 +1884,7 @@ impl State {
     pub fn handle_governance_outcomes(
         &mut self,
         outcomes_msg: &GovernanceOutcomesMessage,
+        undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Result<Vec<StakeRewardDelta>> {
         for outcome in &outcomes_msg.conway_outcomes {
             let proposal = &outcome.voting.procedure;
@@ -1747,8 +1904,9 @@ impl State {
                             self.pots.treasury = self.pots.treasury.saturating_sub(*amount);
 
                             // Credit to reward account
-                            let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                            stake_addresses.add_to_reward(&reward_account, *amount);
+                            self.mutate_stake_address(undo, &reward_account, |stake_addresses| {
+                                stake_addresses.add_to_reward(&reward_account, *amount);
+                            });
                             info!(
                                 "Treasury withdrawal: {} lovelace ({} ADA) to {}",
                                 amount,
@@ -1775,7 +1933,7 @@ impl State {
         }
 
         let mut reward_deltas = Vec::new();
-        reward_deltas.extend(self.pay_proposal_refunds());
+        reward_deltas.extend(self.pay_proposal_refunds(undo));
         info!(
             "Refunds: {}, rewards: {}",
             self.proposal_refunds.len(),
@@ -1829,6 +1987,7 @@ mod tests {
     use acropolis_common::messages::BootstrapPotDeltas;
     use acropolis_common::queries::accounts::AccountsStateQueryResponse;
     use acropolis_common::queries::errors::QueryError;
+    use acropolis_common::state_history::{StateHistory, StateHistoryStore};
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
         Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds,
@@ -1921,9 +2080,10 @@ mod tests {
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         let mut ctx = create_validation_context();
+        let mut undo = BlockStakeAddressUndoRecorder::default();
 
         // Register first
-        state.register_stake_address(&stake_address, None, 0, &mut ctx);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut undo);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1940,14 +2100,14 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg, &mut ctx);
+        state.handle_stake_deltas(&msg, &mut ctx, &mut undo);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 42);
         }
 
-        state.handle_stake_deltas(&msg, &mut ctx);
+        state.handle_stake_deltas(&msg, &mut ctx, &mut undo);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1955,6 +2115,15 @@ mod tests {
         }
 
         ctx.get_validation().as_result().unwrap();
+    }
+
+    #[test]
+    fn rewards_worker_start_signal_returns_error_when_cancelled() {
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<RegistrationChange>>();
+        drop(tx);
+
+        let error = wait_for_rewards_start_signal(rx).unwrap_err();
+        assert!(error.to_string().contains("start cancelled"));
     }
 
     #[test]
@@ -1971,6 +2140,7 @@ mod tests {
     fn spdd_from_delegation_with_utxo_values_and_pledge() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
+        let mut undo = BlockStakeAddressUndoRecorder::default();
 
         let spo1 = test_keyhash(0x01).into();
         let spo2 = test_keyhash(0x02).into();
@@ -2018,12 +2188,12 @@ mod tests {
 
         // Delegate
         let addr1 = create_address(&[0x11]);
-        state.register_stake_address(&addr1, None, 0, &mut ctx);
-        state.record_stake_delegation(&addr1, &spo1);
+        state.register_stake_address(&addr1, None, 0, &mut ctx, &mut undo);
+        state.record_stake_delegation(&addr1, &spo1, &mut undo);
 
         let addr2 = create_address(&[0x12]);
-        state.register_stake_address(&addr2, None, 0, &mut ctx);
-        state.record_stake_delegation(&addr2, &spo2);
+        state.register_stake_address(&addr2, None, 0, &mut ctx, &mut undo);
+        state.record_stake_delegation(&addr2, &spo2, &mut undo);
 
         // Put some value in
         let msg1 = StakeAddressDeltasMessage {
@@ -2035,7 +2205,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg1, &mut ctx);
+        state.handle_stake_deltas(&msg1, &mut ctx, &mut undo);
 
         let msg2 = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -2046,7 +2216,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg2, &mut ctx);
+        state.handle_stake_deltas(&msg2, &mut ctx, &mut undo);
 
         // Get the SPDD
         let spdd = state.generate_spdd();
@@ -2119,13 +2289,14 @@ mod tests {
     fn mir_transfers_to_stake_addresses() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
+        let mut undo = BlockStakeAddressUndoRecorder::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         // Bootstrap with some in reserves
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(&stake_address, None, 0, &mut ctx);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut undo);
 
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -2135,7 +2306,7 @@ mod tests {
                 delta: 99,
             }],
         };
-        state.handle_stake_deltas(&msg, &mut ctx);
+        state.handle_stake_deltas(&msg, &mut ctx, &mut undo);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -2155,7 +2326,7 @@ mod tests {
         };
 
         state.pay_mir(&mir, Era::Shelley);
-        state.apply_pending_mirs(); // Apply accumulated MIRs
+        state.apply_pending_mirs(&mut undo); // Apply accumulated MIRs
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(state.pots.treasury, 0);
         assert_eq!(state.pots.deposits, 2_000_000); // Paid deposit
@@ -2171,13 +2342,14 @@ mod tests {
     fn withdrawal_transfers_from_stake_addresses() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
+        let mut undo = BlockStakeAddressUndoRecorder::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         // Bootstrap with some in reserves
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(&stake_address, None, 0, &mut ctx);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut undo);
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
                 stake_address: stake_address.clone(),
@@ -2187,7 +2359,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg, &mut ctx);
+        state.handle_stake_deltas(&msg, &mut ctx, &mut undo);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -2205,7 +2377,7 @@ mod tests {
         };
 
         state.pay_mir(&mir, Era::Shelley);
-        state.apply_pending_mirs(); // Apply accumulated MIRs
+        state.apply_pending_mirs(&mut undo); // Apply accumulated MIRs
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -2223,7 +2395,7 @@ mod tests {
             }],
         };
 
-        state.handle_withdrawals(&withdrawals, &mut ctx);
+        state.handle_withdrawals(&withdrawals, &mut ctx, &mut undo);
 
         let stake_addresses = state.stake_addresses.lock().unwrap();
         let sas = stake_addresses.get(&stake_address).unwrap();
@@ -2235,13 +2407,14 @@ mod tests {
     fn mir_not_applied_to_deregistered_account() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
+        let mut undo = BlockStakeAddressUndoRecorder::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         // Bootstrap with some in reserves
         state.pots.reserves = 100;
 
         // Register stake address
-        state.register_stake_address(&stake_address, None, 0, &mut ctx);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut undo);
 
         // Queue a MIR for this account
         let mir = MoveInstantaneousReward {
@@ -2251,10 +2424,10 @@ mod tests {
         state.pay_mir(&mir, Era::Shelley);
 
         // Deregister the account BEFORE applying instant rewards (simulates deregistration during epoch)
-        state.deregister_stake_address(&stake_address, None, 100, &mut ctx);
+        state.deregister_stake_address(&stake_address, None, 100, &mut ctx, &mut undo);
 
         // Now apply instant rewards at "epoch boundary"
-        state.apply_pending_mirs();
+        state.apply_pending_mirs(&mut undo);
 
         // MIR should NOT have been applied - reserves should be unchanged
         assert_eq!(state.pots.reserves, 100);
@@ -2277,6 +2450,7 @@ mod tests {
     fn drdd_respects_different_delegations() -> Result<()> {
         let mut state = State::default();
         let mut ctx = create_validation_context();
+        let mut undo = BlockStakeAddressUndoRecorder::default();
 
         let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
         state.dreps.insert(drep_addr_cred.clone(), 1_000_000);
@@ -2360,6 +2534,7 @@ mod tests {
             0,
             Era::Shelley,
             &mut ctx,
+            &mut undo,
         )?;
 
         let deltas = vec![
@@ -2388,7 +2563,7 @@ mod tests {
                 delta: 100_000,
             },
         ];
-        state.handle_stake_deltas(&StakeAddressDeltasMessage { deltas }, &mut ctx);
+        state.handle_stake_deltas(&StakeAddressDeltasMessage { deltas }, &mut ctx, &mut undo);
 
         let drdd = state.generate_drdd();
         assert_eq!(
@@ -2462,5 +2637,49 @@ mod tests {
             state.protocol_parameters.unwrap().conway.unwrap().pool_voting_thresholds,
             params.conway.unwrap().pool_voting_thresholds
         );
+    }
+
+    #[test]
+    fn state_history_and_undo_log_restore_stake_addresses_on_rollback() {
+        let mut history =
+            StateHistory::<State>::new("AccountsState", StateHistoryStore::default_block_store());
+        let mut runtime = crate::runtime::AccountsRuntime::default();
+        let mut state = State::default();
+        let mut ctx = create_validation_context();
+        let stake_address = create_address(&STAKE_KEY_HASH);
+
+        let mut block_one_undo = BlockStakeAddressUndoRecorder::default();
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut block_one_undo);
+        history.commit(1, state.clone());
+        runtime.stake_address_undo_history.commit(1, block_one_undo);
+
+        let mut state = history.get_current_state();
+        let mut block_two_undo = BlockStakeAddressUndoRecorder::default();
+        state.handle_stake_deltas(
+            &StakeAddressDeltasMessage {
+                deltas: vec![StakeAddressDelta {
+                    stake_address: stake_address.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 42,
+                }],
+            },
+            &mut ctx,
+            &mut block_two_undo,
+        );
+        history.commit(2, state.clone());
+        runtime.stake_address_undo_history.commit(2, block_two_undo);
+
+        let current = history.get_current_state();
+        assert_eq!(
+            current.get_stake_state(&stake_address).unwrap().utxo_value,
+            42
+        );
+
+        current.rollback_stake_addresses(&mut runtime.stake_address_undo_history, 2);
+        let rolled_back = history.get_rolled_back_state(2);
+        let rolled_back_state = rolled_back.get_stake_state(&stake_address).unwrap();
+        assert_eq!(rolled_back_state.utxo_value, 0);
+        assert!(rolled_back_state.registered);
     }
 }

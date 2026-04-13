@@ -4,7 +4,7 @@
 use acropolis_codec::map_to_block_era;
 use acropolis_common::{
     commands::chain_sync::ChainSyncCommand,
-    configuration::{StartupMode, SyncMode},
+    configuration::{get_string_flag, StartupMode, SyncMode},
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage},
     BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, Point,
@@ -39,19 +39,25 @@ const DEFAULT_BLOCK_PUBLISH_TOPIC: (&str, &str) =
     ("block-publish-topic", "cardano.block.available");
 const DEFAULT_SYNC_COMMAND_TOPIC: (&str, &str) = ("completion-topic", "cardano.sync.command");
 
-const DEFAULT_AGGREGATOR_URL: &str =
-    "https://aggregator.release-mainnet.api.mithril.network/aggregator";
-const DEFAULT_GENESIS_KEY: &str = r#"
+const DEFAULT_AGGREGATOR_URL: (&str, &str) = (
+    "aggregator-url",
+    "https://aggregator.release-mainnet.api.mithril.network/aggregator",
+);
+const DEFAULT_GENESIS_KEY: (&str, &str) = (
+    "genesis-key",
+    r#"
 5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32
 372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133
-382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"#;
+382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"#,
+);
 const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
 const DEFAULT_STOP: (&str, PauseType) = ("stop", PauseType::NoPause);
 #[cfg(not(target_env = "msvc"))]
 const DEFAULT_PROFILE: (&str, PauseType) = ("profile", PauseType::NoPause);
 const DEFAULT_DOWNLOAD_MAX_AGE: &str = "download-max-age";
 const DEFAULT_DIRECTORY: &str = "../../modules/mithril_snapshot_fetcher/downloads";
-const DEFAULT_NETWORK_NAME: &str = "mainnet";
+// TODO: Read network name from genesis message
+const DEFAULT_NETWORK_NAME: (&str, &str) = ("startup.network-name", "mainnet");
 const SNAPSHOT_METADATA_FILE: &str = "snapshot_metadata.json";
 
 /// Mithril feedback receiver
@@ -127,9 +133,7 @@ impl MithrilSnapshotFetcher {
     /// Can be overridden with the `directory` config key.
     fn resolve_directory(config: &Config) -> String {
         config.get_string("directory").unwrap_or_else(|_| {
-            let network = config
-                .get_string("startup.network-name")
-                .unwrap_or(DEFAULT_NETWORK_NAME.to_string());
+            let network = get_string_flag(config, DEFAULT_NETWORK_NAME);
             format!("{DEFAULT_DIRECTORY}/{network}")
         })
     }
@@ -193,10 +197,8 @@ impl MithrilSnapshotFetcher {
 
     /// Fetch and unpack a snapshot
     async fn download_snapshot(config: Arc<Config>) -> Result<()> {
-        let aggregator_url =
-            config.get_string("aggregator-url").unwrap_or(DEFAULT_AGGREGATOR_URL.to_string());
-        let genesis_key =
-            config.get_string("genesis-key").unwrap_or(DEFAULT_GENESIS_KEY.to_string());
+        let aggregator_url = get_string_flag(&config, DEFAULT_AGGREGATOR_URL);
+        let genesis_key = get_string_flag(&config, DEFAULT_GENESIS_KEY);
         let directory = Self::resolve_directory(&config);
         let snapshot_metadata_path = Path::new(&directory).join(SNAPSHOT_METADATA_FILE);
 
@@ -453,17 +455,14 @@ impl MithrilSnapshotFetcher {
             return Ok(());
         }
 
-        let bootstrapped_subscribe_topic = config
-            .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
+        let bootstrapped_subscribe_topic =
+            get_string_flag(&config, DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC);
         info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
 
         let mut bootstrapped_subscription =
             context.subscribe(&bootstrapped_subscribe_topic).await?;
         let mut sync_command_subscription = if StartupMode::from_config(&config).is_snapshot() {
-            let sync_command_topic = config
-                .get_string(DEFAULT_SYNC_COMMAND_TOPIC.0)
-                .unwrap_or(DEFAULT_SYNC_COMMAND_TOPIC.1.to_string());
+            let sync_command_topic = get_string_flag(&config, DEFAULT_SYNC_COMMAND_TOPIC);
 
             Some(context.subscribe(&sync_command_topic).await?)
         } else {

@@ -157,21 +157,21 @@ pub fn map_scripts_witnesses(tx: &MultiEraTx) -> Vec<(ScriptHash, ScriptLang)> {
     for script in tx.plutus_v1_scripts() {
         scripts_provided.push((
             ScriptHash::from(*script.compute_hash()),
-            ScriptLang::PlutusV1,
+            ScriptLang::plutus_v1(),
         ));
     }
 
     for script in tx.plutus_v2_scripts() {
         scripts_provided.push((
             ScriptHash::from(*script.compute_hash()),
-            ScriptLang::PlutusV2,
+            ScriptLang::plutus_v2(),
         ));
     }
 
     for script in tx.plutus_v3_scripts() {
         scripts_provided.push((
             ScriptHash::from(*script.compute_hash()),
-            ScriptLang::PlutusV3,
+            ScriptLang::plutus_v3(),
         ));
     }
 

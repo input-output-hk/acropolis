@@ -67,7 +67,6 @@ grpc-bind-address = "0.0.0.0:50051"
 # Subscriptions needed for validation
 bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
 protocol-parameters-subscribe-topic = "cardano.protocol.parameters"
-phase2-enabled = false
 
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"

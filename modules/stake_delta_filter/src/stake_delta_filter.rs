@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{conf_enum, get_bool_flag, get_string_flag, StartupMode},
     declare_cardano_reader,
     messages::{
         AddressDeltasMessage, CardanoMessage, Message, StateQuery, StateQueryResponse,
@@ -21,7 +21,6 @@ use acropolis_common::{
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
-use serde::Deserialize;
 use std::{path::Path, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
@@ -64,6 +63,7 @@ const DEFAULT_CACHE_MODE: (&str, CacheMode) = ("cache-mode", CacheMode::Predefin
 const DEFAULT_WRITE_FULL_CACHE: (&str, bool) = ("write-full-cache", false);
 
 /// Network: currently only Main/Test. Parameter is necessary to distinguish caches.
+/// TODO: Read NetworkId from genesis message
 const DEFAULT_NETWORK: (&str, NetworkId) = ("network", NetworkId::Mainnet);
 
 /// Stake Delta Filter module
@@ -105,26 +105,14 @@ impl StakeDeltaFilterParams {
         format!("{:?}", self.network)
     }
 
-    fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
-        config.get_string(keydef.0).unwrap_or(keydef.1.to_string())
-    }
-
-    fn conf_enum<'a, T: Deserialize<'a>>(config: &Arc<Config>, keydef: (&str, T)) -> Result<T> {
-        if config.get_string(keydef.0).is_ok() {
-            config.get::<T>(keydef.0).map_err(|e| anyhow!("cannot parse {} value: {e}", keydef.0))
-        } else {
-            Ok(keydef.1)
-        }
-    }
-
     fn init(cfg: Arc<Config>) -> Result<Arc<Self>> {
         let params = Self {
-            stake_address_delta_topic: Self::conf(&cfg, DEFAULT_STAKE_ADDRESS_DELTA_TOPIC),
-            validation_topic: Self::conf(&cfg, DEFAULT_VALIDATION_TOPIC),
-            cache_dir: Self::conf(&cfg, DEFAULT_CACHE_DIR),
-            cache_mode: Self::conf_enum::<CacheMode>(&cfg, DEFAULT_CACHE_MODE)?,
-            write_full_cache: Self::conf_enum::<bool>(&cfg, DEFAULT_WRITE_FULL_CACHE)?,
-            network: Self::conf_enum::<NetworkId>(&cfg, DEFAULT_NETWORK)?,
+            stake_address_delta_topic: get_string_flag(&cfg, DEFAULT_STAKE_ADDRESS_DELTA_TOPIC),
+            validation_topic: get_string_flag(&cfg, DEFAULT_VALIDATION_TOPIC),
+            cache_dir: get_string_flag(&cfg, DEFAULT_CACHE_DIR),
+            cache_mode: conf_enum::<CacheMode>(&cfg, DEFAULT_CACHE_MODE)?,
+            write_full_cache: get_bool_flag(&cfg, DEFAULT_WRITE_FULL_CACHE),
+            network: conf_enum::<NetworkId>(&cfg, DEFAULT_NETWORK)?,
         };
 
         info!("Cache mode {:?}", params.cache_mode);

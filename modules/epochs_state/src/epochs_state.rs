@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{get_string_flag, StartupMode},
     declare_cardano_reader,
     messages::{
         BlockTxsMessage, CardanoMessage, EpochBootstrapMessage, GenesisCompleteMessage, Message,
@@ -288,7 +288,8 @@ impl EpochsState {
             }
 
             // Commit the new state
-            if let Some(block_info) = ctx.get_current_block_opt() {
+            if primary.message().is_some() {
+                let block_info = primary.block_info();
                 if block_info.intent.do_validation() {
                     ctx.publish().await;
                 }
@@ -305,31 +306,23 @@ impl EpochsState {
         let txs_reader = TxsReader::new(&context, &config).await?;
         let block_reader = BlockReader::new(&context, &config).await?;
 
-        let snapshot_subscribe_topic = config
-            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+        let snapshot_subscribe_topic = get_string_flag(&config, DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC);
         info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
 
         // Publish topic
-        let epoch_activity_publish_topic = config
-            .get_string(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.0)
-            .unwrap_or(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.1.to_string());
+        let epoch_activity_publish_topic =
+            get_string_flag(&config, DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC);
         info!("Publishing EpochActivityMessage on '{epoch_activity_publish_topic}'");
 
-        let epoch_nonce_publish_topic = config
-            .get_string(DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC.0)
-            .unwrap_or(DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC.1.to_string());
+        let epoch_nonce_publish_topic = get_string_flag(&config, DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC);
         info!("Publishing EpochNonceMessage on '{epoch_nonce_publish_topic}'");
 
-        let validation_outcome_topic = config
-            .get_string(DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC.0)
-            .unwrap_or(DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC.1.to_string());
+        let validation_outcome_topic =
+            get_string_flag(&config, DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC);
         info!("Publishing validation outcomes on '{validation_outcome_topic}'");
 
         // query topic
-        let epochs_query_topic = config
-            .get_string(DEFAULT_EPOCHS_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_EPOCHS_QUERY_TOPIC.1.to_string());
+        let epochs_query_topic = get_string_flag(&config, DEFAULT_EPOCHS_QUERY_TOPIC);
         info!("Creating query handler on '{}'", epochs_query_topic);
 
         // state history

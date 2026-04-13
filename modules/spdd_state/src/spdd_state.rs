@@ -1,6 +1,7 @@
 //! Acropolis SPDD state module for Caryatid
 //! Stores historical stake pool delegation distributions
 use acropolis_common::caryatid::{PrimaryRead, RollbackWrapper};
+use acropolis_common::configuration::{get_bool_flag, get_string_flag};
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::SPOStakeDistributionMessage;
 use acropolis_common::queries::errors::QueryError;
@@ -73,18 +74,14 @@ impl SPDDState {
         // Get configuration
 
         // REST topic (not included in BF)
-        let handle_spdd_topic = config
-            .get_string(DEFAULT_HANDLE_SPDD_TOPIC.0)
-            .unwrap_or(DEFAULT_HANDLE_SPDD_TOPIC.1.to_string());
+        let handle_spdd_topic = get_string_flag(&config, DEFAULT_HANDLE_SPDD_TOPIC);
         info!("Creating request handler on '{}'", handle_spdd_topic);
 
         // Query topic
-        let spdd_query_topic = config
-            .get_string(DEFAULT_SPDD_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_SPDD_QUERY_TOPIC.1.to_string());
+        let spdd_query_topic = get_string_flag(&config, DEFAULT_SPDD_QUERY_TOPIC);
         info!("Creating query handler on '{}'", spdd_query_topic);
 
-        let store_spdd = config.get_bool(DEFAULT_STORE_SPDD.0).unwrap_or(DEFAULT_STORE_SPDD.1);
+        let store_spdd = get_bool_flag(&config, DEFAULT_STORE_SPDD);
 
         let history_opt = if store_spdd {
             let history = Arc::new(Mutex::new(StateHistory::<State>::new(

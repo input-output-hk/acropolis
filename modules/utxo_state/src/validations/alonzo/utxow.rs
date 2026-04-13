@@ -32,7 +32,7 @@ pub fn get_input_datum_hashes(
                     match utxo.datum {
                         None => {
                             // only PlutusV3 doesn't require datum
-                            if script_lang != &ScriptLang::PlutusV3 {
+                            if script_lang != &ScriptLang::plutus_v3() {
                                 return Err(Box::new(
                                     UTxOWValidationError::UnspendableUTxONoDatumHash {
                                         utxo_identifier: *input,

@@ -3,27 +3,50 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     crypto::{keyhash_224, keyhash_224_tagged},
     hash::Hash,
-    AddrKeyhash, ExUnits, KeyHash, NativeAssetsDelta, ProposalProcedure, ScriptHash,
+    AddrKeyhash, ExUnits, KeyHash, NativeAssetsDelta, PolicyId, ProposalProcedure, ScriptHash,
     ShelleyAddressPaymentPart, StakeCredential, TxCertificateWithPos, UTXOValue, UTxOIdentifier,
-    VotingProcedures, Withdrawal,
+    Voter, VotingProcedures, Withdrawal,
 };
 
 pub type ScriptIntegrityHash = Hash<32>;
 pub type DatumHash = Hash<32>;
 
 #[derive(
+    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+pub enum PlutusVersion {
+    V1,
+    V2,
+    V3,
+}
+
+#[derive(
     Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub enum ScriptLang {
     Native,
-    PlutusV1,
-    PlutusV2,
-    PlutusV3,
+    Plutus(PlutusVersion),
 }
 
 impl ScriptLang {
     pub fn is_native(&self) -> bool {
         matches!(self, ScriptLang::Native)
+    }
+
+    pub fn is_plutus(&self) -> bool {
+        matches!(self, ScriptLang::Plutus(_))
+    }
+
+    pub fn plutus_v1() -> Self {
+        ScriptLang::Plutus(PlutusVersion::V1)
+    }
+
+    pub fn plutus_v2() -> Self {
+        ScriptLang::Plutus(PlutusVersion::V2)
+    }
+
+    pub fn plutus_v3() -> Self {
+        ScriptLang::Plutus(PlutusVersion::V3)
     }
 }
 
@@ -55,9 +78,9 @@ impl ReferenceScript {
     pub fn get_script_lang(&self) -> ScriptLang {
         match self {
             ReferenceScript::Native(_) => ScriptLang::Native,
-            ReferenceScript::PlutusV1(_) => ScriptLang::PlutusV1,
-            ReferenceScript::PlutusV2(_) => ScriptLang::PlutusV2,
-            ReferenceScript::PlutusV3(_) => ScriptLang::PlutusV3,
+            ReferenceScript::PlutusV1(_) => ScriptLang::Plutus(PlutusVersion::V1),
+            ReferenceScript::PlutusV2(_) => ScriptLang::Plutus(PlutusVersion::V2),
+            ReferenceScript::PlutusV3(_) => ScriptLang::Plutus(PlutusVersion::V3),
         }
     }
 
@@ -252,14 +275,16 @@ impl Datum {
     Debug,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Clone,
     Hash,
 )]
 pub enum RedeemerTag {
     #[n(0)]
-    Spend,
-    #[n(1)]
     Mint,
+    #[n(1)]
+    Spend,
     #[n(2)]
     Cert,
     #[n(3)]
@@ -318,7 +343,21 @@ pub struct RedeemerPointer {
     pub index: u32,
 }
 
-/// Get Scripts needed from UTxOs being spend
+/// !IMPORTANT
+/// Ledger order is different from Plutus Data constructor Order for Script Purpose
+/// This is Ledger Order.
+/// Plutus Data Constructor Order takes Mint before Spend.
+#[derive(Debug)]
+pub enum ScriptPurpose {
+    Spend(UTxOIdentifier),
+    Mint(PolicyId),
+    Reward(StakeCredential),
+    Certify(TxCertificateWithPos),
+    Vote(Voter),
+    Propose(usize, ProposalProcedure),
+}
+
+/// Get Scripts needed from UTxOs being spent
 /// Return a list of (RedeemerPointer, ScriptHash) pairs
 /// NOTE:
 /// Inputs must be sorted lexicographically by UTxO identifier

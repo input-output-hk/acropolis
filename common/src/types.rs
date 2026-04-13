@@ -1434,7 +1434,18 @@ impl<'a, C> minicbor::Decode<'a, C> for ExUnitPrices {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct GovActionId {
     pub transaction_id: TxHash,
     pub action_index: u8,

@@ -8,6 +8,7 @@ use acropolis_common::{BlockInfo, TxHash};
 use anyhow::{anyhow, Result};
 use config::Config;
 use fjall::{Database, Keyspace, OwnedWriteBatch};
+use pallas_traverse::MultiEraBlock;
 
 use crate::stores::{extract_tx_hashes, Block, ExtraBlockData, Tx, TxBlockReference};
 
@@ -114,7 +115,11 @@ impl super::Store for FjallStore {
 
         batch.commit()?;
 
-        self.last_persisted_block.store(info.number - 1, std::sync::atomic::Ordering::Relaxed);
+        // `info.number` is the first removed block, so the durable tip is the previous block.
+        self.last_persisted_block.store(
+            info.number.saturating_sub(1),
+            std::sync::atomic::Ordering::Relaxed,
+        );
 
         Ok(())
     }
@@ -235,30 +240,34 @@ impl FjallBlockStore {
         rollback_block: &BlockInfo,
     ) -> Result<Vec<TxHash>> {
         let number_start = rollback_block.number.to_be_bytes();
-        let slot_start = rollback_block.slot.to_be_bytes();
-        let epoch_slot_start = epoch_slot_key(rollback_block.epoch, rollback_block.epoch_slot);
 
         let mut tx_hashes = Vec::new();
-        // Collect `tx_hashes` from `blocks` and remove entries >= `rollback_block.number`
+        let mut slot_keys = Vec::new();
+        let mut epoch_slot_keys = Vec::new();
+        // Remove blocks from the canonical number cutoff, then derive the slot and epoch-slot
+        // keys from those exact removed blocks. This keeps all secondary indexes aligned with
+        // the number index across both rollback markers and replayed RolledBack blocks.
         for block in self.block_hashes_by_number.range(number_start..) {
             let (key, value) = block.into_inner()?;
             if let Some(block) = self.blocks.get(&value)? {
                 let decoded: Block = minicbor::decode(&block)?;
                 tx_hashes.extend(extract_tx_hashes(&decoded.bytes)?);
+                let raw_block = MultiEraBlock::decode(&decoded.bytes)?;
+                slot_keys.push(raw_block.slot().to_be_bytes());
+                epoch_slot_keys.push(epoch_slot_key(
+                    decoded.extra.epoch,
+                    decoded.extra.epoch_slot,
+                ));
             }
             batch.remove(&self.block_hashes_by_number, key);
             batch.remove(&self.blocks, value);
         }
 
-        // Remove entries >= `rollback_block.slot` from `block_hashes_by_slot`
-        for res in self.block_hashes_by_slot.range(slot_start..) {
-            let key = res.key()?;
+        for key in slot_keys {
             batch.remove(&self.block_hashes_by_slot, key);
         }
 
-        // Remove entries >= `{rollback_block.epoch}{rollback_block.epoch_slot}` from `block_hashes_by_epoch_slot`
-        for res in self.block_hashes_by_epoch_slot.range(epoch_slot_start..) {
-            let key = res.key()?;
+        for key in epoch_slot_keys {
             batch.remove(&self.block_hashes_by_epoch_slot, key);
         }
 
@@ -541,5 +550,29 @@ pub(crate) mod tests {
 
         let new_block = state.store.get_latest_block().unwrap();
         assert_eq!(block, new_block.unwrap());
+    }
+
+    #[test]
+    fn rollback_removes_blocks_from_cutoff_number_across_indexes() {
+        let state = init_state();
+        let blocks_bytes = test_block_range_bytes(3);
+        let infos: Vec<_> = blocks_bytes.iter().map(|bytes| test_block_info(bytes)).collect();
+
+        for (info, bytes) in infos.iter().zip(blocks_bytes.iter()) {
+            state.store.insert_block(info, bytes).unwrap();
+        }
+
+        state.store.rollback(&infos[1]).unwrap();
+
+        assert!(state.store.get_block_by_number(infos[0].number).unwrap().is_some());
+        assert!(state.store.get_block_by_number(infos[1].number).unwrap().is_none());
+        assert!(state.store.get_block_by_slot(infos[0].slot).unwrap().is_some());
+        assert!(state.store.get_block_by_slot(infos[1].slot).unwrap().is_none());
+        assert!(state
+            .store
+            .get_block_by_epoch_slot(infos[1].epoch, infos[1].epoch_slot)
+            .unwrap()
+            .is_none());
+        assert_eq!(state.store.get_tip_block_number(), infos[0].number);
     }
 }
