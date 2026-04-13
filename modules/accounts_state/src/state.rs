@@ -91,9 +91,6 @@ pub struct State {
     /// Protocol parameters that apply during this epoch
     protocol_parameters: Option<ProtocolParams>,
 
-    /// Protocol parameters that applied in the previous epoch
-    //previous_protocol_parameters: Option<ProtocolParams>,
-
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<(PoolId, StakeAddress)>,
 

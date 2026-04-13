@@ -432,7 +432,6 @@ impl AccountsState {
                                     .await
                                 {
                                     Ok(refund_deltas) => {
-                                        // publish stake reward deltas
                                         stake_reward_deltas.extend(refund_deltas);
                                     }
                                     Err(e) => {
@@ -476,7 +475,8 @@ impl AccountsState {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                // Clear the skip flag after first transition handling.
+                // publish stake reward deltas if we're not in rollback (that is, processing
+                // some normal block with data and number).
                 if let Some(block_info) = deltas_block_info {
                     async {
                         ctx.handle(

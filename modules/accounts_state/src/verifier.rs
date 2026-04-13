@@ -3,20 +3,22 @@ use crate::{
     rewards::{RewardDetail, RewardsResult},
     state::Pots,
 };
-use csv::StringRecord;
-use anyhow::{Result, bail, anyhow};
 use acropolis_common::{BlockInfo, DelegatedStake, Lovelace, PoolId, RewardType, StakeAddress};
+use anyhow::{anyhow, bail, Result};
+use csv::StringRecord;
 use hex::FromHex;
 use itertools::{
     EitherOrBoth::{Both, Left, Right},
     Itertools,
 };
-use std::{cmp::Ordering, collections::BTreeMap, fs::File};
-use std::collections::HashMap;
-use std::fs::read_dir;
-use std::path::{Path, PathBuf};
-use tracing::{debug, error, info, warn};
 use regex::Regex;
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, HashMap},
+    fs::{read_dir, File},
+    path::PathBuf,
+};
+use tracing::{debug, error, info, warn};
 
 /// Verifier
 pub struct Verifier {
@@ -69,27 +71,31 @@ impl Verifier {
 
     /// Takes files from directory, and builds a map:
     /// epoch -> (file, column in csv file, total columns in file) for files matching the template.
-    fn process_files_for_verification_list(template: &str, files_to_check: &Vec<(String, String)>) -> anyhow::Result<HashMap<u64, (String, usize, usize)>> {
+    fn process_files_for_verification_list(
+        template: &str,
+        files_to_check: &Vec<String>,
+    ) -> anyhow::Result<HashMap<u64, (String, usize, usize)>> {
         let mut matching_files = HashMap::new();
 
-        for (filename, filepath) in files_to_check {
-            println!("File {filepath}, checking with {template}");
+        for filepath in files_to_check {
             if let Some(unify) = Self::unify_string(template, &filepath)? {
-                println!("File {filepath} matches template {template} with unify {unify}");
-
                 if let Ok(res) = unify.parse::<u64>() {
                     matching_files.insert(res, (filepath.clone(), 1, 2));
-                }
-                else if let Some(t) = Regex::new("(\\d+)-(\\d+)")?.captures(&unify) {
-                    let start = t.get(1).ok_or_else(
-                        || anyhow!("left range not present")
-                    )?.as_str().parse::<usize>()?;
-                    let end = t.get(2).ok_or_else(
-                        || anyhow!("left range not present")
-                    )?.as_str().parse::<usize>()?;
+                } else if let Some(t) = Regex::new("(\\d+)-(\\d+)")?.captures(&unify) {
+                    let start = t
+                        .get(1)
+                        .ok_or_else(|| anyhow!("left range not present"))?
+                        .as_str()
+                        .parse::<usize>()?;
+                    let end = t
+                        .get(2)
+                        .ok_or_else(|| anyhow!("left range not present"))?
+                        .as_str()
+                        .parse::<usize>()?;
 
-                    for (idx,e) in (start..=end).enumerate() {
-                        matching_files.insert(e as u64, (filepath.clone(), idx+1, end-start+2));
+                    for (idx, e) in (start..=end).enumerate() {
+                        matching_files
+                            .insert(e as u64, (filepath.clone(), idx + 1, end - start + 2));
                     }
                 }
             }
@@ -99,9 +105,9 @@ impl Verifier {
     }
 
     /// Iterates directory of template, and builds a map: epoch -> (file, column in csv file)
-    fn build_verifier_list(template: &Option<String>)
-        -> Result<HashMap<u64, (String, usize, usize)>>
-    {
+    fn build_verifier_list(
+        template: &Option<String>,
+    ) -> Result<HashMap<u64, (String, usize, usize)>> {
         let Some(template) = template else {
             return Ok(HashMap::new());
         };
@@ -147,7 +153,7 @@ impl Verifier {
                 continue;
             };
 
-            files_to_check.push((filename, filepath));
+            files_to_check.push(filepath);
         }
 
         Self::process_files_for_verification_list(&template, &files_to_check)
@@ -173,10 +179,7 @@ impl Verifier {
         }
     }
 
-    fn get_spdd_reader(
-        &self,
-        epoch: u64,
-    ) -> Option<(String, csv::Reader<File>, usize, usize)> {
+    fn get_spdd_reader(&self, epoch: u64) -> Option<(String, csv::Reader<File>, usize, usize)> {
         let Some((path, idx, total)) = self.spdd_files.get(&epoch) else {
             return None;
         };
@@ -432,29 +435,36 @@ impl Verifier {
         }
     }
 
-    fn parse_one_record(r: &StringRecord, idx: usize, total: usize)
-        -> anyhow::Result<Option<(PoolId, Lovelace)>>
-    {
+    fn parse_one_record(
+        r: &StringRecord,
+        idx: usize,
+        total: usize,
+    ) -> anyhow::Result<Option<(PoolId, Lovelace)>> {
         if r.len() != total {
-            bail!("Missing amount column in record with {} columns, expected {}", r.len(), total);
+            bail!(
+                "Missing amount column in record with {} columns, expected {}",
+                r.len(),
+                total
+            );
         }
 
-        let spo = r.get(0).ok_or_else(
-            || anyhow::anyhow!("Cannot take SPO from record {r:?}")
-        )?;
+        let spo = r.get(0).ok_or_else(|| anyhow::anyhow!("Cannot take SPO from record {r:?}"))?;
         let Some(spo) = Vec::from_hex(&spo).ok().and_then(|bytes| PoolId::try_from(bytes).ok())
         else {
             bail!("Bad hex/SPO for SPO: {spo}");
         };
 
-        let amount_str = r.get(idx).ok_or_else(|| anyhow::anyhow!(
-            "Missing amount column in record with {} columns, expected {}", r.len(), total
-        ))?;
+        let amount_str = r.get(idx).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Missing amount column in record with {} columns, expected {}",
+                r.len(),
+                total
+            )
+        })?;
 
         if amount_str.is_empty() {
             Ok(None)
-        }
-        else {
+        } else {
             let amount = amount_str.parse::<Lovelace>()?;
             Ok(Some((spo, amount)))
         }
@@ -473,11 +483,14 @@ impl Verifier {
                 Err(err) => {
                     error!("Bad row in {path}: {err}, skipping");
                     continue;
-                },
+                }
                 Ok(row) if row.len() != total => {
-                    error!("Bad row in {path}: {} instead of {total} columns, skipping", row.len());
+                    error!(
+                        "Bad row in {path}: {} instead of {total} columns, skipping",
+                        row.len()
+                    );
                     continue;
-                },
+                }
                 Ok(row) => row,
             };
 
@@ -659,7 +672,7 @@ mod tests {
         let record = StringRecord::from(vec![&"ff".repeat(28), "", "1"]);
 
         let res2 = Verifier::parse_one_record(&record, 1, 3);
-        let res3 = Verifier::parse_one_record(&record, 1, 3);
+        let res3 = Verifier::parse_one_record(&record, 2, 3);
 
         assert_eq!(res2.unwrap(), None);
         assert_eq!(res3.unwrap(), Some((PoolId::from([0xff; 28]), 1)));
@@ -687,7 +700,8 @@ mod tests {
             Verifier::unify_string(
                 "../../modules/accounts_state/test-data/spdd.mainnet.{}.csv",
                 "../../modules/accounts_state/test-data/.gitignore"
-            ).unwrap(),
+            )
+            .unwrap(),
             None
         )
     }
@@ -696,13 +710,14 @@ mod tests {
     fn test_process_files_for_verification_list() {
         let template = "path/to/spdd-{}.csv";
         let files_to_check = vec![
-            ("spdd-10.csv".to_string(), "path/to/spdd-10.csv".to_string()),
-            ("spdd-11.csv".to_string(), "path/to/spdd-11.csv".to_string()),
-            ("spdd-12-14.csv".to_string(), "path/to/spdd-12-14.csv".to_string()),
-            ("other-file.csv".to_string(), "path/to/other-file.csv".to_string()),
+            "path/to/spdd-10.csv".to_string(),
+            "path/to/spdd-11.csv".to_string(),
+            "path/to/spdd-12-14.csv".to_string(),
+            "path/to/other-file.csv".to_string(),
         ];
 
-        let result = Verifier::process_files_for_verification_list(template, &files_to_check).unwrap();
+        let result =
+            Verifier::process_files_for_verification_list(template, &files_to_check).unwrap();
         let expected = HashMap::from([
             (10, ("path/to/spdd-10.csv".to_string(), 1, 2)),
             (11, ("path/to/spdd-11.csv".to_string(), 1, 2)),
