@@ -14,8 +14,9 @@ use crate::{
     spo_distribution_publisher::SPODistributionPublisher,
     spo_rewards_publisher::SPORewardsPublisher,
     stake_reward_deltas_publisher::StakeRewardDeltasPublisher, verifier::Verifier,
-    AccountsPublishers, AccountsReaders, CertsReader, EpochActivityReader, GovOutcomesReader,
-    GovProceduresReader, ParamsReader, PotsReader, SPOReader, StakeDeltasReader, WithdrawalsReader,
+    AccountsPublishers, AccountsReaders, CertsReader, EpochActivityReader, GenesisReader,
+    GovOutcomesReader, GovProceduresReader, ParamsReader, SPOReader, StakeDeltasReader,
+    WithdrawalsReader,
 };
 
 // Publishers
@@ -79,7 +80,7 @@ impl AccountsConfig {
 
         Ok(AccountsConfig {
             readers: AccountsReaders {
-                pots: PotsReader::new(&context, config).await?,
+                genesis: GenesisReader::new(&context, config).await?,
                 certs: CertsReader::new(&context, config).await?,
                 withdrawals: WithdrawalsReader::new(&context, config).await?,
                 stake_deltas: StakeDeltasReader::new(&context, config).await?,

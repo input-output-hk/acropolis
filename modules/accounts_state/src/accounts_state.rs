@@ -5,14 +5,14 @@ use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     declare_cardano_reader,
     messages::{
-        CardanoMessage, EpochActivityMessage, GovernanceOutcomesMessage,
+        CardanoMessage, EpochActivityMessage, GenesisCompleteMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStateMessage,
         SnapshotMessage, SnapshotStateMessage, StakeAddressDeltasMessage, StateQueryResponse,
         StateTransitionMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     queries::{accounts::AccountsStateQueryResponse, errors::QueryError},
     state_history::{StateHistory, StateHistoryStore},
-    Era, Pots,
+    Era,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -78,11 +78,11 @@ declare_cardano_reader!(
     WithdrawalsMessage
 );
 declare_cardano_reader!(
-    PotsReader,
-    "pots-subscribe-topic",
-    "cardano.pots",
-    Pots,
-    Pots
+    GenesisReader,
+    "genesis-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+    GenesisComplete,
+    GenesisCompleteMessage
 );
 declare_cardano_reader!(
     StakeDeltasReader,
@@ -115,7 +115,7 @@ declare_cardano_reader!(
 
 struct AccountsReaders {
     // Single use readers
-    pub pots: PotsReader,
+    pub genesis: GenesisReader,
     pub snapshot: Option<Box<dyn Subscription<Message>>>,
 
     // Block readers
@@ -200,11 +200,16 @@ impl AccountsState {
                 bail!("Unexpected rollback while reading initial gov outcomes");
             }
 
-            match readers.pots.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((block_info, pot_deltas_msg)) => {
+            match readers.genesis.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, genesis_msg)) => {
                     let mut state = State::default();
-                    state.handle_initial_pots(&pot_deltas_msg)?;
+                    state.handle_initial_pots(&genesis_msg.values.initial_pots)?;
                     history.lock().await.commit(block_info.number, state);
+
+                    publishers
+                        .pots
+                        .publish_pots(&block_info, genesis_msg.values.initial_pots.clone())
+                        .await?;
                 }
                 RollbackWrapper::Rollback(_) => {
                     bail!("Unexpected rollback while reading initial pots");
