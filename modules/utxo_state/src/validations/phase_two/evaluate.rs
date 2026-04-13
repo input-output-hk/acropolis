@@ -3,7 +3,6 @@ use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
-
 use acropolis_common::validation::UplcMachineError;
 use acropolis_common::{
     validation::Phase2ValidationError, CostModels, ReferenceScript, ScriptHash, ScriptLang,
