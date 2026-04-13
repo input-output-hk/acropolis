@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
-    configuration::StartupMode,
+    configuration::{get_string_flag, StartupMode},
     declare_cardano_reader,
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, DRepStateMessage,
@@ -11,10 +11,12 @@ use acropolis_common::{
         SnapshotMessage, SnapshotStateMessage, StateQuery, StateQueryResponse,
         StateTransitionMessage,
     },
-    queries::errors::QueryError,
-    queries::governance::{
-        GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
-        ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
+    queries::{
+        errors::QueryError,
+        governance::{
+            GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
+            ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
+        },
     },
 };
 use anyhow::{anyhow, bail, Result};
@@ -107,21 +109,12 @@ struct Readers {
 }
 
 impl GovernanceStateConfig {
-    fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
-        let actual = config.get_string(keydef.0).unwrap_or(keydef.1.to_string());
-        info!(
-            "Creating subscriber/publisher on '{}' for {}",
-            actual, keydef.0
-        );
-        actual
-    }
-
     pub fn new(config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
-            enact_publish_topic: Self::conf(config, CONFIG_ENACT_STATE_TOPIC),
-            governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
-            validation_outcome_topic: Self::conf(config, CONFIG_VALIDATION_OUTCOME_TOPIC),
-            snapshot_subscribe_topic: Self::conf(config, CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC),
+            enact_publish_topic: get_string_flag(config, CONFIG_ENACT_STATE_TOPIC),
+            governance_query_topic: get_string_flag(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
+            validation_outcome_topic: get_string_flag(config, CONFIG_VALIDATION_OUTCOME_TOPIC),
+            snapshot_subscribe_topic: get_string_flag(config, CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC),
             verification_output_file: config
                 .get_string(VERIFICATION_OUTPUT_FILE)
                 .map(Some)

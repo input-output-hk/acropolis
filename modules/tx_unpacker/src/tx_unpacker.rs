@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::state::State;
 use acropolis_common::{
     caryatid::PrimaryRead,
+    configuration::get_string_flag,
     messages::{
         AssetDeltasMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
@@ -33,7 +34,8 @@ const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("transactions-subscribe-topic", "cardano.txs");
 
 const CIP25_METADATA_LABEL: u64 = 721;
-const DEFAULT_NETWORK_NAME: &str = "mainnet";
+// TODO: Read network name from genesis message
+const DEFAULT_NETWORK_NAME: (&str, &str) = ("startup.network-name", "mainnet");
 
 /// Tx unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -417,9 +419,8 @@ impl TxUnpacker {
         let publish_tx_validation_topic = config.get_string("publish-tx-validation-topic").ok();
 
         // Main transaction subscriber
-        let transactions_subscribe_topic = config
-            .get_string(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.1.to_string());
+        let transactions_subscribe_topic =
+            get_string_flag(&config, DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC);
         info!("Creating subscriber on '{transactions_subscribe_topic}'");
         let txs_sub = context.subscribe(&transactions_subscribe_topic).await?;
 
@@ -444,11 +445,7 @@ impl TxUnpacker {
             None => None,
         };
 
-        let network_id = match config
-            .get_string("startup.network-name")
-            .unwrap_or(DEFAULT_NETWORK_NAME.to_string())
-            .as_ref()
-        {
+        let network_id = match get_string_flag(&config, DEFAULT_NETWORK_NAME).as_ref() {
             "mainnet" => NetworkId::Mainnet,
             _ => NetworkId::Testnet,
         };

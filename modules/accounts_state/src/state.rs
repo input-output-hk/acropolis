@@ -1,6 +1,9 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
-use crate::rewards::calculate_rewards;
+use crate::rewards::{
+    apply_registration_changes, apply_registration_changes_filtered, calculate_rewards,
+    wait_for_rewards_start_signal,
+};
 use crate::runtime::{BlockStakeAddressUndoRecorder, RewardRuntime, StakeAddressUndoHistory};
 use crate::verifier::Verifier;
 use acropolis_common::caryatid::ValidationContext;
@@ -68,11 +71,15 @@ impl EpochSnapshots {
 }
 
 #[derive(Debug, Clone)]
-struct PendingRewardsPlan {
-    rewarded_epoch: u64,
-    rewarded_era: Era,
-    shelley_params: ShelleyParams,
-    stake_rewards: Lovelace,
+pub struct PendingRewardsPlan {
+    pub rewarded_epoch: u64,
+    pub rewarded_era: Era,
+    pub shelley_params: ShelleyParams,
+    pub stake_rewards: Lovelace,
+    pub performance: Arc<EpochSnapshot>,
+    pub existing_registrations: HashSet<StakeAddress>,
+    pub existing_deregistrations: HashSet<StakeAddress>,
+    pub staking: Arc<EpochSnapshot>,
 }
 
 /// Overall state - stored per block
@@ -115,27 +122,11 @@ pub struct State {
     /// Addresses registration changes in current epoch
     current_epoch_registration_changes: Vec<RegistrationChange>,
 
-    /// Rollback-safe description of the rewards that should be applied at the
-    /// next epoch transition. The async task remains runtime-owned, but the
-    /// deterministic inputs needed to recompute on replay must survive rollbacks.
-    pending_rewards_plan: Option<PendingRewardsPlan>,
-
     /// DReps mapped to all accounts that have ever delegated to them
     /// Required to properly replay PV9 in which there was a DRep deregistration
     /// bug causing all accounts that have ever delegated to the DRep to have their
     /// delegation wiped reguardless of if they were currently delegated to the DRep.
     drep_delegators: OrdMap<DRepCredential, OrdSet<StakeAddress>>,
-
-    /// Randomness stabilization window (4k/f slots), computed from protocol params.
-    /// Used to delay the rewards calculation and filter registration changes:
-    /// - `notify_block` waits until `block.epoch_slot >= stability_window_slot` before
-    ///   signalling the rewards task to start
-    /// - `apply_registration_changes_filtered` skips any `RegistrationChange` with
-    ///   `epoch_slot > stability_window_slot`, so only changes before this point
-    ///   affect `addrsRew` (the set of addresses eligible for rewards)
-    /// - Changes after this slot remain in `current_epoch_registration_changes` and
-    ///   are picked up at the next epoch boundary
-    stability_window_slot: u64,
 
     /// Pending MIRs from reserves to be applied at epoch boundary
     /// Key is stake address, value is the amount to add (or in Alonzo+, accumulated sum)
@@ -149,25 +140,6 @@ pub struct State {
 }
 
 impl State {
-    fn wait_for_rewards_start_signal(
-        start_rewards_rx: std::sync::mpsc::Receiver<()>,
-    ) -> Result<()> {
-        start_rewards_rx.recv().map_err(|_| anyhow!("Rewards calculation start cancelled"))?;
-        Ok(())
-    }
-
-    fn pending_rewards_result_from_plan(&self) -> Result<Option<crate::rewards::RewardsResult>> {
-        if let Some(plan) = self.pending_rewards_plan.as_ref() {
-            info!(
-                rewarded_epoch = plan.rewarded_epoch,
-                "Recomputing pending rewards synchronously from rollback-safe plan"
-            );
-            Ok(Some(self.calculate_pending_rewards_from_plan(plan)?))
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Bootstrap state from snapshot data (consumes the message to avoid cloning)
     pub fn bootstrap(&mut self, bootstrap_msg: AccountsBootstrapMessage) -> Result<()> {
         let num_accounts = bootstrap_msg.accounts.len();
@@ -333,21 +305,8 @@ impl State {
         true
     }
 
-    fn append_registration_change(
-        &mut self,
-        rewards_runtime: &mut RewardRuntime,
-        change: RegistrationChange,
-    ) {
+    fn append_registration_change(&mut self, change: RegistrationChange) {
         self.current_epoch_registration_changes.push(change.clone());
-        rewards_runtime.push_registration_change(change);
-    }
-
-    pub(crate) fn current_epoch_registration_changes(&self) -> &[RegistrationChange] {
-        &self.current_epoch_registration_changes
-    }
-
-    pub(crate) fn rewards_stability_window_slot(&self) -> u64 {
-        self.stability_window_slot
     }
 
     pub(crate) fn rollback_stake_addresses(
@@ -681,8 +640,9 @@ impl State {
         // Compute the randomness stabilization window (4k/f) from Shelley genesis params.
         // This is when Cardano captures `addrsRew` and starts the rewards calculation.
         let f = &shelley_params.active_slots_coeff;
-        self.stability_window_slot =
-            4 * (shelley_params.security_param as u64) * f.denom() / f.numer();
+        rewards_runtime.set_stability_window_slot(
+            4 * (shelley_params.security_param as u64) * f.denom() / f.numer(),
+        );
 
         // First time into Shelley, fix reserves to max_supply - total_utxos
         // We need to do this because tracking fees - which increase reserves - during Byron
@@ -763,12 +723,12 @@ impl State {
         // handle the Shelley bug part!
         let mut registrations: HashSet<StakeAddress> = HashSet::new();
         let mut deregistrations: HashSet<StakeAddress> = HashSet::new();
-        Self::apply_registration_changes(
+        apply_registration_changes(
             &self.epoch_snapshots.set.registration_changes,
             &mut registrations,
             &mut deregistrations,
         );
-        Self::apply_registration_changes(
+        apply_registration_changes(
             &self.epoch_snapshots.mark.registration_changes,
             &mut registrations,
             &mut deregistrations,
@@ -782,50 +742,59 @@ impl State {
             era
         };
 
-        self.pending_rewards_plan = Some(PendingRewardsPlan {
+        rewards_runtime.set_rewards_plan(PendingRewardsPlan {
             rewarded_epoch: epoch - 1,
             rewarded_era,
             shelley_params: shelley_params.clone(),
             stake_rewards: monetary_change.stake_rewards,
+            performance: performance.clone(),
+            staking: staking.clone(),
+            existing_registrations: registrations.clone(),
+            existing_deregistrations: deregistrations.clone(),
         });
 
-        let (start_rewards_tx, start_rewards_rx) = std::sync::mpsc::channel::<()>();
-        let current_epoch_registration_changes =
-            rewards_runtime.begin_epoch_registration_changes(epoch);
-        let stability_window_slot = self.stability_window_slot;
-        rewards_runtime.set_epoch_rewards_task(spawn_blocking(move || {
-            // Wait for start signal (sent at stability_window_slot into epoch)
-            Self::wait_for_rewards_start_signal(start_rewards_rx)?;
+        let (start_rewards_tx, start_rewards_rx) =
+            std::sync::mpsc::channel::<Vec<RegistrationChange>>();
 
-            // Apply current epoch registration changes up to the stability window.
-            // In Cardano, addrsRew is captured at the stability window, not the epoch boundary.
-            // Accounts that deregister before the stability window won't receive rewards.
-            let current_changes = current_epoch_registration_changes.lock().unwrap();
-            Self::apply_registration_changes_filtered(
-                &current_changes,
-                &mut registrations,
-                &mut deregistrations,
-                Some(stability_window_slot),
-            );
-            drop(current_changes);
+        let stability_window_slot = rewards_runtime.get_stability_window_slot();
+        self.current_epoch_registration_changes = Vec::new();
+        rewards_runtime.set_epoch_rewards_task(
+            epoch,
+            spawn_blocking(move || {
+                // Wait for start signal (sent at stability_window_slot into epoch)
+                let current_changes = wait_for_rewards_start_signal(start_rewards_rx)?;
 
-            if tracing::enabled!(Level::DEBUG) {
-                registrations.iter().for_each(|addr| debug!(epoch, "Registration {}", addr));
-                deregistrations.iter().for_each(|addr| debug!(epoch, "Deregistration {}", addr));
-            }
+                // Apply current epoch registration changes up to the stability window.
+                // In Cardano, addrsRew is captured at the stability window, not the epoch boundary.
+                // Accounts that deregister before the stability window won't receive rewards.
+                apply_registration_changes_filtered(
+                    &current_changes,
+                    &mut registrations,
+                    &mut deregistrations,
+                    Some(stability_window_slot),
+                );
+                drop(current_changes);
 
-            // Calculate reward payouts for previous epoch
-            calculate_rewards(
-                epoch - 1,
-                rewarded_era,
-                performance,
-                staking,
-                &shelley_params,
-                monetary_change.stake_rewards,
-                &registrations,
-                &deregistrations,
-            )
-        }));
+                if tracing::enabled!(Level::DEBUG) {
+                    registrations.iter().for_each(|addr| debug!(epoch, "Registration {}", addr));
+                    deregistrations
+                        .iter()
+                        .for_each(|addr| debug!(epoch, "Deregistration {}", addr));
+                }
+
+                // Calculate reward payouts for previous epoch
+                calculate_rewards(
+                    epoch - 1,
+                    rewarded_era,
+                    performance,
+                    staking,
+                    &shelley_params,
+                    monetary_change.stake_rewards,
+                    &registrations,
+                    &deregistrations,
+                )
+            }),
+        );
 
         // Delay starting calculation until stability window into epoch, to capture registration
         // changes that affect addrsRew, and also to put them out of reach of rollbacks
@@ -891,92 +860,13 @@ impl State {
         Ok(total_lovelace)
     }
 
-    /// Apply a registration change set to registration/deregistration lists
-    /// registrations gets all registrations still in effect at the end of the changes
-    /// deregistrations likewise for net deregistrations
-    fn apply_registration_changes(
-        changes: &Vec<RegistrationChange>,
-        registrations: &mut HashSet<StakeAddress>,
-        deregistrations: &mut HashSet<StakeAddress>,
-    ) {
-        Self::apply_registration_changes_filtered(changes, registrations, deregistrations, None);
-    }
-
-    fn pending_rewards_registrations(&self) -> (HashSet<StakeAddress>, HashSet<StakeAddress>) {
-        let mut registrations: HashSet<StakeAddress> = HashSet::new();
-        let mut deregistrations: HashSet<StakeAddress> = HashSet::new();
-
-        Self::apply_registration_changes(
-            &self.epoch_snapshots.set.registration_changes,
-            &mut registrations,
-            &mut deregistrations,
-        );
-        Self::apply_registration_changes(
-            &self.epoch_snapshots.mark.registration_changes,
-            &mut registrations,
-            &mut deregistrations,
-        );
-        Self::apply_registration_changes_filtered(
-            &self.current_epoch_registration_changes,
-            &mut registrations,
-            &mut deregistrations,
-            Some(self.stability_window_slot),
-        );
-
-        (registrations, deregistrations)
-    }
-
-    fn calculate_pending_rewards_from_plan(
-        &self,
-        plan: &PendingRewardsPlan,
-    ) -> Result<crate::rewards::RewardsResult> {
-        let (registrations, deregistrations) = self.pending_rewards_registrations();
-
-        calculate_rewards(
-            plan.rewarded_epoch,
-            plan.rewarded_era,
-            self.epoch_snapshots.mark.clone(),
-            self.epoch_snapshots.go.clone(),
-            &plan.shelley_params,
-            plan.stake_rewards,
-            &registrations,
-            &deregistrations,
-        )
-    }
-
-    /// Apply a registration change set with optional epoch_slot filtering.
-    /// If max_epoch_slot is Some, only changes with epoch_slot <= max_epoch_slot are applied.
-    /// This is used to replicate Cardano's Shelley-era bug where `addrsRew` is captured at 4k/5.
-    fn apply_registration_changes_filtered(
-        changes: &Vec<RegistrationChange>,
-        registrations: &mut HashSet<StakeAddress>,
-        deregistrations: &mut HashSet<StakeAddress>,
-        max_epoch_slot: Option<u64>,
-    ) {
-        for change in changes {
-            // Skip changes that happened after the stability window
-            if let Some(max_slot) = max_epoch_slot {
-                if change.epoch_slot > max_slot {
-                    continue;
-                }
-            }
-
-            match change.kind {
-                RegistrationChangeKind::Registered => {
-                    registrations.insert(change.address.clone());
-                    deregistrations.remove(&change.address);
-                }
-                RegistrationChangeKind::Deregistered => {
-                    registrations.remove(&change.address);
-                    deregistrations.insert(change.address.clone());
-                }
-            };
-        }
-    }
-
     /// Notify of a new block — triggers rewards calculation once we reach the stability window
     pub fn notify_block(&mut self, block: &BlockInfo, rewards_runtime: &mut RewardRuntime) {
-        rewards_runtime.notify_block(block.number, block.epoch_slot, self.stability_window_slot);
+        rewards_runtime.notify_block(
+            block.number,
+            block.epoch_slot,
+            &self.current_epoch_registration_changes,
+        );
     }
 
     fn pay_proposal_refunds(
@@ -1343,30 +1233,26 @@ impl State {
 
         // Skip rewards calculation on first epoch after bootstrap
         if skip_rewards {
-            // Snapshot bootstrap already materialized the prior epoch's reward effects,
-            // so any leftover async reward work must be discarded rather than paid later.
-            rewards_runtime.clear_on_rollback();
-            self.pending_rewards_plan = None;
             info!("Skipping rewards calculation on first epoch after bootstrap");
             return Ok((spo_rewards, reward_deltas));
         }
 
-        // Check previous epoch rewards calculation is done. On rollback replay we may no longer
-        // have the original async task, so fall back to recomputing from rollback-safe inputs.
+        // Check previous epoch rewards calculation is done.
         let rewards_result = if let Some(task) = rewards_runtime.take_epoch_rewards_task() {
             match task.await {
-                Ok(Ok(rewards_result)) => Some(rewards_result),
-                Ok(Err(error)) => {
-                    error!("Rewards calculation task failed: {error:#}");
-                    self.pending_rewards_result_from_plan()?
+                Ok(Ok(rewards_result)) => {
+                    rewards_runtime.set_epoch_rewards_result(rewards_result.clone());
+                    Some(rewards_result)
                 }
-                Err(error) => {
-                    error!("Rewards calculation task join failed: {error:#}");
-                    self.pending_rewards_result_from_plan()?
+                Ok(Err(error)) => {
+                    anyhow::bail!("Rewards calculation task failed: {error:#}");
+                }
+                Err(join_error) => {
+                    anyhow::bail!("Rewards task join failed (panic/cancel/abort): {join_error:#}");
                 }
             }
         } else {
-            self.pending_rewards_result_from_plan()?
+            None
         };
 
         if let Some(rewards_result) = rewards_result {
@@ -1566,7 +1452,6 @@ impl State {
         deposit: Option<Lovelace>,
         epoch_slot: u64,
         ctx: &mut ValidationContext,
-        rewards_runtime: &mut RewardRuntime,
         undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Option<StakeRegistrationOutcome> {
         debug!("Register stake address {stake_address}");
@@ -1590,14 +1475,11 @@ impl State {
             self.pots.deposits += deposit;
 
             // Add to registration changes only on success (consistent with deregister)
-            self.append_registration_change(
-                rewards_runtime,
-                RegistrationChange {
-                    address: stake_address.clone(),
-                    kind: RegistrationChangeKind::Registered,
-                    epoch_slot,
-                },
-            );
+            self.append_registration_change(RegistrationChange {
+                address: stake_address.clone(),
+                kind: RegistrationChangeKind::Registered,
+                epoch_slot,
+            });
 
             Some(StakeRegistrationOutcome::Registered(deposit))
         } else {
@@ -1618,7 +1500,6 @@ impl State {
         refund: Option<Lovelace>,
         epoch_slot: u64,
         ctx: &mut ValidationContext,
-        rewards_runtime: &mut RewardRuntime,
         undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Option<StakeRegistrationOutcome> {
         debug!("Deregister stake address {stake_address}");
@@ -1647,14 +1528,11 @@ impl State {
             self.pots.deposits -= refund_amount;
 
             // Add to registration changes with epoch_slot from the block
-            self.append_registration_change(
-                rewards_runtime,
-                RegistrationChange {
-                    address: stake_address.clone(),
-                    kind: RegistrationChangeKind::Deregistered,
-                    epoch_slot,
-                },
-            );
+            self.append_registration_change(RegistrationChange {
+                address: stake_address.clone(),
+                kind: RegistrationChangeKind::Deregistered,
+                epoch_slot,
+            });
 
             Some(StakeRegistrationOutcome::Deregistered(refund_amount))
         } else {
@@ -1766,7 +1644,6 @@ impl State {
         epoch_slot: u64,
         era: Era,
         ctx: &mut ValidationContext,
-        rewards_runtime: &mut RewardRuntime,
         undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Result<Vec<StakeRegistrationUpdate>> {
         let mut stake_registration_updates: Vec<StakeRegistrationUpdate> = Vec::new();
@@ -1780,14 +1657,9 @@ impl State {
 
             match &tx_cert.cert {
                 TxCertificate::StakeRegistration(reg) => {
-                    if let Some(outcome) = self.register_stake_address(
-                        reg,
-                        None,
-                        epoch_slot,
-                        ctx,
-                        rewards_runtime,
-                        undo,
-                    ) {
+                    if let Some(outcome) =
+                        self.register_stake_address(reg, None, epoch_slot, ctx, undo)
+                    {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
@@ -1796,14 +1668,9 @@ impl State {
                 }
 
                 TxCertificate::StakeDeregistration(dreg) => {
-                    if let Some(outcome) = self.deregister_stake_address(
-                        dreg,
-                        None,
-                        epoch_slot,
-                        ctx,
-                        rewards_runtime,
-                        undo,
-                    ) {
+                    if let Some(outcome) =
+                        self.deregister_stake_address(dreg, None, epoch_slot, ctx, undo)
+                    {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
@@ -1821,7 +1688,6 @@ impl State {
                         Some(reg.deposit),
                         epoch_slot,
                         ctx,
-                        rewards_runtime,
                         undo,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
@@ -1837,7 +1703,6 @@ impl State {
                         Some(dreg.refund),
                         epoch_slot,
                         ctx,
-                        rewards_runtime,
                         undo,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
@@ -1874,7 +1739,6 @@ impl State {
                         Some(delegation.deposit),
                         epoch_slot,
                         ctx,
-                        rewards_runtime,
                         undo,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
@@ -1895,7 +1759,6 @@ impl State {
                         Some(delegation.deposit),
                         epoch_slot,
                         ctx,
-                        rewards_runtime,
                         undo,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
@@ -1912,7 +1775,6 @@ impl State {
                         Some(delegation.deposit),
                         epoch_slot,
                         ctx,
-                        rewards_runtime,
                         undo,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
@@ -2214,18 +2076,10 @@ mod tests {
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         let mut ctx = create_validation_context();
-        let mut rewards_runtime = RewardRuntime::default();
         let mut undo = BlockStakeAddressUndoRecorder::default();
 
         // Register first
-        state.register_stake_address(
-            &stake_address,
-            None,
-            0,
-            &mut ctx,
-            &mut rewards_runtime,
-            &mut undo,
-        );
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut undo);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -2261,10 +2115,10 @@ mod tests {
 
     #[test]
     fn rewards_worker_start_signal_returns_error_when_cancelled() {
-        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<RegistrationChange>>();
         drop(tx);
 
-        let error = State::wait_for_rewards_start_signal(rx).unwrap_err();
+        let error = wait_for_rewards_start_signal(rx).unwrap_err();
         assert!(error.to_string().contains("start cancelled"));
     }
 
@@ -2282,7 +2136,6 @@ mod tests {
     fn spdd_from_delegation_with_utxo_values_and_pledge() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
-        let mut rewards_runtime = RewardRuntime::default();
         let mut undo = BlockStakeAddressUndoRecorder::default();
 
         let spo1 = test_keyhash(0x01).into();
@@ -2331,11 +2184,11 @@ mod tests {
 
         // Delegate
         let addr1 = create_address(&[0x11]);
-        state.register_stake_address(&addr1, None, 0, &mut ctx, &mut rewards_runtime, &mut undo);
+        state.register_stake_address(&addr1, None, 0, &mut ctx, &mut undo);
         state.record_stake_delegation(&addr1, &spo1, &mut undo);
 
         let addr2 = create_address(&[0x12]);
-        state.register_stake_address(&addr2, None, 0, &mut ctx, &mut rewards_runtime, &mut undo);
+        state.register_stake_address(&addr2, None, 0, &mut ctx, &mut undo);
         state.record_stake_delegation(&addr2, &spo2, &mut undo);
 
         // Put some value in
@@ -2432,7 +2285,6 @@ mod tests {
     fn mir_transfers_to_stake_addresses() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
-        let mut rewards_runtime = RewardRuntime::default();
         let mut undo = BlockStakeAddressUndoRecorder::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
@@ -2440,14 +2292,7 @@ mod tests {
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(
-            &stake_address,
-            None,
-            0,
-            &mut ctx,
-            &mut rewards_runtime,
-            &mut undo,
-        );
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut undo);
 
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -2493,7 +2338,6 @@ mod tests {
     fn withdrawal_transfers_from_stake_addresses() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
-        let mut rewards_runtime = RewardRuntime::default();
         let mut undo = BlockStakeAddressUndoRecorder::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
@@ -2501,14 +2345,7 @@ mod tests {
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(
-            &stake_address,
-            None,
-            0,
-            &mut ctx,
-            &mut rewards_runtime,
-            &mut undo,
-        );
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut undo);
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
                 stake_address: stake_address.clone(),
@@ -2566,7 +2403,6 @@ mod tests {
     fn mir_not_applied_to_deregistered_account() {
         let mut state = State::default();
         let mut ctx = create_validation_context();
-        let mut rewards_runtime = RewardRuntime::default();
         let mut undo = BlockStakeAddressUndoRecorder::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
@@ -2574,14 +2410,7 @@ mod tests {
         state.pots.reserves = 100;
 
         // Register stake address
-        state.register_stake_address(
-            &stake_address,
-            None,
-            0,
-            &mut ctx,
-            &mut rewards_runtime,
-            &mut undo,
-        );
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut undo);
 
         // Queue a MIR for this account
         let mir = MoveInstantaneousReward {
@@ -2591,14 +2420,7 @@ mod tests {
         state.pay_mir(&mir, Era::Shelley);
 
         // Deregister the account BEFORE applying instant rewards (simulates deregistration during epoch)
-        state.deregister_stake_address(
-            &stake_address,
-            None,
-            100,
-            &mut ctx,
-            &mut rewards_runtime,
-            &mut undo,
-        );
+        state.deregister_stake_address(&stake_address, None, 100, &mut ctx, &mut undo);
 
         // Now apply instant rewards at "epoch boundary"
         state.apply_pending_mirs(&mut undo);
@@ -2624,7 +2446,6 @@ mod tests {
     fn drdd_respects_different_delegations() -> Result<()> {
         let mut state = State::default();
         let mut ctx = create_validation_context();
-        let mut rewards_runtime = RewardRuntime::default();
         let mut undo = BlockStakeAddressUndoRecorder::default();
 
         let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
@@ -2709,7 +2530,6 @@ mod tests {
             0,
             Era::Shelley,
             &mut ctx,
-            &mut rewards_runtime,
             &mut undo,
         )?;
 
@@ -2815,74 +2635,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn skip_rewards_clears_stale_reward_work() {
-        let mut state = State::default();
-        let mut rewards_runtime = RewardRuntime::default();
-        let mut undo = BlockStakeAddressUndoRecorder::default();
-        let verifier = Verifier::new();
-        let stake_address = create_address(&STAKE_KEY_HASH);
-
-        state.stake_addresses.lock().unwrap().insert(
-            stake_address.clone(),
-            StakeAddressState {
-                registered: true,
-                ..StakeAddressState::default()
-            },
-        );
-        state.pending_rewards_plan = Some(PendingRewardsPlan {
-            rewarded_epoch: 1,
-            rewarded_era: Era::Shelley,
-            shelley_params: acropolis_common::protocol_params::ShelleyParams::default(),
-            stake_rewards: 0,
-        });
-
-        let mut rewards = BTreeMap::new();
-        rewards.insert(
-            PoolId::default(),
-            vec![crate::rewards::RewardDetail {
-                account: stake_address.clone(),
-                rtype: RewardType::Member,
-                amount: 7,
-                pool: PoolId::default(),
-                registered: true,
-            }],
-        );
-        rewards_runtime.set_epoch_rewards_task(tokio::spawn(async move {
-            Ok(crate::rewards::RewardsResult {
-                epoch: 1,
-                total_paid: 7,
-                rewards,
-                ..crate::rewards::RewardsResult::default()
-            })
-        }));
-
-        let (spo_rewards, reward_deltas) = state
-            .complete_previous_epoch_rewards_calculation(
-                &verifier,
-                true,
-                &mut rewards_runtime,
-                &mut undo,
-            )
-            .await
-            .unwrap();
-        assert!(spo_rewards.is_empty());
-        assert!(reward_deltas.is_empty());
-        assert!(state.pending_rewards_plan.is_none());
-
-        let (_, reward_deltas) = state
-            .complete_previous_epoch_rewards_calculation(
-                &verifier,
-                false,
-                &mut rewards_runtime,
-                &mut undo,
-            )
-            .await
-            .unwrap();
-        assert!(reward_deltas.is_empty());
-        assert_eq!(state.get_stake_state(&stake_address).unwrap().rewards, 0);
-    }
-
     #[test]
     fn state_history_and_undo_log_restore_stake_addresses_on_rollback() {
         let mut history =
@@ -2893,14 +2645,7 @@ mod tests {
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         let mut block_one_undo = BlockStakeAddressUndoRecorder::default();
-        state.register_stake_address(
-            &stake_address,
-            None,
-            0,
-            &mut ctx,
-            &mut runtime.rewards,
-            &mut block_one_undo,
-        );
+        state.register_stake_address(&stake_address, None, 0, &mut ctx, &mut block_one_undo);
         history.commit(1, state.clone());
         runtime.stake_address_undo_history.commit(1, block_one_undo);
 

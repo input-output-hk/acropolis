@@ -10,7 +10,7 @@ use crate::{
 };
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper},
-    configuration::StartupMode,
+    configuration::{get_bool_flag, get_string_flag, StartupMode},
     declare_cardano_reader,
     messages::{AddressDeltasMessage, ProtocolParamsMessage, StateTransitionMessage},
     queries::errors::QueryError,
@@ -162,14 +162,6 @@ impl AddressState {
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        fn get_bool_flag(config: &Config, key: (&str, bool)) -> bool {
-            config.get_bool(key.0).unwrap_or(key.1)
-        }
-
-        fn get_string_flag(config: &Config, key: (&str, &str)) -> String {
-            config.get_string(key.0).unwrap_or_else(|_| key.1.to_string())
-        }
-
         // Get configuration flags and query topic
         let storage_config = AddressStorageConfig {
             db_path: get_string_flag(&config, DEFAULT_ADDRESS_DB_PATH),

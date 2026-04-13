@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use acropolis_common::caryatid::RollbackWrapper;
-use acropolis_common::configuration::StartupMode;
+use acropolis_common::configuration::{get_bool_flag, get_string_flag, StartupMode};
 use acropolis_common::declare_cardano_reader;
 use acropolis_common::messages::{
     GovernanceOutcomesMessage, SnapshotMessage, SnapshotStateMessage, StateTransitionMessage,
@@ -33,6 +33,7 @@ use state::State;
 const CONFIG_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 const CONFIG_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
+// TODO: Read network name from genesis message
 const CONFIG_NETWORK_NAME: (&str, &str) = ("startup.network-name", "mainnet");
 const CONFIG_STORE_HISTORY: (&str, bool) = ("store-history", false);
 /// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
@@ -64,25 +65,13 @@ struct ParametersStateConfig {
 }
 
 impl ParametersStateConfig {
-    fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
-        let actual = config.get_string(keydef.0).unwrap_or(keydef.1.to_string());
-        info!("Parameter value '{}' for {}", actual, keydef.0);
-        actual
-    }
-
-    fn conf_bool(config: &Arc<Config>, keydef: (&str, bool)) -> bool {
-        let actual = config.get_bool(keydef.0).unwrap_or(keydef.1);
-        info!("Parameter value '{}' for {}", actual, keydef.0);
-        actual
-    }
-
     pub fn new(context: Arc<Context<Message>>, config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
             context,
-            network_name: Self::conf(config, CONFIG_NETWORK_NAME),
-            protocol_parameters_topic: Self::conf(config, CONFIG_PROTOCOL_PARAMETERS_TOPIC),
-            parameters_query_topic: Self::conf(config, DEFAULT_PARAMETERS_QUERY_TOPIC),
-            store_history: Self::conf_bool(config, CONFIG_STORE_HISTORY),
+            network_name: get_string_flag(config, CONFIG_NETWORK_NAME),
+            protocol_parameters_topic: get_string_flag(config, CONFIG_PROTOCOL_PARAMETERS_TOPIC),
+            parameters_query_topic: get_string_flag(config, DEFAULT_PARAMETERS_QUERY_TOPIC),
+            store_history: get_bool_flag(config, CONFIG_STORE_HISTORY),
         })
     }
 }
