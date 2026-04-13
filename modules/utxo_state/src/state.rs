@@ -350,11 +350,11 @@ impl State {
         // them durable. Bootstrap data is the only path written straight to
         // the immutable store.
         match block.status {
-            BlockStatus::Volatile | BlockStatus::Immutable | BlockStatus::RolledBack => {
+            BlockStatus::Volatile | BlockStatus::RolledBack => {
                 self.volatile_created.add_block(block.number);
                 self.volatile_spent.add_block(block.number);
             }
-            BlockStatus::Bootstrap => {}
+            BlockStatus::Bootstrap | BlockStatus::Immutable => {}
         }
 
         Ok(())
@@ -378,11 +378,11 @@ impl State {
                 }
 
                 match block.status {
-                    BlockStatus::Volatile | BlockStatus::Immutable | BlockStatus::RolledBack => {
+                    BlockStatus::Volatile | BlockStatus::RolledBack => {
                         // Add to volatile spent index
                         self.volatile_spent.add_utxo(input);
                     }
-                    BlockStatus::Bootstrap => {
+                    BlockStatus::Bootstrap | BlockStatus::Immutable => {
                         // Bootstrap state is not replayed, so it is safe to
                         // mutate the immutable store directly.
                         self.immutable_utxos.delete_utxo(input).await?;
@@ -414,14 +414,14 @@ impl State {
 
         // Add to volatile or immutable maps
         match block.status {
-            BlockStatus::Volatile | BlockStatus::Immutable | BlockStatus::RolledBack => {
+            BlockStatus::Volatile | BlockStatus::RolledBack => {
                 self.volatile_created.add_utxo(&key);
 
                 if self.volatile_utxos.insert(key, value).is_some() {
                     error!("Saw UTXO {} before", output.utxo_identifier);
                 }
             }
-            BlockStatus::Bootstrap => {
+            BlockStatus::Bootstrap | BlockStatus::Immutable => {
                 self.immutable_utxos.add_utxo(key, value).await?;
                 // Note we don't check for duplicates in immutable - store
                 // may double check this anyway
