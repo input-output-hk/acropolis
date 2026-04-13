@@ -77,11 +77,12 @@ impl Verifier {
     ) -> anyhow::Result<HashMap<u64, (String, usize, usize)>> {
         let mut matching_files = HashMap::new();
 
+        let range_regex = Regex::new("(\\d+)-(\\d+)")?;
         for filepath in files_to_check {
-            if let Some(unify) = Self::unify_string(template, &filepath)? {
+            if let Some(unify) = Self::unify_string(template, filepath)? {
                 if let Ok(res) = unify.parse::<u64>() {
                     matching_files.insert(res, (filepath.clone(), 1, 2));
-                } else if let Some(t) = Regex::new("(\\d+)-(\\d+)")?.captures(&unify) {
+                } else if let Some(t) = range_regex.captures(&unify) {
                     let start = t
                         .get(1)
                         .ok_or_else(|| anyhow!("left range not present"))?
@@ -156,7 +157,7 @@ impl Verifier {
             files_to_check.push(filepath);
         }
 
-        Self::process_files_for_verification_list(&template, &files_to_check)
+        Self::process_files_for_verification_list(template, &files_to_check)
     }
 
     /// Takes `epoch`, returns reference file name, reader, csv column index for the epoch,
@@ -180,11 +181,9 @@ impl Verifier {
     }
 
     fn get_spdd_reader(&self, epoch: u64) -> Option<(String, csv::Reader<File>, usize, usize)> {
-        let Some((path, idx, total)) = self.spdd_files.get(&epoch) else {
-            return None;
-        };
+        let (path, idx, total) = self.spdd_files.get(&epoch)?;
 
-        match csv::Reader::from_path(&path) {
+        match csv::Reader::from_path(path) {
             Ok(reader) => Some((path.clone(), reader, *idx, *total)),
             Err(e) => {
                 error!("File {path} was registered during initialization, but cannot be read: {e}");
@@ -449,7 +448,7 @@ impl Verifier {
         }
 
         let spo = r.get(0).ok_or_else(|| anyhow::anyhow!("Cannot take SPO from record {r:?}"))?;
-        let Some(spo) = Vec::from_hex(&spo).ok().and_then(|bytes| PoolId::try_from(bytes).ok())
+        let Some(spo) = Vec::from_hex(spo).ok().and_then(|bytes| PoolId::try_from(bytes).ok())
         else {
             bail!("Bad hex/SPO for SPO: {spo}");
         };
