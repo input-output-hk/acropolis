@@ -3,21 +3,14 @@
 
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
-    configuration::{get_bool_flag, get_string_flag, get_u64_flag, StartupMode},
     declare_cardano_reader,
     messages::{
         AccountsBootstrapMessage, CardanoMessage, EpochActivityMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStateMessage,
-        SnapshotMessage, SnapshotStateMessage, StakeAddressDeltasMessage, StateQuery,
-        StateQueryResponse, StateTransitionMessage, TxCertificatesMessage, WithdrawalsMessage,
+        SnapshotMessage, SnapshotStateMessage, StakeAddressDeltasMessage, StateQueryResponse,
+        StateTransitionMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
-    queries::{
-        accounts::{
-            AccountInfo, AccountsStateQuery, AccountsStateQueryResponse, DrepDelegators,
-            PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC,
-        },
-        errors::QueryError,
-    },
+    queries::{accounts::AccountsStateQueryResponse, errors::QueryError},
     state_history::{StateHistory, StateHistoryStore},
     Era, Pots,
 };
@@ -40,8 +33,10 @@ mod stake_reward_deltas_publisher;
 mod state;
 use stake_reward_deltas_publisher::StakeRewardDeltasPublisher;
 use state::State;
+mod configuration;
 mod monetary;
 mod pots_publisher;
+mod queries;
 mod rewards;
 mod runtime;
 mod verifier;
@@ -50,8 +45,8 @@ use runtime::{AccountsRuntime, BlockStakeAddressUndoRecorder};
 use verifier::Verifier;
 
 use crate::{
-    pots_publisher::PotsPublisher,
-    spo_distribution_store::{SPDDStore, SPDDStoreConfig},
+    configuration::AccountsConfig, pots_publisher::PotsPublisher, queries::handle_accounts_query,
+    spo_distribution_store::SPDDStore,
 };
 mod spo_distribution_store;
 
@@ -119,37 +114,6 @@ declare_cardano_reader!(
     GovernanceOutcomes,
     GovernanceOutcomesMessage
 );
-
-// Publishers
-const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) = (
-    "publish-drep-distribution-topic",
-    "cardano.drep.distribution",
-);
-const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
-    ("publish-spo-distribution-topic", "cardano.spo.distribution");
-const DEFAULT_SPO_REWARDS_TOPIC: (&str, &str) =
-    ("publish-spo-rewards-topic", "cardano.spo.rewards");
-const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: (&str, &str) = (
-    "publish-stake-reward-deltas-topic",
-    "cardano.stake.reward.deltas",
-);
-const DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC: (&str, &str) = (
-    "publish-stake-registration-updates-topic",
-    "cardano.stake.registration.updates",
-);
-const DEFAULT_VALIDATION_OUTCOMES_TOPIC: (&str, &str) = (
-    "publish-validation-outcomes-topic",
-    "cardano.validation.accounts",
-);
-const DEFAULT_POTS_TOPIC: (&str, &str) = ("publish-pots-topic", "cardano.pots");
-
-/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
-const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("snapshot-subscribe-topic", "cardano.snapshot");
-
-const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./fjall-spdd");
-const DEFAULT_SPDD_RETENTION_EPOCHS: (&str, u64) = ("spdd-retention-epochs", 0);
-const DEFAULT_SPDD_CLEAR_ON_START: (&str, bool) = ("spdd-clear-on-start", true);
 
 /// Accounts State module
 #[module(
@@ -635,105 +599,23 @@ impl AccountsState {
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-
-        // Subscription topics
-        let snapshot_subscribe_topic = get_string_flag(&config, DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC);
-
-        // Publishing topics
-        let drep_distribution_topic = get_string_flag(&config, DEFAULT_DREP_DISTRIBUTION_TOPIC);
-        info!("Creating DRep distribution publisher on '{drep_distribution_topic}'");
-
-        let spo_distribution_topic = get_string_flag(&config, DEFAULT_SPO_DISTRIBUTION_TOPIC);
-        info!("Creating SPO distribution publisher on '{spo_distribution_topic}'");
-
-        let spo_rewards_topic = get_string_flag(&config, DEFAULT_SPO_REWARDS_TOPIC);
-        info!("Creating SPO rewards publisher on '{spo_rewards_topic}'");
-
-        let stake_reward_deltas_topic = get_string_flag(&config, DEFAULT_STAKE_REWARD_DELTAS_TOPIC);
-        info!("Creating stake reward deltas publisher on '{stake_reward_deltas_topic}'");
-
-        let stake_registration_updates_topic =
-            get_string_flag(&config, DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC);
-        info!(
-            "Creating stake registration updates publisher on '{stake_registration_updates_topic}'"
-        );
-
-        let pots_topic = get_string_flag(&config, DEFAULT_POTS_TOPIC);
-        info!("Creating pots publisher on '{pots_topic}'");
-
-        let validation_outcomes_topic = get_string_flag(&config, DEFAULT_VALIDATION_OUTCOMES_TOPIC);
-        info!("Validation outcomes are to be published on '{validation_outcomes_topic}'");
-
-        // SPDD configs
-        let spdd_db_path = get_string_flag(&config, DEFAULT_SPDD_DB_PATH);
-        info!("SPDD database path: {spdd_db_path}");
-
-        let spdd_retention_epochs = get_u64_flag(&config, DEFAULT_SPDD_RETENTION_EPOCHS);
-        info!("SPDD retention epochs: {:?}", spdd_retention_epochs);
-
-        let spdd_clear_on_start = get_bool_flag(&config, DEFAULT_SPDD_CLEAR_ON_START);
-        info!("SPDD clear on start: {spdd_clear_on_start}");
-
-        // Query topics
-        let accounts_query_topic = get_string_flag(&config, DEFAULT_ACCOUNTS_QUERY_TOPIC);
-        info!("Creating query handler on '{}'", accounts_query_topic);
-
-        // Create verifier and read comparison data according to config
-        let mut verifier = Verifier::new();
-
-        if let Ok(verify_pots_file) = config.get_string("verify-pots-file") {
-            info!("Verifying pots against '{verify_pots_file}'");
-            verifier.read_pots(&verify_pots_file);
-        }
-
-        if let Ok(verify_rewards_files) = config.get_string("verify-rewards-files") {
-            info!("Verifying rewards against '{verify_rewards_files}'");
-            verifier.set_rewards_template(&verify_rewards_files);
-        }
-
-        if let Ok(verify_spdd_files) = config.get_string("verify-spdd-files") {
-            info!("Verifying rewards against '{verify_spdd_files}'");
-            verifier.set_spdd_template(&verify_spdd_files);
-        }
+        let accounts_cfg = AccountsConfig::init(context.clone(), &config).await?;
 
         // History
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "AccountsState",
+            "accounts_state",
             StateHistoryStore::default_block_store(),
         )));
         let history_query = history.clone();
         let history_tick = history.clone();
 
-        // Spdd store
-        let spdd_store_config = SPDDStoreConfig {
-            path: spdd_db_path,
-            retention_epochs: spdd_retention_epochs,
-            clear_on_start: spdd_clear_on_start,
-        };
-        let spdd_store = if spdd_store_config.is_enabled() {
-            Some(Arc::new(Mutex::new(SPDDStore::new(&spdd_store_config)?)))
-        } else {
-            None
-        };
-        let spdd_store_query = spdd_store.clone();
+        let spdd_store_query = accounts_cfg.spdd_store.clone();
 
-        context.handle(&accounts_query_topic, move |message| {
+        context.handle(&accounts_cfg.accounts_query_topic, move |message| {
             let history = history_query.clone();
             let spdd_store = spdd_store_query.clone();
             async move {
-                let Message::StateQuery(StateQuery::Accounts(query)) = message.as_ref() else {
-                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
-                        AccountsStateQueryResponse::Error(QueryError::internal_error(
-                            "Invalid message for accounts-state",
-                        )),
-                    )));
-                };
-
                 let guard = history.lock().await;
-                let spdd_store_guard = match spdd_store.as_ref() {
-                    Some(s) => Some(s.lock().await),
-                    None => None,
-                };
 
                 let state = match guard.current() {
                     Some(s) => s,
@@ -746,143 +628,12 @@ impl AccountsState {
                     }
                 };
 
-                let response = match query {
-                    AccountsStateQuery::GetAccountInfo { account } => {
-                        match state.get_stake_state(account) {
-                            Some(account) => AccountsStateQueryResponse::AccountInfo(AccountInfo {
-                                utxo_value: account.utxo_value,
-                                rewards: account.rewards,
-                                delegated_spo: account.delegated_spo,
-                                delegated_drep: account.delegated_drep.clone(),
-                            }),
-                            None => AccountsStateQueryResponse::Error(QueryError::not_found(
-                                format!("Account {}", account),
-                            )),
-                        }
-                    }
-
-                    AccountsStateQuery::GetPoolsLiveStakes { pools_operators } => {
-                        AccountsStateQueryResponse::PoolsLiveStakes(
-                            state.get_pools_live_stakes(pools_operators),
-                        )
-                    }
-
-                    AccountsStateQuery::GetPoolDelegators { pool_operator } => {
-                        AccountsStateQueryResponse::PoolDelegators(PoolDelegators {
-                            delegators: state.get_pool_delegators(pool_operator),
-                        })
-                    }
-
-                    AccountsStateQuery::GetPoolLiveStake { pool_operator } => {
-                        AccountsStateQueryResponse::PoolLiveStake(
-                            state.get_pool_live_stake_info(pool_operator),
-                        )
-                    }
-
-                    AccountsStateQuery::GetDrepDelegators { drep } => {
-                        AccountsStateQueryResponse::DrepDelegators(DrepDelegators {
-                            delegators: state.get_drep_delegators(drep),
-                        })
-                    }
-
-                    AccountsStateQuery::GetAccountsDrepDelegationsMap { stake_addresses } => {
-                        match state.get_drep_delegations_map(stake_addresses) {
-                            Some(map) => {
-                                AccountsStateQueryResponse::AccountsDrepDelegationsMap(map)
-                            }
-                            None => AccountsStateQueryResponse::Error(QueryError::internal_error(
-                                "Error retrieving DRep delegations map",
-                            )),
-                        }
-                    }
-
-                    AccountsStateQuery::GetOptimalPoolSizing => {
-                        AccountsStateQueryResponse::OptimalPoolSizing(
-                            state.get_optimal_pool_sizing(),
-                        )
-                    }
-
-                    AccountsStateQuery::GetAccountsUtxoValuesMap { stake_addresses } => {
-                        match state.get_accounts_utxo_values_map(stake_addresses) {
-                            Some(map) => AccountsStateQueryResponse::AccountsUtxoValuesMap(map),
-                            None => AccountsStateQueryResponse::Error(QueryError::not_found(
-                                "One or more accounts not found",
-                            )),
-                        }
-                    }
-
-                    AccountsStateQuery::GetAccountsUtxoValuesSum { stake_addresses } => {
-                        match state.get_accounts_utxo_values_sum(stake_addresses) {
-                            Some(sum) => AccountsStateQueryResponse::AccountsUtxoValuesSum(sum),
-                            None => AccountsStateQueryResponse::Error(QueryError::not_found(
-                                "One or more accounts not found",
-                            )),
-                        }
-                    }
-
-                    AccountsStateQuery::GetAccountsBalancesMap { stake_addresses } => {
-                        match state.get_accounts_balances_map(stake_addresses) {
-                            Some(map) => AccountsStateQueryResponse::AccountsBalancesMap(map),
-                            None => AccountsStateQueryResponse::Error(QueryError::not_found(
-                                "One or more accounts not found",
-                            )),
-                        }
-                    }
-
-                    AccountsStateQuery::GetActiveStakes {} => {
-                        AccountsStateQueryResponse::ActiveStakes(
-                            state.get_latest_snapshot_account_balances(),
-                        )
-                    }
-
-                    AccountsStateQuery::GetAccountsBalancesSum { stake_addresses } => {
-                        match state.get_account_balances_sum(stake_addresses) {
-                            Some(sum) => AccountsStateQueryResponse::AccountsBalancesSum(sum),
-                            None => AccountsStateQueryResponse::Error(QueryError::not_found(
-                                "One or more accounts not found",
-                            )),
-                        }
-                    }
-
-                    AccountsStateQuery::GetSPDDByEpoch { epoch } => match spdd_store_guard {
-                        Some(spdd_store) => match spdd_store.query_by_epoch(*epoch) {
-                            Ok(result) => AccountsStateQueryResponse::SPDDByEpoch(result),
-                            Err(e) => AccountsStateQueryResponse::Error(
-                                QueryError::internal_error(e.to_string()),
-                            ),
-                        },
-                        None => {
-                            AccountsStateQueryResponse::Error(QueryError::storage_disabled("SPDD"))
-                        }
-                    },
-
-                    AccountsStateQuery::GetSPDDByEpochAndPool { epoch, pool_id } => {
-                        match spdd_store_guard {
-                            Some(spdd_store) => {
-                                match spdd_store.query_by_epoch_and_pool(*epoch, pool_id) {
-                                    Ok(result) => {
-                                        AccountsStateQueryResponse::SPDDByEpochAndPool(result)
-                                    }
-                                    Err(e) => AccountsStateQueryResponse::Error(
-                                        QueryError::internal_error(e.to_string()),
-                                    ),
-                                }
-                            }
-                            None => AccountsStateQueryResponse::Error(
-                                QueryError::storage_disabled("SPDD"),
-                            ),
-                        }
-                    }
-
-                    _ => AccountsStateQueryResponse::Error(QueryError::not_implemented(format!(
-                        "Unimplemented query variant: {:?}",
-                        query
-                    ))),
+                let spdd_store_guard = match spdd_store.as_ref() {
+                    Some(s) => Some(s.lock().await),
+                    None => None,
                 };
 
-                Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
-                    response,
-                )))
+                handle_accounts_query(state, spdd_store_guard.as_deref(), message.as_ref())
             }
         });
 
@@ -890,84 +641,46 @@ impl AccountsState {
         let mut tick_subscription = context.subscribe("clock.tick").await?;
         context.clone().run(async move {
             loop {
-                let Ok((_, message)) = tick_subscription.read().await else {
-                    return;
-                };
-                if let Message::Clock(message) = message.as_ref() {
-                    if (message.number % 60) == 0 {
-                        let span = info_span!("accounts_state.tick", number = message.number);
-                        async {
+                match tick_subscription.read().await {
+                    Ok((_, message)) => match message.as_ref() {
+                        Message::Clock(message) if message.number % 60 == 0 => {
                             if let Some(state) = history_tick.lock().await.current() {
-                                state.tick().await.inspect_err(|e| error!("Tick error: {e}")).ok();
+                                state.log_stats();
                             }
                         }
-                        .instrument(span)
-                        .await;
-                    }
+                        _ => continue,
+                    },
+                    Err(_) => return,
                 }
             }
         });
-
-        // Publishers
-        let drep_publisher =
-            DRepDistributionPublisher::new(context.clone(), drep_distribution_topic);
-        let spo_publisher = SPODistributionPublisher::new(context.clone(), spo_distribution_topic);
-        let spo_rewards_publisher = SPORewardsPublisher::new(context.clone(), spo_rewards_topic);
-        let stake_reward_deltas_publisher =
-            StakeRewardDeltasPublisher::new(context.clone(), stake_reward_deltas_topic);
-        let stake_registration_updates_publisher = StakeRegistrationUpdatesPublisher::new(
-            context.clone(),
-            stake_registration_updates_topic,
-        );
-        let pots_publisher = PotsPublisher::new(context.clone(), pots_topic);
-
-        // Subscribe
-        let spos_reader = SPOReader::new(&context, &config).await?;
-        let ea_reader = EpochActivityReader::new(&context, &config).await?;
-        let certs_reader = CertsReader::new(&context, &config).await?;
-        let withdrawals_reader = WithdrawalsReader::new(&context, &config).await?;
-        let pot_deltas_reader = PotsReader::new(&context, &config).await?;
-        let stake_deltas_reader = StakeDeltasReader::new(&context, &config).await?;
-        let governance_procedures_reader = GovProceduresReader::new(&context, &config).await?;
-        let governance_outcomes_reader = GovOutcomesReader::new(&context, &config).await?;
-        let params_reader = ParamsReader::new(&context, &config).await?;
-
-        // Only subscribe to Snapshot if we're using Snapshot to start-up
-        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
-        let snapshot_subscription = if is_snapshot_mode {
-            info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
-            Some(context.subscribe(&snapshot_subscribe_topic).await?)
-        } else {
-            info!("Skipping snapshot subscription (startup method is not snapshot)");
-            None
-        };
 
         let context_copy = context.clone();
         // Start run task
         context.run(async move {
             Self::run(
                 history,
-                spdd_store,
+                accounts_cfg.spdd_store,
                 context_copy,
-                snapshot_subscription,
-                drep_publisher,
-                spo_publisher,
-                spo_rewards_publisher,
-                stake_reward_deltas_publisher,
-                stake_registration_updates_publisher,
-                pots_publisher,
-                validation_outcomes_topic,
-                spos_reader,
-                ea_reader,
-                certs_reader,
-                withdrawals_reader,
-                pot_deltas_reader,
-                stake_deltas_reader,
-                governance_procedures_reader,
-                governance_outcomes_reader,
-                params_reader,
-                &verifier,
-                is_snapshot_mode,
+                accounts_cfg.snapshot_subscription,
+                accounts_cfg.drep_publisher,
+                accounts_cfg.spo_publisher,
+                accounts_cfg.spo_rewards_publisher,
+                accounts_cfg.stake_reward_deltas_publisher,
+                accounts_cfg.stake_registration_updates_publisher,
+                accounts_cfg.pots_publisher,
+                accounts_cfg.validation_outcomes_topic,
+                accounts_cfg.spos_reader,
+                accounts_cfg.ea_reader,
+                accounts_cfg.certs_reader,
+                accounts_cfg.withdrawals_reader,
+                accounts_cfg.pot_deltas_reader,
+                accounts_cfg.stake_deltas_reader,
+                accounts_cfg.governance_procedures_reader,
+                accounts_cfg.governance_outcomes_reader,
+                accounts_cfg.params_reader,
+                &accounts_cfg.verifier,
+                accounts_cfg.is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
