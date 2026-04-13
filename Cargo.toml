@@ -35,7 +35,6 @@ members = [
     "modules/mcp_server",                   # Model Context Protocol server
     "modules/custom_indexer",               # Custom indexer module
     "modules/midnight_state",               # Indexes and serves data needed by the `midnight-node`
-    "modules/era_state",                    # Era history state (era boundaries and slot/epoch/time conversions)
 
     # Process builds
     "processes/omnibus",            # All-inclusive omnibus process

@@ -11,7 +11,6 @@ pub mod configuration;
 pub mod crypto;
 pub mod drep;
 pub mod epoch_snapshot;
-pub mod era_history;
 pub mod era_summary;
 pub mod genesis_values;
 pub mod hash;
