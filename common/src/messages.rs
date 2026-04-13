@@ -3,7 +3,6 @@
 use crate::address::StakeAddress;
 use crate::commands::chain_sync::ChainSyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
-use crate::era_history::EraHistory;
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
 use crate::protocol_params::{Nonce, Nonces, ProtocolParams};
@@ -360,13 +359,6 @@ pub struct SPOStateMessage {
     pub retired_spos: Vec<(PoolId, StakeAddress)>,
 }
 
-/// Era history message published at startup.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EraHistoryMessage {
-    /// Complete era history with system start time.
-    pub era_history: EraHistory,
-}
-
 /// Cardano message enum
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[allow(clippy::large_enum_variant)]
@@ -382,7 +374,6 @@ pub enum CardanoMessage {
     TxCertificates(TxCertificatesMessage),   // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),     // Address deltas received
     Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts
-    PotDeltas(PotDeltasMessage),             // Changes to pot balances
     BlockInfoMessage(BlockTxsMessage), // Transaction Info (total count, total output, total fees in a block)
     EpochActivity(EpochActivityMessage), // Total fees and VRF keys for an epoch
     EpochNonce(Option<Nonce>),         // Epoch nonce for the current epoch
@@ -405,7 +396,8 @@ pub enum CardanoMessage {
     StakeRegistrationUpdates(StakeRegistrationUpdatesMessage), // Stake registration updates
     PoolRegistrationUpdates(PoolRegistrationUpdatesMessage),   // Pool registration updates
 
-    EraHistory(EraHistoryMessage), // Era history with system start time
+    // Pots
+    Pots(Pots), // Current Pots
 }
 
 /// A new block has been announced by some peer

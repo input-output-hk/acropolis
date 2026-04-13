@@ -6,13 +6,13 @@ use acropolis_common::{
     declare_cardano_reader,
     messages::{
         CardanoMessage, EpochActivityMessage, GovernanceOutcomesMessage,
-        GovernanceProceduresMessage, Message, PotDeltasMessage, ProtocolParamsMessage,
-        SPOStateMessage, SnapshotMessage, SnapshotStateMessage, StakeAddressDeltasMessage,
-        StateQueryResponse, StateTransitionMessage, TxCertificatesMessage, WithdrawalsMessage,
+        GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStateMessage,
+        SnapshotMessage, SnapshotStateMessage, StakeAddressDeltasMessage, StateQueryResponse,
+        StateTransitionMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     queries::{accounts::AccountsStateQueryResponse, errors::QueryError},
     state_history::{StateHistory, StateHistoryStore},
-    Era,
+    Era, Pots,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -35,6 +35,7 @@ use stake_reward_deltas_publisher::StakeRewardDeltasPublisher;
 use state::State;
 mod configuration;
 mod monetary;
+mod pots_publisher;
 mod queries;
 mod rewards;
 mod runtime;
@@ -43,7 +44,9 @@ mod verifier;
 use runtime::{AccountsRuntime, BlockStakeAddressUndoRecorder};
 use verifier::Verifier;
 
-use crate::{configuration::AccountsConfig, queries::handle_accounts_query};
+use crate::{
+    configuration::AccountsConfig, pots_publisher::PotsPublisher, queries::handle_accounts_query,
+};
 
 // Subscriptions
 declare_cardano_reader!(
@@ -77,9 +80,9 @@ declare_cardano_reader!(
 declare_cardano_reader!(
     PotsReader,
     "pots-subscribe-topic",
-    "cardano.pot.deltas",
-    PotDeltas,
-    PotDeltasMessage
+    "cardano.pots",
+    Pots,
+    Pots
 );
 declare_cardano_reader!(
     StakeDeltasReader,
@@ -135,6 +138,7 @@ struct AccountsPublishers {
     pub spo_rewards: SPORewardsPublisher,
     pub stake_reward_deltas: StakeRewardDeltasPublisher,
     pub registration_updates: StakeRegistrationUpdatesPublisher,
+    pub pots: PotsPublisher,
 }
 
 /// Accounts State module
@@ -199,7 +203,7 @@ impl AccountsState {
             match readers.pots.read_with_rollbacks().await? {
                 RollbackWrapper::Normal((block_info, pot_deltas_msg)) => {
                     let mut state = State::default();
-                    state.handle_pot_deltas(&pot_deltas_msg)?;
+                    state.handle_initial_pots(&pot_deltas_msg)?;
                     history.lock().await.commit(block_info.number, state);
                 }
                 RollbackWrapper::Rollback(_) => {
@@ -411,6 +415,12 @@ impl AccountsState {
 
                 // Clear the skip flag after first transition handling.
                 skip_first_epoch_rewards = false;
+
+                // publish current pots after handling the epoch transition, so that the published pots reflect the new epoch's state
+                ctx.handle(
+                    "publish_pots",
+                    publishers.pots.publish_pots(primary.block_info(), state.get_pots()).await,
+                );
             }
 
             // Now handle the certs_message properly
@@ -554,7 +564,7 @@ impl AccountsState {
                     Ok((_, message)) => match message.as_ref() {
                         Message::Clock(message) if message.number % 60 == 0 => {
                             if let Some(state) = history_tick.lock().await.current() {
-                                state.tick();
+                                state.log_stats();
                             }
                         }
                         _ => continue,

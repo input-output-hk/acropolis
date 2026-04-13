@@ -282,9 +282,9 @@ impl Datum {
 )]
 pub enum RedeemerTag {
     #[n(0)]
-    Mint,
-    #[n(1)]
     Spend,
+    #[n(1)]
+    Mint,
     #[n(2)]
     Cert,
     #[n(3)]
@@ -325,6 +325,18 @@ impl Redeemer {
     }
 }
 
+impl Ord for Redeemer {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.redeemer_pointer().cmp(&other.redeemer_pointer())
+    }
+}
+
+impl PartialOrd for Redeemer {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[derive(
     serde::Serialize,
     serde::Deserialize,
@@ -333,6 +345,8 @@ impl Redeemer {
     Debug,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Clone,
     Hash,
 )]

@@ -9,7 +9,7 @@ use caryatid_sdk::Context;
 use config::Config;
 
 use crate::{
-    drep_distribution_publisher::DRepDistributionPublisher,
+    drep_distribution_publisher::DRepDistributionPublisher, pots_publisher::PotsPublisher,
     registration_updates_publisher::StakeRegistrationUpdatesPublisher,
     spo_distribution_publisher::SPODistributionPublisher,
     spo_rewards_publisher::SPORewardsPublisher,
@@ -35,6 +35,7 @@ const DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC: (&str, &str) = (
     "publish-stake-registration-updates-topic",
     "cardano.stake.registration.updates",
 );
+const DEFAULT_POTS_TOPIC: (&str, &str) = ("publish-pots-topic", "cardano.pots");
 const DEFAULT_VALIDATION_OUTCOMES_TOPIC: (&str, &str) =
     ("validation-outcomes-topic", "cardano.validation.accounts");
 
@@ -109,6 +110,10 @@ impl AccountsConfig {
                 registration_updates: StakeRegistrationUpdatesPublisher::new(
                     context.clone(),
                     get_string_flag(config, DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC),
+                ),
+                pots: PotsPublisher::new(
+                    context.clone(),
+                    get_string_flag(config, DEFAULT_POTS_TOPIC),
                 ),
             },
             validation_outcomes_topic: get_string_flag(config, DEFAULT_VALIDATION_OUTCOMES_TOPIC),

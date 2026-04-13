@@ -20,6 +20,7 @@ pub struct GenesisValues {
     pub shelley_genesis_hash: Hash<32>,
     pub genesis_delegs: GenesisDelegates,
     pub magic_number: MagicNumber,
+    pub security_param: u64,
 }
 
 impl GenesisValues {
@@ -82,6 +83,7 @@ impl GenesisValues {
             ])
             .unwrap(),
             magic_number: MagicNumber::new(764824073),
+            security_param: 2160,
         }
     }
 

@@ -1,11 +1,11 @@
 use acropolis_common::{
-    crypto::keyhash_256, genesis_values::GenesisValues, validation::ScriptContextError, Address,
-    Datum, DatumHash, KeyHash, NativeAssetDelta, NativeAssetsDelta, PolicyId, ProposalProcedure,
-    Redeemer, RedeemerPointer, RedeemerTag, ScriptHash, ScriptLang, ScriptPurpose, ScriptRef,
+    genesis_values::GenesisValues, validation::ScriptContextError, Address, Datum, DatumHash,
+    KeyHash, NativeAssetDelta, NativeAssetsDelta, PolicyId, ProposalProcedure, Redeemer,
+    RedeemerPointer, RedeemerTag, ScriptHash, ScriptLang, ScriptPurpose, ScriptRef,
     TxCertificateWithPos, TxHash, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, Voter,
     VotingProcedures, Withdrawal,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::governance::*;
@@ -32,7 +32,7 @@ pub struct TxInfo {
     pub tx_id: TxHash,
     pub voting_procedures: Option<VotingProcedures>,
     pub proposal_procedures: Vec<ProposalProcedure>,
-    pub current_treasury_amount: Option<u64>,
+    pub treasury_value: Option<u64>,
     pub treasury_donation: Option<u64>,
     pub redeemers: Vec<Redeemer>,
 }
@@ -44,31 +44,29 @@ impl TxInfo {
         utxos: &HashMap<UTxOIdentifier, UTXOValue>,
         genesis_values: &GenesisValues,
     ) -> Result<Self, ScriptContextError> {
-        let mut sorted_consumes = tx_deltas.consumes.clone();
-        sorted_consumes.sort();
-
+        // sort inputs by UTxOIdentifier
+        let sorted_consumes = tx_deltas.consumes.iter().collect::<BTreeSet<_>>();
         let inputs = sorted_consumes
             .iter()
             .map(|utxo_id| {
                 let utxo_value =
-                    utxos.get(utxo_id).ok_or(ScriptContextError::MissingInput(*utxo_id))?;
+                    utxos.get(utxo_id).ok_or(ScriptContextError::MissingInput(**utxo_id))?;
                 Ok(ResolvedInput {
-                    utxo_id: *utxo_id,
+                    utxo_id: **utxo_id,
                     utxo_value: utxo_value.clone(),
                 })
             })
             .collect::<Result<Vec<_>, ScriptContextError>>()?;
 
-        let mut sorted_ref_inputs = tx_deltas.reference_inputs.clone();
-        sorted_ref_inputs.sort();
-
+        // sort reference inputs by UTxOIdentifier
+        let sorted_ref_inputs = tx_deltas.reference_inputs.iter().collect::<BTreeSet<_>>();
         let reference_inputs = sorted_ref_inputs
             .iter()
             .map(|utxo_id| {
                 let utxo_value =
-                    utxos.get(utxo_id).ok_or(ScriptContextError::MissingInput(*utxo_id))?;
+                    utxos.get(utxo_id).ok_or(ScriptContextError::MissingInput(**utxo_id))?;
                 Ok(ResolvedInput {
-                    utxo_id: *utxo_id,
+                    utxo_id: **utxo_id,
                     utxo_value: utxo_value.clone(),
                 })
             })
@@ -87,34 +85,57 @@ impl TxInfo {
             })
             .collect();
 
-        let validity = tx_deltas.validity_interval.as_ref().ok_or(
+        let validity_interval = tx_deltas.validity_interval.as_ref().ok_or(
             ScriptContextError::MissingValidationData("validity_interval".into()),
         )?;
         let valid_range = TimeRange::new(
-            validity.invalid_before,
-            validity.invalid_hereafter,
+            validity_interval.invalid_before,
+            validity_interval.invalid_hereafter,
             genesis_values,
         );
 
+        // Keep certificates as same order from tx body
         let certificates = tx_deltas.certs.clone().unwrap_or_default();
-        let withdrawals = tx_deltas.withdrawals.clone().unwrap_or_default();
-        let mint = tx_deltas.mint_burn_deltas.clone().unwrap_or_default();
-        let signatories = tx_deltas.required_signers.clone().unwrap_or_default();
-        let redeemers = tx_deltas.redeemers.clone().unwrap_or_default();
 
-        // In Babbage/Conway era, txInfoData includes both explicit datum witnesses AND
-        // inline datums from all inputs and reference inputs (keyed by their hash).
-        let mut datums = tx_deltas.plutus_data.clone().unwrap_or_default();
-        for utxo_id in tx_deltas.consumes.iter().chain(tx_deltas.reference_inputs.iter()) {
-            if let Some(utxo) = utxos.get(utxo_id) {
-                if let Some(Datum::Inline(bytes)) = &utxo.datum {
-                    let hash: DatumHash = keyhash_256(bytes);
-                    if !datums.iter().any(|(h, _)| h == &hash) {
-                        datums.push((hash, bytes.clone()));
-                    }
-                }
+        // NOTE:
+        // sort withdrawals by StakeAddress
+        // but when encoding
+        // because sorting differs by Plutus version
+        // Plutus V1 | V2: sort by StakingCredential (pub key first, then script)
+        // Plutus V3: sort by Credential (script first, then pub key)
+        let withdrawals = tx_deltas.withdrawals.clone().unwrap_or_default();
+
+        // NOTE:
+        // sort mint values by policy id and asset name
+        // but when encoding
+        // because MintValue differs by Plutus Version
+        // Plutus V1 | V2: Include ada entry
+        // Plutus V3: Omit ada entry
+        let mint = tx_deltas.mint_burn_deltas.clone().unwrap_or_default();
+
+        // sort signatories by KeyHash (removing duplicates)
+        let signatories = match tx_deltas.required_signers.as_ref() {
+            Some(signers) => {
+                signers.iter().cloned().collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>()
             }
-        }
+            None => vec![],
+        };
+
+        // sort by redeemers by ScriptPurpose (removing duplicates)
+        let redeemers = match tx_deltas.redeemers.as_ref() {
+            Some(redeemers) => {
+                redeemers.iter().cloned().collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>()
+            }
+            None => vec![],
+        };
+
+        // sort by hash bytes (removing duplicates)
+        let datums = match tx_deltas.plutus_data.as_ref() {
+            Some(datums) => {
+                datums.iter().cloned().collect::<BTreeMap<_, _>>().into_iter().collect::<Vec<_>>()
+            }
+            None => vec![],
+        };
 
         let tx_hash =
             tx_deltas.produces.first().map(|out| out.utxo_identifier.tx_hash).unwrap_or_default();
@@ -133,7 +154,7 @@ impl TxInfo {
             tx_id: tx_hash,
             voting_procedures: tx_deltas.voting_procedures.clone(),
             proposal_procedures: tx_deltas.proposal_procedures.clone().unwrap_or_default(),
-            current_treasury_amount: None,
+            treasury_value: tx_deltas.treasury_value,
             treasury_donation: tx_deltas.donation,
             redeemers,
         })
@@ -311,9 +332,8 @@ fn encode_tx_info<'a>(
     let valid_range = tx_info.valid_range.to_plutus_data(arena, version)?;
 
     let sigs = {
-        let mut sorted_sigs = tx_info.signatories.clone();
-        sorted_sigs.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
-        let items: Vec<_> = sorted_sigs
+        let items: Vec<_> = tx_info
+            .signatories
             .iter()
             .map(|k| k.to_plutus_data(arena, version))
             .collect::<Result<_, _>>()?;
@@ -393,7 +413,7 @@ fn encode_tx_info<'a>(
                     .collect::<Result<_, _>>()?;
                 list(arena, items)
             };
-            let treasury = encode_maybe_lovelace(tx_info.current_treasury_amount, arena, version)?;
+            let treasury = encode_maybe_lovelace(tx_info.treasury_value, arena, version)?;
             let donation = encode_maybe_lovelace(tx_info.treasury_donation, arena, version)?;
 
             Ok(constr(
@@ -522,7 +542,7 @@ fn encode_redeemers_map<'a>(
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     let sorted_inputs: Vec<UTxOIdentifier> = tx_info.inputs.iter().map(|ri| ri.utxo_id).collect();
 
-    let mut entries: Vec<_> = tx_info
+    let entries: Vec<_> = tx_info
         .redeemers
         .iter()
         .map(|redeemer| {
@@ -542,17 +562,10 @@ fn encode_redeemers_map<'a>(
             )?;
             let key = encode_redeemer_key(&purpose, arena, version)?;
             let value = from_cbor(arena, &redeemer.data)?;
-            let sort_key = (&redeemer.tag, redeemer.index);
-            Ok((sort_key, key, value))
+            Ok((key, value))
         })
         .collect::<Result<_, ScriptContextError>>()?;
-
-    // Sort by PlutusPurpose constructor order (Mint < Spend < Cert < Reward
-    // < Vote < Propose), then by index within each tag.
-    entries.sort_by_key(|(sort_key, _, _)| *sort_key);
-
-    let pairs = entries.into_iter().map(|(_, k, v)| (k, v)).collect();
-    Ok(map(arena, pairs))
+    Ok(map(arena, entries))
 }
 
 /// Encode a `ScriptPurpose` as a redeemer map key.

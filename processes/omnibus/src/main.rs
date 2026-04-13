@@ -19,7 +19,6 @@ use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
-use acropolis_module_era_state::EraState;
 use acropolis_module_fake_block_injector::FakeBlockInjector;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
@@ -106,7 +105,6 @@ pub async fn main() -> Result<()> {
 
     // Register modules
     GenesisBootstrapper::register(&mut process);
-    EraState::register(&mut process);
     SnapshotBootstrapper::register(&mut process);
     MithrilSnapshotFetcher::register(&mut process);
     BlockUnpacker::register(&mut process);

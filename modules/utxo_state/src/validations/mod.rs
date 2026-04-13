@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use acropolis_common::{
+    genesis_values::GenesisValues,
     protocol_params::ProtocolParams,
     validation::{Phase1ValidationError, TransactionValidationError},
-    Era, PoolRegistrationUpdate, ReferenceScript, ScriptHash, StakeRegistrationUpdate,
+    CostModels, Era, PoolRegistrationUpdate, ReferenceScript, ScriptHash, StakeRegistrationUpdate,
     TxUTxODeltas, UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
@@ -15,12 +17,16 @@ pub mod phase2;
 mod phase_two;
 mod shelley;
 
+#[allow(clippy::too_many_arguments)]
 pub fn validate_tx(
     tx_deltas: &TxUTxODeltas,
     pool_registration_updates: &[PoolRegistrationUpdate],
     stake_registration_updates: &[StakeRegistrationUpdate],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
     protocol_params: &ProtocolParams,
+    genesis_values: &GenesisValues,
+    cost_models: &CostModels,
+    lookup_reference_script: &dyn Fn(&ScriptHash) -> Option<Arc<ReferenceScript>>,
     era: Era,
 ) -> Result<(), Box<TransactionValidationError>> {
     let inputs = &tx_deltas.consumes;
@@ -86,6 +92,21 @@ pub fn validate_tx(
             .collect();
         babbage::utxow::validate(created_reference_scripts)
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
+    }
+
+    // Phase 2: Plutus script execution (if params provided and redeemers present)
+    let has_redeemers = tx_deltas.redeemers.as_ref().is_some_and(|r| !r.is_empty());
+    if has_redeemers && era >= Era::Alonzo {
+        phase_two::validate_tx_phase_two(
+            tx_deltas,
+            utxos,
+            genesis_values,
+            cost_models,
+            &scripts_needed,
+            &scripts_provided,
+            lookup_reference_script,
+        )
+        .map_err(|e| Box::new(e.into()))?;
     }
 
     Ok(())

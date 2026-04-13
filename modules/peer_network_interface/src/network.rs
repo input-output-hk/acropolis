@@ -778,14 +778,16 @@ mod tests {
     async fn test_manager_from_cfg(cfg: InterfaceConfig) -> NetworkManager {
         let context = test_context();
         let (events_sender, events) = mpsc::channel(32);
+        let block_wanted_subscription =
+            Some(context.message_bus.subscribe(&cfg.block_wanted_topic).await.unwrap());
         let flow_handler = BlockFlowHandler::new(
             &cfg,
             BlockFlowMode::Consensus,
+            acropolis_common::params::SECURITY_PARAMETER_K,
             context.clone(),
             events_sender.clone(),
-        )
-        .await
-        .unwrap();
+            block_wanted_subscription,
+        );
         NetworkManager::new(
             cfg.node_addresses.clone(),
             0,

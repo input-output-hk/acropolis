@@ -2036,7 +2036,7 @@ impl GovernanceAction {
 }
 
 #[derive(
-    serde::Serialize, serde::Deserialize, Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Hash,
+    serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash,
 )]
 pub enum Voter {
     ConstitutionalCommitteeKey(ConstitutionalCommitteeKeyHash),
@@ -2071,6 +2071,24 @@ impl Voter {
             Voter::DRepKey(k) => Some(k.into_inner()),
             Voter::StakePoolKey(k) => Some(k.into_inner()),
             _ => None,
+        }
+    }
+
+    /// Compare Voters; since Haskell ledger trans Voting Procedures without re-sorting and use Ledger Credential;
+    /// Which caused Credential sort different from Plutus V1, V2, which uses Plutus Credential (they sort PubKey first, then Script),
+    /// But in Voters, Script comes first, then PubKey;
+    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/conway/impl/src/Cardano/Ledger/Conway/TxInfo.hs#L695
+    pub fn cmp_as_ledger(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Voter::ConstitutionalCommitteeKey(_), Voter::ConstitutionalCommitteeScript(_)) => {
+                std::cmp::Ordering::Greater
+            }
+            (Voter::ConstitutionalCommitteeScript(_), Voter::ConstitutionalCommitteeKey(_)) => {
+                std::cmp::Ordering::Less
+            }
+            (Voter::DRepKey(_), Voter::DRepScript(_)) => std::cmp::Ordering::Greater,
+            (Voter::DRepScript(_), Voter::DRepKey(_)) => std::cmp::Ordering::Less,
+            (a, b) => a.cmp(b),
         }
     }
 }
@@ -2123,6 +2141,21 @@ pub struct SingleVoterVotes {
 pub struct VotingProcedures {
     #[serde_as(as = "Vec<(_, _)>")]
     pub votes: HashMap<Voter, SingleVoterVotes>,
+}
+
+impl VotingProcedures {
+    pub fn sorted_votes(&self) -> Vec<(&Voter, Vec<(&GovActionId, &VotingProcedure)>)> {
+        let mut sorted = self.votes.iter().collect::<Vec<(_, _)>>();
+        sorted.sort_by(|(a, _), (b, _)| a.cmp_as_ledger(b)); // sort by voter
+        sorted
+            .iter()
+            .map(|(voter, single_votes)| {
+                let mut votes = single_votes.voting_procedures.iter().collect::<Vec<(_, _)>>();
+                votes.sort_by(|(a, _), (b, _)| a.cmp(b)); // sort inner map by gaid
+                (*voter, votes)
+            })
+            .collect::<Vec<_>>()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
