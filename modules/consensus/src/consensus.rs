@@ -6,8 +6,10 @@ pub mod tree_block;
 pub mod tree_error;
 pub mod tree_observer;
 
+use acropolis_common::params::SECURITY_PARAMETER_K;
 use acropolis_common::{
     configuration::{get_bool_flag, get_string_flag, get_u64_flag, BlockFlowMode},
+    genesis_values::GenesisValues,
     messages::{
         BlockRejectedMessage, BlockWantedMessage, CardanoMessage, ConsensusMessage, Message,
         RawBlockMessage, StateTransitionMessage,
@@ -38,7 +40,8 @@ const DEFAULT_CONSENSUS_WANTS_TOPIC: (&str, &str) =
     ("consensus-wants-topic", "cardano.consensus.wants");
 const DEFAULT_FORCE_VALIDATION: (&str, bool) = ("force-validation", true);
 const DEFAULT_VALIDATION_TIMEOUT: (&str, u64) = ("validation-timeout", 60); // seconds
-const DEFAULT_SECURITY_PARAMETER: (&str, u64) = ("security-parameter", 2160); // TODO: This should come from the protocol params message security_param
+const DEFAULT_GENESIS_COMPLETION_TOPIC: (&str, &str) =
+    ("genesis-completion-topic", "cardano.sequence.bootstrapped");
 
 /// Events emitted by the consensus tree observer, queued for async publishing.
 enum ObserverEvent {
@@ -186,8 +189,8 @@ impl Consensus {
         let force_validation = get_bool_flag(&config, DEFAULT_FORCE_VALIDATION);
         info!("Force validation and chain selection: {force_validation}");
 
-        let security_parameter = get_u64_flag(&config, DEFAULT_SECURITY_PARAMETER);
-        info!("Security parameter k={security_parameter}");
+        let genesis_completion_topic = get_string_flag(&config, DEFAULT_GENESIS_COMPLETION_TOPIC);
+        info!("Subscribing to genesis completion on '{genesis_completion_topic}'");
 
         // Subscribe for incoming blocks (BlockAvailable)
         let block_subscription = context.subscribe(&blocks_available_topic).await?;
@@ -200,35 +203,54 @@ impl Consensus {
             None
         };
 
+        // Subscribe to genesis completion for initial security parameter
+        let mut genesis_subscription = context.subscribe(&genesis_completion_topic).await?;
+
         // Subscribe all the validators
         let validator_subscriptions: Vec<_> =
             try_join_all(validator_topics.iter().map(|topic| context.subscribe(topic))).await?;
 
         let do_validation = !validator_subscriptions.is_empty();
 
-        // Create the consensus tree with a queue-based observer
-        let event_queue: EventQueue = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let observer = Box::new(QueuingConsensusTreeObserver {
-            events: event_queue.clone(),
-        });
-        let tree = ConsensusTree::new(security_parameter, observer);
-
-        let mut runtime = ConsensusRuntime {
-            context: context.clone(),
-            blocks_proposed_topic,
-            consensus_wants_topic,
-            event_queue,
-            pending_post_rollback_marker: None,
-            tree,
-            block_data: HashMap::new(),
-            validator_topics,
-            validator_subscriptions,
-            validation_timeout,
-            do_validation,
-            stats: ConsensusStats::default(),
-        };
-
+        let run_context = context.clone();
         context.run(async move {
+            let genesis_k = Self::wait_genesis_values(&mut genesis_subscription)
+                .await
+                .map(|gv| {
+                    info!(
+                        k = gv.security_param,
+                        "Security parameter k set from genesis values"
+                    );
+                    gv.security_param
+                })
+                .unwrap_or_else(|e| {
+                    warn!(
+                        "Failed to receive genesis values, using default k={}: {e:#}",
+                        SECURITY_PARAMETER_K
+                    );
+                    SECURITY_PARAMETER_K
+                });
+
+            let event_queue: EventQueue = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let observer = Box::new(QueuingConsensusTreeObserver {
+                events: event_queue.clone(),
+            });
+            let tree = ConsensusTree::new(genesis_k, observer);
+
+            let mut runtime = ConsensusRuntime {
+                context: run_context,
+                blocks_proposed_topic,
+                consensus_wants_topic,
+                event_queue,
+                pending_post_rollback_marker: None,
+                tree,
+                block_data: HashMap::new(),
+                validator_topics,
+                validator_subscriptions,
+                validation_timeout,
+                do_validation,
+                stats: ConsensusStats::default(),
+            };
             // TODO: Temporary until consensus flow fully works.
             match flow_mode {
                 BlockFlowMode::Direct => {
@@ -245,6 +267,18 @@ impl Consensus {
         });
 
         Ok(())
+    }
+
+    async fn wait_genesis_values(
+        subscription: &mut Box<dyn Subscription<Message>>,
+    ) -> Result<GenesisValues> {
+        let (_, message) = subscription.read().await?;
+        match message.as_ref() {
+            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                Ok(complete.values.clone())
+            }
+            msg => anyhow::bail!("Unexpected message on genesis completion topic: {msg:?}"),
+        }
     }
 }
 
@@ -921,7 +955,6 @@ impl ConsensusRuntime {
                     _,
                     CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
                 )) => {
-                    // Pass rollback to all validators and state modules.
                     self.context
                         .message_bus
                         .publish(&self.blocks_proposed_topic, message.clone())
@@ -1035,7 +1068,7 @@ mod tests {
 
         let event_queue: EventQueue = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut tree = ConsensusTree::new(
-            DEFAULT_SECURITY_PARAMETER.1,
+            SECURITY_PARAMETER_K,
             Box::new(QueuingConsensusTreeObserver {
                 events: event_queue.clone(),
             }),

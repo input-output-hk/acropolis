@@ -322,6 +322,10 @@ impl GenesisBootstrapper {
                     )
                     .unwrap(),
                     magic_number: MagicNumber::new(byron_genesis.protocol_consts.protocol_magic),
+                    security_param: shelley_genesis
+                        .security_param
+                        .map(|k| k as u64)
+                        .unwrap_or(byron_genesis.protocol_consts.k as u64),
                 };
 
                 // Send completion message

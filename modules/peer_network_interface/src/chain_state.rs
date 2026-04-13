@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::{connection::Header, network::PeerId};
-use acropolis_common::{BlockHash, hash::Hash, params::SECURITY_PARAMETER_K};
+use acropolis_common::{BlockHash, hash::Hash};
 use pallas::network::miniprotocols::Point;
 use tracing::warn;
 
@@ -140,7 +140,6 @@ impl SpecificPoint {
     }
 }
 
-#[derive(Debug, Default)]
 pub struct ChainState {
     pub preferred_upstream: Option<PeerId>,
     blocks: BTreeMap<u64, SlotBlockData>,
@@ -149,11 +148,31 @@ pub struct ChainState {
     rolled_back_to: Option<Header>,
     tips: HashMap<PeerId, Point>,
     waiting_for_first_message: bool,
+    security_param_k: u64,
 }
 
 impl ChainState {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(security_param_k: u64) -> Self {
+        Self {
+            preferred_upstream: None,
+            blocks: BTreeMap::new(),
+            published_blocks: VecDeque::new(),
+            unpublished_blocks: VecDeque::new(),
+            rolled_back_to: None,
+            tips: HashMap::new(),
+            waiting_for_first_message: false,
+            security_param_k,
+        }
+    }
+
+    pub fn handle_sync_reset(&mut self) {
+        self.preferred_upstream = None;
+        self.blocks.clear();
+        self.published_blocks.clear();
+        self.unpublished_blocks.clear();
+        self.rolled_back_to = None;
+        self.tips.clear();
+        self.waiting_for_first_message = false;
     }
 
     pub fn handle_roll_forward(&mut self, id: PeerId, header: Header) -> Vec<PeerId> {
@@ -358,7 +377,8 @@ impl ChainState {
         }
         if let Some(published) = self.unpublished_blocks.pop_front() {
             self.published_blocks.push_back(published);
-            while self.published_blocks.len() > SECURITY_PARAMETER_K as usize {
+            let k = self.security_param_k as usize;
+            while self.published_blocks.len() > k {
                 let Some(block) = self.published_blocks.pop_front() else {
                     break;
                 };
@@ -388,9 +408,14 @@ pub enum ChainEvent<'a> {
 #[cfg(test)]
 mod tests {
     use acropolis_common::Era;
+    use acropolis_common::params::SECURITY_PARAMETER_K;
     use pallas::crypto::hash::Hasher;
 
     use super::*;
+
+    fn make_test_chain_state() -> ChainState {
+        ChainState::new(SECURITY_PARAMETER_K)
+    }
 
     fn make_block(slot: u64, desc: &str) -> (Header, Vec<u8>) {
         let mut hasher = Hasher::<256>::new();
@@ -411,7 +436,7 @@ mod tests {
 
     #[test]
     fn should_work_in_happy_path() {
-        let mut state = ChainState::new();
+        let mut state = make_test_chain_state();
         let peer = PeerId(0);
         state.handle_new_preferred_upstream(peer);
 
@@ -448,7 +473,7 @@ mod tests {
 
     #[test]
     fn should_handle_blocks_fetched_out_of_order() {
-        let mut state = ChainState::new();
+        let mut state = make_test_chain_state();
         let p1 = PeerId(0);
         state.handle_new_preferred_upstream(p1);
 
@@ -493,7 +518,7 @@ mod tests {
 
     #[test]
     fn should_handle_rollback() {
-        let mut state = ChainState::new();
+        let mut state = make_test_chain_state();
         let p1 = PeerId(0);
         state.handle_new_preferred_upstream(p1);
 
@@ -563,7 +588,7 @@ mod tests {
 
     #[test]
     fn should_ignore_irrelevant_block_fetch_after_rollback() {
-        let mut state = ChainState::new();
+        let mut state = make_test_chain_state();
         let p1 = PeerId(0);
         state.handle_new_preferred_upstream(p1);
 
@@ -641,7 +666,7 @@ mod tests {
 
     #[test]
     fn should_not_report_rollback_for_unpublished_portion_of_chain() {
-        let mut state = ChainState::new();
+        let mut state = make_test_chain_state();
         let p1 = PeerId(0);
         state.handle_new_preferred_upstream(p1);
 
@@ -690,7 +715,7 @@ mod tests {
 
     #[test]
     fn should_gracefully_switch_to_chain_on_fork() {
-        let mut state = ChainState::new();
+        let mut state = make_test_chain_state();
         let p1 = PeerId(0);
         let p2 = PeerId(1);
         state.handle_new_preferred_upstream(p1);
@@ -773,7 +798,7 @@ mod tests {
 
     #[test]
     fn should_gracefully_switch_to_new_chain_at_older_head() {
-        let mut state = ChainState::new();
+        let mut state = make_test_chain_state();
         let p1 = PeerId(0);
         state.handle_new_preferred_upstream(p1);
 
@@ -846,7 +871,7 @@ mod tests {
 
     #[test]
     fn should_gracefully_switch_to_new_chain_at_current_head() {
-        let mut state = ChainState::new();
+        let mut state = make_test_chain_state();
         let p1 = PeerId(0);
         state.handle_new_preferred_upstream(p1);
 
@@ -904,7 +929,7 @@ mod tests {
 
     #[test]
     fn should_not_drop_messages_when_switching_to_new_chain() {
-        let mut state = ChainState::new();
+        let mut state = make_test_chain_state();
         let p1 = PeerId(0);
         state.handle_new_preferred_upstream(p1);
 
