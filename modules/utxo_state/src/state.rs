@@ -1028,7 +1028,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn observe_output_adds_immutable_block_utxos_to_volatile_index() {
+    async fn observe_output_adds_immutable_block_utxos_to_immutable_index() {
         let mut state = new_state();
         let datum_data = vec![1, 2, 3, 4, 5];
 
@@ -1072,8 +1072,8 @@ pub mod tests {
         let deltas = UTXODeltasMessage { deltas };
 
         state.handle_utxo_deltas(&block, &deltas).await.unwrap();
-        assert_eq!(1, state.volatile_utxos.len());
-        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
+        assert_eq!(0, state.volatile_utxos.len());
+        assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
         let key = output.utxo_identifier;
@@ -1119,7 +1119,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn observe_input_marks_immutable_block_utxo_spent_without_deleting_immutable_store() {
+    async fn observe_input_marks_immutable_block_utxo_spent() {
         let mut state = new_state();
         let output = TxOutput {
             utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
@@ -1147,8 +1147,8 @@ pub mod tests {
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
         state.observe_block(&block1).await.unwrap();
         state.observe_output(&output, &block1).await.unwrap();
-        assert_eq!(1, state.volatile_utxos.len());
-        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
+        assert_eq!(0, state.volatile_utxos.len());
+        assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
         let input = output.utxo_identifier;
@@ -1156,7 +1156,7 @@ pub mod tests {
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
         state.observe_block(&block2).await.unwrap();
         state.observe_input(&input, &block2).await.unwrap();
-        assert_eq!(1, state.volatile_utxos.len());
+        assert_eq!(0, state.volatile_utxos.len());
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
     }
@@ -1319,7 +1319,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn explicit_rollback_reinstates_future_spent_immutable_block_utxos() {
+    async fn explicit_rollback_reinstates_future_spent_volatile_block_utxos() {
         let mut state = new_state();
 
         let output = TxOutput {
@@ -1330,12 +1330,12 @@ pub mod tests {
             script_ref: None,
         };
 
-        let block10 = create_block(BlockStatus::Immutable, 10, 10);
+        let block10 = create_block(BlockStatus::Volatile, 10, 10);
         state.observe_block(&block10).await.unwrap();
         state.observe_output(&output, &block10).await.unwrap();
         assert!(state.lookup_utxo(&output.utxo_identifier).await.unwrap().is_some());
 
-        let block11 = create_block(BlockStatus::Immutable, 11, 11);
+        let block11 = create_block(BlockStatus::Volatile, 11, 11);
         state.observe_block(&block11).await.unwrap();
         state.observe_input(&output.utxo_identifier, &block11).await.unwrap();
         assert_eq!(0, state.count_valid_utxos().await);
@@ -1718,8 +1718,8 @@ pub mod tests {
         let deltas1 = UTXODeltasMessage { deltas };
 
         state.handle_utxo_deltas(&block1, &deltas1).await.unwrap();
-        assert_eq!(1, state.volatile_utxos.len());
-        assert_eq!(0, state.immutable_utxos.len().await.unwrap());
+        assert_eq!(0, state.volatile_utxos.len());
+        assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
 
@@ -1736,7 +1736,7 @@ pub mod tests {
         let deltas2 = UTXODeltasMessage { deltas };
         state.handle_utxo_deltas(&block2, &deltas2).await.unwrap();
 
-        assert_eq!(1, state.volatile_utxos.len());
+        assert_eq!(0, state.volatile_utxos.len());
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
         assert_eq!(0, *observer.balance.lock().await);
