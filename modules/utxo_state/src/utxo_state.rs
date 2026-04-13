@@ -6,11 +6,13 @@ use acropolis_common::{
     configuration::{get_string_flag, StartupMode},
     declare_cardano_reader,
     messages::{
-        CardanoMessage, Message, PoolRegistrationUpdatesMessage, ProtocolParamsMessage,
-        SnapshotMessage, SnapshotStateMessage, StakeRegistrationUpdatesMessage, StateQuery,
-        StateQueryResponse, StateTransitionMessage, UTXODeltasMessage,
+        CardanoMessage, GenesisCompleteMessage, Message, PoolRegistrationUpdatesMessage,
+        ProtocolParamsMessage, SnapshotMessage, SnapshotStateMessage,
+        StakeRegistrationUpdatesMessage, StateQuery, StateQueryResponse, StateTransitionMessage,
+        UTXODeltasMessage,
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+    Pots,
 };
 use caryatid_sdk::{module, Context, Subscription};
 
@@ -51,6 +53,13 @@ mod utils;
 pub mod validations;
 
 declare_cardano_reader!(
+    GenesisCompleteReader,
+    "bootstrapped-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+    GenesisComplete,
+    GenesisCompleteMessage
+);
+declare_cardano_reader!(
     UTxODeltasReader,
     "utxo-deltas-subscribe-topic",
     "cardano.utxo.deltas",
@@ -77,6 +86,13 @@ declare_cardano_reader!(
     "cardano.pool.registration.updates",
     PoolRegistrationUpdates,
     PoolRegistrationUpdatesMessage
+);
+declare_cardano_reader!(
+    PotsReader,
+    "pots-subscribe-topic",
+    "cardano.pots",
+    Pots,
+    Pots
 );
 
 const DEFAULT_STORE: (&str, &str) = ("store", "memory");
@@ -115,13 +131,28 @@ impl UTXOState {
     async fn run(
         context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,
+        mut bootstrapped_reader: GenesisCompleteReader,
         mut utxo_deltas_reader: UTxODeltasReader,
         mut params_reader: ParamsReader,
         mut pool_updates_reader: Option<PoolUpdatesReader>,
         mut stake_updates_reader: Option<StakeUpdatesReader>,
+        mut pots_reader: PotsReader,
         publish_tx_validation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
+        let genesis_values = match bootstrapped_reader.read_with_rollbacks().await? {
+            RollbackWrapper::Normal((block_info, genesis_complete)) => {
+                info!(
+                    "Received genesis complete message at block {}",
+                    block_info.number
+                );
+                genesis_complete.values.clone()
+            }
+            _ => {
+                bail!("Failed to read genesis complete message");
+            }
+        };
+
         let mut bootstrap_block_processed = false;
 
         loop {
@@ -141,16 +172,24 @@ impl UTXOState {
                     None
                 }
             };
+            let is_new_epoch = deltas_msg.as_ref().map(|(b, _)| b.new_epoch).unwrap_or(true);
 
             let mut current_protocol_params = state.lock().await.get_or_init_protocol_parameters();
 
-            // Read protocol parameters if new epoch
-            if deltas_msg.as_ref().map(|(b, _)| b.new_epoch).unwrap_or(true) {
+            // Read protocol parameters and pots if new epoch
+            if is_new_epoch {
                 match ctx
                     .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
                 {
                     RollbackWrapper::Normal((_, params)) => {
                         current_protocol_params = params.params.clone();
+                    }
+                    RollbackWrapper::Rollback(_) => {}
+                }
+
+                match ctx.consume_sync("pots_reader", pots_reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((_, pots)) => {
+                        state.lock().await.handle_pots(pots.as_ref().clone());
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
@@ -203,6 +242,7 @@ impl UTXOState {
                                     &pool_registration_updates,
                                     &stake_registration_updates,
                                     &current_protocol_params,
+                                    &genesis_values,
                                 )
                                 .await
                                 .map_err(|e| e.into()),
@@ -256,6 +296,7 @@ impl UTXOState {
         }
 
         // Subscribers
+        let bootstrapped_reader = GenesisCompleteReader::new(&context, &config).await?;
         let pool_updates_reader = if pool_registration_updates_subscribe_topic.is_some() {
             Some(PoolUpdatesReader::new(&context, &config).await?)
         } else {
@@ -268,6 +309,7 @@ impl UTXOState {
         };
         let utxo_deltas_reader = UTxODeltasReader::new(&context, &config).await?;
         let params_reader = ParamsReader::new(&context, &config).await?;
+        let pots_reader = PotsReader::new(&context, &config).await?;
 
         let snapshot_topic = get_string_flag(&config, DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC);
         info!("Creating snapshot subscriber on '{snapshot_topic}'");
@@ -317,10 +359,12 @@ impl UTXOState {
             Self::run(
                 context_run,
                 state_run,
+                bootstrapped_reader,
                 utxo_deltas_reader,
                 params_reader,
                 pool_updates_reader,
                 stake_updates_reader,
+                pots_reader,
                 utxo_validation_publish_topic,
                 is_snapshot_mode,
             )

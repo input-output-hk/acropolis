@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
     KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
-    Redeemer, ReferenceScript, ScriptHash, ScriptLang, ScriptRef, Slot, StakeRegistrationUpdate,
-    TxCertificate, TxCertificateWithPos, TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness,
-    Value, ValueMap, VotingProcedures, Withdrawal,
+    Redeemer, ReferenceScript, ScriptHash, ScriptRef, Slot, StakeRegistrationUpdate, TxCertificate,
+    TxCertificateWithPos, TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness, Value, ValueMap,
+    VotingProcedures, Withdrawal,
 };
 
 /// Transaction output (UTXO)
@@ -78,6 +78,7 @@ pub struct Transaction {
     pub reference_inputs: Vec<UTxOIdentifier>,
     pub fee: u64,
     pub donation: Option<u64>,
+    pub treasury_value: Option<u64>,
     pub created_reference_scripts: Vec<(ScriptHash, ReferenceScript)>,
     // Transaction total collateral that is moved to fee pot
     // only added since Babbage era
@@ -92,7 +93,7 @@ pub struct Transaction {
     pub voting_procedures: Option<VotingProcedures>,
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
     pub vkey_witnesses: Vec<VKeyWitness>,
-    pub script_witnesses: Vec<(ScriptHash, ScriptLang)>,
+    pub script_witnesses: Vec<(ScriptHash, ReferenceScript)>,
     pub redeemers: Vec<Redeemer>,
     pub plutus_data: Vec<(DatumHash, Vec<u8>)>,
     pub error: Option<Phase1ValidationError>,
@@ -115,6 +116,7 @@ impl Transaction {
             reference_inputs,
             fee,
             donation,
+            treasury_value,
             created_reference_scripts,
             stated_total_collateral,
             is_valid,
@@ -139,6 +141,7 @@ impl Transaction {
             reference_inputs,
             fee,
             donation,
+            treasury_value,
             created_reference_scripts: None,
             stated_total_collateral,
             is_valid,
@@ -197,6 +200,9 @@ pub struct TxUTxODeltas {
     // Transaction donation (added from Conway era)
     pub donation: Option<u64>,
 
+    // Transaction Treasury Value (added from Conway era)
+    pub treasury_value: Option<u64>,
+
     // Transaction total collateral
     pub stated_total_collateral: Option<u64>,
 
@@ -242,7 +248,7 @@ pub struct TxUTxODeltas {
     pub vkey_witnesses: Option<Vec<VKeyWitness>>,
 
     // Scripts Witnesses Provided
-    pub script_witnesses: Option<Vec<(ScriptHash, ScriptLang)>>,
+    pub script_witnesses: Option<Vec<(ScriptHash, ReferenceScript)>>,
 
     // Redeemers
     pub redeemers: Option<Vec<Redeemer>>,

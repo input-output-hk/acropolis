@@ -17,7 +17,7 @@ use acropolis_common::{
     math::update_value_with_delta,
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, EpochActivityMessage,
-        GovernanceOutcomesMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
+        GovernanceOutcomesMessage, ProtocolParamsMessage, SPOStateMessage,
         StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::{ProtocolParams, ShelleyParams},
@@ -324,7 +324,7 @@ impl State {
     }
 
     /// Get the current pot balances
-    pub fn _get_pots(&self) -> Pots {
+    pub fn get_pots(&self) -> Pots {
         self.pots.clone()
     }
 
@@ -1839,9 +1839,8 @@ impl State {
         }
     }
 
-    /// Handle pots
-    pub fn handle_pot_deltas(&mut self, pot_deltas: &PotDeltasMessage) -> Result<()> {
-        let pot_deltas = &pot_deltas.deltas;
+    /// Handle initial pots
+    pub fn handle_initial_pots(&mut self, initial_pots: &Pots) -> Result<()> {
         let apply = |name: &str, pot: &mut u64, delta: i64| {
             if let Err(e) = update_value_with_delta(pot, delta) {
                 error!("Applying {name} pot delta {delta}: {e}");
@@ -1853,17 +1852,17 @@ impl State {
         apply(
             "Treasury",
             &mut self.pots.treasury,
-            pot_deltas.delta_treasury,
+            initial_pots.treasury.try_into().expect("initial treasury pot value out of range"),
         );
         apply(
             "Reserves",
             &mut self.pots.reserves,
-            pot_deltas.delta_reserves,
+            initial_pots.reserves.try_into().expect("initial reserves pot value out of range"),
         );
         apply(
             "Deposits",
             &mut self.pots.deposits,
-            pot_deltas.delta_deposits,
+            initial_pots.deposits.try_into().expect("initial deposits pot value out of range"),
         );
 
         Ok(())
@@ -1974,7 +1973,6 @@ mod tests {
 
     use super::*;
     use acropolis_common::crypto::{keyhash_224, keyhash_256};
-    use acropolis_common::messages::BootstrapPotDeltas;
     use acropolis_common::queries::accounts::AccountsStateQueryResponse;
     use acropolis_common::queries::errors::QueryError;
     use acropolis_common::state_history::{StateHistory, StateHistoryStore};
@@ -2229,17 +2227,15 @@ mod tests {
     }
 
     #[test]
-    fn pot_delta_updates_pots() {
+    fn initial_pots_updates_pots() {
         let mut state = State::default();
-        let pot_deltas = PotDeltasMessage {
-            deltas: BootstrapPotDeltas {
-                delta_treasury: 99,
-                delta_reserves: 42,
-                delta_deposits: 77,
-            },
+        let initial_pots = Pots {
+            treasury: 99,
+            reserves: 42,
+            deposits: 77,
         };
 
-        state.handle_pot_deltas(&pot_deltas).unwrap();
+        state.handle_initial_pots(&initial_pots).unwrap();
         assert_eq!(state.pots.reserves, 42);
         assert_eq!(state.pots.treasury, 99);
         assert_eq!(state.pots.deposits, 77);

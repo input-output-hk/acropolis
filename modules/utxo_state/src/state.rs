@@ -3,6 +3,7 @@ use crate::address_delta_mode::AddressDeltaPublishMode;
 use crate::reference_scripts_state::ReferenceScriptsState;
 use crate::validations;
 use crate::volatile_index::VolatileIndex;
+use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::messages::Message;
 use acropolis_common::protocol_params::ProtocolParams;
 use acropolis_common::state_history::{StateHistory, StateHistoryStore};
@@ -12,8 +13,8 @@ use acropolis_common::{
 };
 use acropolis_common::{
     Address, AddressDelta, CreatedUTxOExtended, Era, ExtendedAddressDelta, PoolRegistrationUpdate,
-    ReferenceScript, ScriptHash, ShelleyAddressPointer, SpentUTxOExtended, StakeRegistrationUpdate,
-    TxHash, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, ValueMap,
+    Pots, ReferenceScript, ScriptHash, ShelleyAddressPointer, SpentUTxOExtended,
+    StakeRegistrationUpdate, TxHash, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, ValueMap,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -129,6 +130,9 @@ pub struct State {
 
     /// Address delta publish mode for emitted observer deltas.
     address_delta_publish_mode: AddressDeltaPublishMode,
+
+    /// Current Pots, updated at the start of each epoch
+    pots: Pots,
 }
 
 impl State {
@@ -158,6 +162,7 @@ impl State {
             avvm_cancelled_value: None,
             pointer_address_values: None,
             address_delta_publish_mode,
+            pots: Pots::default(),
         }
     }
 
@@ -254,8 +259,10 @@ impl State {
     }
 
     /// Look up a Reference script
-    #[allow(dead_code)]
-    pub fn lookup_reference_script(&self, script_hash: &ScriptHash) -> Option<ReferenceScript> {
+    pub fn lookup_reference_script(
+        &self,
+        script_hash: &ScriptHash,
+    ) -> Option<Arc<ReferenceScript>> {
         self.reference_scripts_history.get_current_state().lookup_reference_script(script_hash)
     }
 
@@ -483,6 +490,14 @@ impl State {
             volatile_utxos = self.volatile_utxos.len(),
             valid_utxos = n_valid,
         );
+    }
+
+    /// TODO:
+    /// We are storing pots in utxo_state for LEDGER rule validation
+    /// ConwayTreasuryValueMismatch: Which validates transaction's treasury value
+    /// is same as the one from accounts_state.
+    pub fn handle_pots(&mut self, pots: Pots) {
+        self.pots = pots;
     }
 
     /// Tick for pruning and logging
@@ -883,6 +898,7 @@ impl State {
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
         protocol_params: &ProtocolParams,
+        genesis_values: &GenesisValues,
     ) -> Result<(), Box<ValidationError>> {
         let mut bad_transactions = Vec::new();
         let deltas = &deltas_msg.deltas;
@@ -892,6 +908,7 @@ impl State {
             deltas.iter().flat_map(|tx_deltas| tx_deltas.consumes.iter()).collect::<Vec<_>>();
         all_inputs.extend(deltas.iter().flat_map(|tx_deltas| tx_deltas.reference_inputs.iter()));
         let mut utxos = self.collect_utxos(&all_inputs).await;
+        let cost_models = protocol_params.cost_models();
 
         for tx_deltas in deltas.iter() {
             if block.status != BlockStatus::Bootstrap {
@@ -901,6 +918,9 @@ impl State {
                     stake_registration_updates,
                     &utxos,
                     protocol_params,
+                    genesis_values,
+                    &cost_models,
+                    &|script_hash| self.lookup_reference_script(script_hash),
                     block.era,
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
@@ -1092,7 +1112,7 @@ pub mod tests {
 
         match state.lookup_reference_script(&ref_script.compute_hash()) {
             Some(reference_script) => {
-                assert_eq!(ref_script, reference_script);
+                assert_eq!(ref_script, *reference_script);
             }
             None => panic!("Reference script not found"),
         }
@@ -1357,7 +1377,7 @@ pub mod tests {
         state.handle_utxo_deltas(&block2, &deltas).await.unwrap();
         assert_eq!(
             Some(v1_script.clone()),
-            state.lookup_reference_script(&v1_script.compute_hash())
+            state.lookup_reference_script(&v1_script.compute_hash()).map(|s| (*s).clone())
         );
 
         let rollback2 = create_block(BlockStatus::RolledBack, 2, 2);
@@ -1387,11 +1407,11 @@ pub mod tests {
         state.handle_utxo_deltas(&block1, &deltas).await.unwrap();
         assert_eq!(
             Some(v2_script.clone()),
-            state.lookup_reference_script(&v2_script.compute_hash())
+            state.lookup_reference_script(&v2_script.compute_hash()).map(|s| (*s).clone())
         );
         assert_eq!(
             None,
-            state.lookup_reference_script(&v1_script.compute_hash())
+            state.lookup_reference_script(&v1_script.compute_hash()).map(|s| (*s).clone())
         );
     }
 
@@ -1428,7 +1448,7 @@ pub mod tests {
         state.handle_utxo_deltas(&block2, &deltas).await.unwrap();
         assert_eq!(
             Some(v1_script.clone()),
-            state.lookup_reference_script(&v1_script.compute_hash())
+            state.lookup_reference_script(&v1_script.compute_hash()).map(|s| (*s).clone())
         );
 
         let replay_output = TxOutput {
@@ -1463,11 +1483,11 @@ pub mod tests {
 
         assert_eq!(
             Some(v2_script.clone()),
-            state.lookup_reference_script(&v2_script.compute_hash())
+            state.lookup_reference_script(&v2_script.compute_hash()).map(|s| (*s).clone())
         );
         assert_eq!(
             None,
-            state.lookup_reference_script(&v1_script.compute_hash())
+            state.lookup_reference_script(&v1_script.compute_hash()).map(|s| (*s).clone())
         );
     }
 

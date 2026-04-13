@@ -1,10 +1,16 @@
+use std::sync::Arc;
+
 use acropolis_common::{ReferenceScript, ScriptHash};
 use imbl::HashMap as ImblHashMap;
 
 #[derive(Clone, Debug, Default)]
 pub struct ReferenceScriptsState {
     /// <script hash, (ref script struct, and its occurrence count)>
-    reference_scripts: ImblHashMap<ScriptHash, (ReferenceScript, u64)>,
+    ///
+    /// Scripts are stored as `Arc<ReferenceScript>` so that lookups and
+    /// propagation through validation do not clone the underlying CBOR bytes
+    /// (which can be 4-12KB per Plutus script).
+    reference_scripts: ImblHashMap<ScriptHash, (Arc<ReferenceScript>, u64)>,
 }
 
 impl ReferenceScriptsState {
@@ -25,12 +31,15 @@ impl ReferenceScriptsState {
         for (script_hash, reference_script) in created_reference_scripts {
             self.reference_scripts
                 .entry(*script_hash)
-                .or_insert((reference_script.clone(), 0))
+                .or_insert_with(|| (Arc::new(reference_script.clone()), 0))
                 .1 += 1;
         }
     }
 
-    pub fn lookup_reference_script(&self, script_hash: &ScriptHash) -> Option<ReferenceScript> {
+    pub fn lookup_reference_script(
+        &self,
+        script_hash: &ScriptHash,
+    ) -> Option<Arc<ReferenceScript>> {
         self.reference_scripts.get(script_hash).map(|(script, _)| script.clone())
     }
 }

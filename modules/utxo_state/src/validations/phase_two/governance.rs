@@ -4,37 +4,9 @@ use acropolis_common::{
 };
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
+use crate::validations::phase_two::utils::cmp_withdrawal;
+
 use super::to_plutus_data::*;
-
-/// Plutus Data encoding uses transformed Credential;
-/// Which sorts PubKey first, then Script Hash;
-/// Only Votes and Withdrawal from Plutus V3, they use the original ledger ordering.
-fn cmp_credential_for_trans(a: &Credential, b: &Credential) -> std::cmp::Ordering {
-    match (a, b) {
-        (Credential::AddrKeyHash(_), Credential::ScriptHash(_)) => std::cmp::Ordering::Less,
-        (Credential::ScriptHash(_), Credential::AddrKeyHash(_)) => std::cmp::Ordering::Greater,
-        (a, b) => a.cmp(b),
-    }
-}
-
-// ============================================================================
-// Withdrawals
-// ============================================================================
-
-/// V3 uses the original ledger ordering for Credential
-/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/conway/impl/src/Cardano/Ledger/Conway/TxInfo.hs#L545
-fn cmp_withdrawal(
-    a: &Withdrawal,
-    b: &Withdrawal,
-    plutus_version: PlutusVersion,
-) -> std::cmp::Ordering {
-    match plutus_version {
-        PlutusVersion::V1 | PlutusVersion::V2 => {
-            cmp_credential_for_trans(&a.address.credential, &b.address.credential)
-        }
-        _ => a.address.credential.cmp(&b.address.credential),
-    }
-}
 
 pub fn encode_withdrawals<'a>(
     withdrawals: &[Withdrawal],
@@ -191,42 +163,13 @@ impl ToPlutusData for GovActionId {
 // VotingProcedures (V3)
 // ============================================================================
 
-/// Compare Voters; since Haskell ledger trans Voting Procedures without re-sorting;
-/// Which caused Credential sort different from Plutus V1, V2 (they sort PubKey first, then Script),
-/// But in Voters, Script comes first, then PubKey;
-/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/conway/impl/src/Cardano/Ledger/Conway/TxInfo.hs#L695
-fn cmp_voter(a: &Voter, b: &Voter) -> std::cmp::Ordering {
-    match (a, b) {
-        (Voter::ConstitutionalCommitteeKey(_), Voter::ConstitutionalCommitteeScript(_)) => {
-            std::cmp::Ordering::Greater
-        }
-        (Voter::ConstitutionalCommitteeScript(_), Voter::ConstitutionalCommitteeKey(_)) => {
-            std::cmp::Ordering::Less
-        }
-        (Voter::DRepKey(_), Voter::DRepScript(_)) => std::cmp::Ordering::Greater,
-        (Voter::DRepScript(_), Voter::DRepKey(_)) => std::cmp::Ordering::Less,
-        (a, b) => a.cmp(b),
-    }
-}
-
 impl ToPlutusData for VotingProcedures {
     fn to_plutus_data<'a>(
         &self,
         arena: &'a Arena,
         version: PlutusVersion,
     ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-        let sorted_votes = {
-            let mut sorted = self.votes.iter().collect::<Vec<(_, _)>>();
-            sorted.sort_by(|(a, _), (b, _)| cmp_voter(a, b)); // sort by voter
-            sorted
-                .iter()
-                .map(|(voter, single_votes)| {
-                    let mut votes = single_votes.voting_procedures.iter().collect::<Vec<(_, _)>>();
-                    votes.sort_by(|(a, _), (b, _)| a.cmp(b)); // sort inner map by gaid
-                    (*voter, votes)
-                })
-                .collect::<Vec<_>>()
-        };
+        let sorted_votes = self.sorted_votes();
         let pairs: Vec<_> = sorted_votes
             .iter()
             .map(|(voter, single_votes)| {

@@ -171,11 +171,9 @@ pub fn encode_datums<'a>(
     arena: &'a Arena,
     version: PlutusVersion,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-    let mut sorted_datums: Vec<_> = datums.iter().collect();
-    sorted_datums.sort_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
     match version {
         PlutusVersion::V1 => {
-            let tuples: Vec<_> = sorted_datums
+            let tuples: Vec<_> = datums
                 .iter()
                 .map(|(hash, cbor_bytes)| {
                     let k = hash.to_plutus_data(arena, version)?;
@@ -186,7 +184,7 @@ pub fn encode_datums<'a>(
             Ok(list(arena, tuples))
         }
         PlutusVersion::V2 | PlutusVersion::V3 => {
-            let pairs: Vec<_> = sorted_datums
+            let pairs: Vec<_> = datums
                 .iter()
                 .map(|(hash, cbor_bytes)| {
                     let k = hash.to_plutus_data(arena, version)?;

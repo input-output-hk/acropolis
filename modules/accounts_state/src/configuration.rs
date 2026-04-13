@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     drep_distribution_publisher::DRepDistributionPublisher,
+    pots_publisher::PotsPublisher,
     registration_updates_publisher::StakeRegistrationUpdatesPublisher,
     spo_distribution_publisher::SPODistributionPublisher,
     spo_distribution_store::{SPDDStore, SPDDStoreConfig},
@@ -38,6 +39,7 @@ const DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC: (&str, &str) = (
     "publish-stake-registration-updates-topic",
     "cardano.stake.registration.updates",
 );
+const DEFAULT_POTS_TOPIC: (&str, &str) = ("publish-pots-topic", "cardano.pots");
 const DEFAULT_VALIDATION_OUTCOMES_TOPIC: (&str, &str) =
     ("validation-outcomes-topic", "cardano.validation.accounts");
 
@@ -68,6 +70,7 @@ pub struct AccountsConfig {
     pub spo_rewards_publisher: SPORewardsPublisher,
     pub stake_reward_deltas_publisher: StakeRewardDeltasPublisher,
     pub stake_registration_updates_publisher: StakeRegistrationUpdatesPublisher,
+    pub pots_publisher: PotsPublisher,
 
     // Miscellaneous
     pub is_snapshot_mode: bool,
@@ -144,6 +147,10 @@ impl AccountsConfig {
             stake_registration_updates_publisher: StakeRegistrationUpdatesPublisher::new(
                 context.clone(),
                 get_string_flag(config, DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC),
+            ),
+            pots_publisher: PotsPublisher::new(
+                context.clone(),
+                get_string_flag(config, DEFAULT_POTS_TOPIC),
             ),
             is_snapshot_mode,
             validation_outcomes_topic: get_string_flag(config, DEFAULT_VALIDATION_OUTCOMES_TOPIC),

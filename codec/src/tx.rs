@@ -1,7 +1,8 @@
 use crate::{
     address::map_address, certs::map_certificate, map_all_governance_voting_procedures,
     map_alonzo_update, map_babbage_update, map_datum, map_governance_proposals_procedure,
-    map_mint_burn, map_redeemer, map_reference_script, map_value, witness::map_vkey_witnesses,
+    map_mint_burn, map_native_script, map_redeemer, map_reference_script, map_value,
+    witness::map_vkey_witnesses,
 };
 use acropolis_common::{validation::Phase1ValidationError, *};
 use pallas_primitives::Metadatum as PallasMetadatum;
@@ -119,6 +120,13 @@ pub fn map_transaction_donation(tx: &MultiEraTx) -> Option<u64> {
     }
 }
 
+pub fn map_transaction_treasury_value(tx: &MultiEraTx) -> Option<u64> {
+    match tx {
+        MultiEraTx::Conway(conway) => conway.transaction_body.treasury_value,
+        _ => None,
+    }
+}
+
 pub fn map_metadatum(metadatum: &PallasMetadatum) -> Metadatum {
     match metadatum {
         PallasMetadatum::Int(pallas_primitives::Int(i)) => Metadatum::Int(i128::from(*i)),
@@ -144,34 +152,34 @@ pub fn map_metadata(metadata: &MultiEraMeta) -> Option<Metadata> {
     }
 }
 
-pub fn map_scripts_witnesses(tx: &MultiEraTx) -> Vec<(ScriptHash, ScriptLang)> {
+pub fn map_scripts_witnesses(tx: &MultiEraTx) -> Vec<(ScriptHash, ReferenceScript)> {
     let mut scripts_provided = Vec::new();
 
     for script in tx.native_scripts() {
         scripts_provided.push((
             ScriptHash::from(*script.original_hash()),
-            ScriptLang::Native,
+            ReferenceScript::Native(map_native_script(script)),
         ));
     }
 
     for script in tx.plutus_v1_scripts() {
         scripts_provided.push((
             ScriptHash::from(*script.compute_hash()),
-            ScriptLang::plutus_v1(),
+            ReferenceScript::PlutusV1(script.as_ref().to_vec()),
         ));
     }
 
     for script in tx.plutus_v2_scripts() {
         scripts_provided.push((
             ScriptHash::from(*script.compute_hash()),
-            ScriptLang::plutus_v2(),
+            ReferenceScript::PlutusV2(script.as_ref().to_vec()),
         ));
     }
 
     for script in tx.plutus_v3_scripts() {
         scripts_provided.push((
             ScriptHash::from(*script.compute_hash()),
-            ScriptLang::plutus_v3(),
+            ReferenceScript::PlutusV3(script.as_ref().to_vec()),
         ));
     }
 
@@ -206,6 +214,7 @@ pub fn map_transaction(
     let is_valid = tx.is_valid();
 
     let donation = map_transaction_donation(tx);
+    let treasury_value = map_transaction_treasury_value(tx);
 
     let mut certs = Vec::new();
     let mut withdrawals = Vec::new();
@@ -337,6 +346,7 @@ pub fn map_transaction(
         reference_inputs,
         fee,
         donation,
+        treasury_value,
         created_reference_scripts,
         stated_total_collateral,
         is_valid,
