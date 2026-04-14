@@ -11,13 +11,9 @@ use acropolis_common::{
     },
 };
 
-use crate::{spo_distribution_store::SPDDStore, state::State};
+use crate::state::State;
 
-pub fn handle_accounts_query(
-    state: &State,
-    spdd_store: Option<&SPDDStore>,
-    message: &Message,
-) -> Arc<Message> {
+pub fn handle_accounts_query(state: &State, message: &Message) -> Arc<Message> {
     let Message::StateQuery(StateQuery::Accounts(query)) = message else {
         return Arc::new(Message::StateQueryResponse(StateQueryResponse::Accounts(
             AccountsStateQueryResponse::Error(QueryError::internal_error(
@@ -114,26 +110,6 @@ pub fn handle_accounts_query(
                 )),
             }
         }
-
-        AccountsStateQuery::GetSPDDByEpoch { epoch } => match spdd_store {
-            Some(spdd_store) => match spdd_store.query_by_epoch(*epoch) {
-                Ok(result) => AccountsStateQueryResponse::SPDDByEpoch(result),
-                Err(e) => {
-                    AccountsStateQueryResponse::Error(QueryError::internal_error(e.to_string()))
-                }
-            },
-            None => AccountsStateQueryResponse::Error(QueryError::storage_disabled("SPDD")),
-        },
-
-        AccountsStateQuery::GetSPDDByEpochAndPool { epoch, pool_id } => match spdd_store {
-            Some(spdd_store) => match spdd_store.query_by_epoch_and_pool(*epoch, pool_id) {
-                Ok(result) => AccountsStateQueryResponse::SPDDByEpochAndPool(result),
-                Err(e) => {
-                    AccountsStateQueryResponse::Error(QueryError::internal_error(e.to_string()))
-                }
-            },
-            None => AccountsStateQueryResponse::Error(QueryError::storage_disabled("SPDD")),
-        },
 
         _ => AccountsStateQueryResponse::Error(QueryError::not_implemented(format!(
             "Unimplemented query variant: {:?}",

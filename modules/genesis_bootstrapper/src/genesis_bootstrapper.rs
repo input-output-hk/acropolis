@@ -26,7 +26,6 @@ use tracing::{error, info, info_span, Instrument};
 const DEFAULT_STARTUP_TOPIC: (&str, &str) = ("startup-topic", "cardano.sequence.start");
 const DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC: (&str, &str) =
     ("publish-utxo-deltas-topic", "cardano.utxo.deltas");
-const DEFAULT_PUBLISH_POTS_TOPIC: (&str, &str) = ("publish-pots-topic", "cardano.pots");
 const DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC: (&str, &str) =
     ("publish-genesis-utxos-topic", "cardano.genesis.utxos");
 const DEFAULT_COMPLETION_TOPIC: (&str, &str) =
@@ -180,12 +179,9 @@ impl GenesisBootstrapper {
                     tip_slot: None,
                 };
 
-                if !snapshot_bootstrap {
+                let initial_pots = if !snapshot_bootstrap {
                     let publish_utxo_deltas_topic = get_string_flag(&config, DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC);
                     info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
-
-                    let publish_pots_topic = get_string_flag(&config, DEFAULT_PUBLISH_POTS_TOPIC);
-                    info!("Publishing pots on '{publish_pots_topic}'");
 
                     let publish_genesis_utxos_topic = get_string_flag(&config, DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC);
                     info!("Publishing genesis transactions on '{publish_genesis_utxos_topic}'");
@@ -272,15 +268,6 @@ impl GenesisBootstrapper {
                         }
                     };
 
-                    let message_enum = Message::Cardano((
-                        block_info.clone(),
-                        CardanoMessage::Pots(initial_pots),
-                    ));
-                    context
-                        .publish(&publish_pots_topic, Arc::new(message_enum))
-                        .await
-                        .unwrap_or_else(|e| error!("Failed to publish initial pots: {e}"));
-
                     let gen_utxos_message = Message::Cardano((
                         block_info.clone(),
                         CardanoMessage::GenesisUTxOs(GenesisUTxOsMessage {
@@ -291,7 +278,11 @@ impl GenesisBootstrapper {
                         .publish(&publish_genesis_utxos_topic, Arc::new(gen_utxos_message))
                         .await
                         .unwrap_or_else(|e| error!("Failed to publish genesis UTXOs: {e}"));
-                }
+
+                    initial_pots
+                } else {
+                    Pots::default()
+                };
 
                 let values = GenesisValues {
                     byron_timestamp: byron_genesis.start_time,
@@ -320,6 +311,7 @@ impl GenesisBootstrapper {
                         .security_param
                         .map(|k| k as u64)
                         .unwrap_or(byron_genesis.protocol_consts.k as u64),
+                    initial_pots,
                 };
 
                 // Send completion message

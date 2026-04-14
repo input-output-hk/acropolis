@@ -153,6 +153,11 @@ impl UTXOState {
             }
         };
 
+        if !is_snapshot_mode {
+            pots_reader.read_with_rollbacks().await?;
+            params_reader.read_with_rollbacks().await?;
+        }
+
         let mut bootstrap_block_processed = false;
 
         loop {
@@ -172,7 +177,8 @@ impl UTXOState {
                     None
                 }
             };
-            let is_new_epoch = deltas_msg.as_ref().map(|(b, _)| b.new_epoch).unwrap_or(true);
+            let is_new_epoch =
+                deltas_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true);
 
             let mut current_protocol_params = state.lock().await.get_or_init_protocol_parameters();
 
