@@ -8,9 +8,9 @@ use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     configuration::get_string_flag,
     messages::{
-        AssetDeltasMessage, CardanoMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, RawTxsMessage, StateTransitionMessage, TxCertificatesMessage,
-        UTXODeltasMessage, WithdrawalsMessage,
+        AssetDeltasMessage, CardanoMessage, GenesisCompleteMessage, GovernanceProceduresMessage,
+        Message, ProtocolParamsMessage, RawTxsMessage, StateTransitionMessage,
+        TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     state_history::{StateHistory, StateHistoryStore},
     *,
@@ -44,13 +44,18 @@ declare_cardano_reader!(
     ProtocolParams,
     ProtocolParamsMessage
 );
+declare_cardano_reader!(
+    GenesisReader,
+    "genesis-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+    GenesisComplete,
+    GenesisCompleteMessage
+);
 
 const DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC: (&str, &str) =
     ("publish-tx-validation-topic", "cardano.validation.tx");
 
 const CIP25_METADATA_LABEL: u64 = 721;
-// TODO: Read network name from genesis message
-const DEFAULT_NETWORK_NAME: (&str, &str) = ("startup.network-name", "mainnet");
 
 /// Tx unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -65,7 +70,6 @@ impl TxUnpacker {
     #[allow(clippy::too_many_arguments)]
     async fn run(
         context: Arc<Context<Message>>,
-        network_id: NetworkId,
         history: Arc<Mutex<StateHistory<State>>>,
         // publishers
         publish_utxo_deltas_topic: Option<String>,
@@ -76,24 +80,14 @@ impl TxUnpacker {
         publish_tx_validation_topic: String,
         // subscribers
         mut txs_reader: TxsReader,
-        bootstrapped_sub: Option<Box<dyn Subscription<Message>>>,
         mut params_reader: Option<ParamsReader>,
+        mut genesis_reader: GenesisReader,
     ) -> Result<()> {
-        let genesis = match bootstrapped_sub {
-            Some(mut sub) => {
-                let (_, bootstrapped_message) = sub.read().await?;
-                let genesis = match bootstrapped_message.as_ref() {
-                    Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
-                        complete.values.clone()
-                    }
-                    _ => panic!(
-                        "Unexpected message in genesis completion topic: {bootstrapped_message:?}"
-                    ),
-                };
-
-                Some(genesis)
+        let genesis = match genesis_reader.read_with_rollbacks().await? {
+            RollbackWrapper::Normal((_, genesis)) => genesis.values.clone(),
+            RollbackWrapper::Rollback(_) => {
+                bail!("Unexpected rollback while reading genesis values")
             }
-            None => None,
         };
 
         loop {
@@ -169,7 +163,7 @@ impl TxUnpacker {
                                         tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
-                                    let mapped_tx = acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
+                                    let mapped_tx = acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, genesis.network_id(), block.era);
                                     let tx_output = mapped_tx.calculate_tx_output();
 
                                     // sum up total output lovelace for a block
@@ -327,23 +321,21 @@ impl TxUnpacker {
 
             if let Some(txs_msg) = primary.message() {
                 if primary.do_validation() {
-                    if let Some(ref genesis) = genesis {
-                        let block = primary.block_info();
+                    let block = primary.block_info();
 
-                        let span = info_span!("tx_unpacker.validate", block = block.number);
-                        async {
-                            ctx.handle(
-                                "validate",
-                                state
-                                    .validate(block, txs_msg, &genesis.genesis_delegs)
-                                    .map_err(|e| e.into()),
-                            );
+                    let span = info_span!("tx_unpacker.validate", block = block.number);
+                    async {
+                        ctx.handle(
+                            "validate",
+                            state
+                                .validate(block, txs_msg, &genesis.genesis_delegs)
+                                .map_err(|e| e.into()),
+                        );
 
-                            ctx.publish().await;
-                        }
-                        .instrument(span)
-                        .await;
+                        ctx.publish().await;
                     }
+                    .instrument(span)
+                    .await;
                 }
             }
 
@@ -400,20 +392,7 @@ impl TxUnpacker {
             None => None,
         };
 
-        // Optional subscription for bootstrap (only needed if we are validating)
-        let bootstrapped_subscribe_topic = config.get_string("bootstrapped-subscribe-topic").ok();
-        let bootstrapped_sub = match bootstrapped_subscribe_topic {
-            Some(topic) => {
-                info!("Creating subscriber on '{topic}'");
-                Some(context.subscribe(&topic).await?)
-            }
-            None => None,
-        };
-
-        let network_id = match get_string_flag(&config, DEFAULT_NETWORK_NAME).as_ref() {
-            "mainnet" => NetworkId::Mainnet,
-            _ => NetworkId::Testnet,
-        };
+        let genesis_reader = GenesisReader::new(&context, &config).await?;
 
         // Initialize State
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -425,7 +404,6 @@ impl TxUnpacker {
         context.run(async move {
             Self::run(
                 context_run,
-                network_id,
                 history,
                 publish_utxo_deltas_topic,
                 publish_asset_deltas_topic,
@@ -434,8 +412,8 @@ impl TxUnpacker {
                 publish_governance_procedures_topic,
                 publish_tx_validation_topic,
                 txs_reader,
-                bootstrapped_sub,
                 params_reader,
+                genesis_reader,
             )
             .await
             .unwrap_or_else(|e| error!("Failed to run Tx Unpacker: {e}"));
