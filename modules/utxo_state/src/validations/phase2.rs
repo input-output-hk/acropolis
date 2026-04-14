@@ -440,7 +440,7 @@ fn evaluate_script_inner(
     let arena = arena_pool().acquire();
 
     // Decode the FLAT-encoded script
-    let program: &Program<DeBruijn> = flat::decode(&arena, script_bytes)
+    let program: &Program<DeBruijn> = flat::decode(&arena, script_bytes, plutus_version, 7)
         .map_err(|e| Phase2Error::DecodeFailed(ScriptHash::default(), e.to_string()))?;
 
     // Decode redeemer from CBOR to PlutusData
@@ -599,8 +599,8 @@ fn evaluate_raw_flat_program_inner(flat_bytes: &[u8]) -> Result<RawEvalResult, S
     let arena = arena_pool().acquire();
 
     // Decode the FLAT-encoded program
-    let program: &Program<DeBruijn> =
-        flat::decode(&arena, flat_bytes).map_err(|e| format!("Decode failed: {:?}", e))?;
+    let program: &Program<DeBruijn> = flat::decode(&arena, flat_bytes, PlutusVersion::V2, 7)
+        .map_err(|e| format!("Decode failed: {:?}", e))?;
 
     // Evaluate the program directly (no argument application)
     let start = Instant::now();

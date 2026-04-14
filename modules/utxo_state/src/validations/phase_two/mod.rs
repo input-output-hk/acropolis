@@ -33,6 +33,7 @@ pub fn validate_tx_phase_two(
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
     genesis_values: &GenesisValues,
     cost_models: &CostModels,
+    protocol_major_version: u64,
     scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
     scripts_provided: &HashMap<ScriptHash, ScriptLang>,
     lookup_reference_script: &dyn Fn(&ScriptHash) -> Option<Arc<ReferenceScript>>,
@@ -47,6 +48,7 @@ pub fn validate_tx_phase_two(
         &script_contexts,
         &scripts_table,
         cost_models,
+        protocol_major_version,
         tx_deltas.is_valid,
     )
 }

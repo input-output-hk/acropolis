@@ -75,7 +75,8 @@ pub fn validate_tx(
 
     if era >= Era::Babbage {
         let plutus_scripts_witnesses = acropolis_codec::extract_plutus_scripts_witnesses(&tx);
-        babbage::utxow::validate(&plutus_scripts_witnesses)
+
+        babbage::utxow::validate(&plutus_scripts_witnesses, protocol_params)
             .map_err(|e| Box::new(Phase1ValidationError::from(*e).into()))?;
     }
 

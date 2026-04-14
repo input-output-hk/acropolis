@@ -90,18 +90,26 @@ pub fn validate_tx(
             .iter()
             .map(|(hash, script)| (*hash, script))
             .collect();
-        babbage::utxow::validate(created_reference_scripts)
+        babbage::utxow::validate(created_reference_scripts, protocol_params)
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
     }
 
     // Phase 2: Plutus script execution (if params provided and redeemers present)
     let has_redeemers = tx_deltas.redeemers.as_ref().is_some_and(|r| !r.is_empty());
     if has_redeemers && era >= Era::Alonzo {
+        let protocol_version = protocol_params.protocol_version().ok_or_else(|| {
+            Box::new(
+                (Phase1ValidationError::Other("Protocol version is not set".to_string())).into(),
+            )
+        })?;
+        let protocol_major_version = protocol_version.major;
+
         phase_two::validate_tx_phase_two(
             tx_deltas,
             utxos,
             genesis_values,
             cost_models,
+            protocol_major_version,
             &scripts_needed,
             &scripts_provided,
             lookup_reference_script,

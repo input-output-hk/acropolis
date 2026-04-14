@@ -155,13 +155,21 @@ fn from_common_version(v: acropolis_common::PlutusVersion) -> PlutusVersion {
 ///
 /// Uses the same evaluator thread pool and arena pool as `evaluate_scripts`.
 /// Intended for calibration and benchmarking only.
-pub fn evaluate_raw_flat_program(flat_bytes: &[u8]) -> Result<std::time::Duration, String> {
+pub fn evaluate_raw_flat_program(
+    flat_bytes: &[u8],
+    plutus_version: PlutusVersion,
+    protocol_major_version: u64,
+) -> Result<std::time::Duration, String> {
     let flat_bytes = flat_bytes.to_vec();
     evaluator_pool().install(|| {
         let arena = arena_pool().acquire();
-        let program: &uplc_turbo::program::Program<DeBruijn> =
-            uplc_turbo::flat::decode(&arena, &flat_bytes)
-                .map_err(|e| format!("Decode failed: {e:?}"))?;
+        let program: &uplc_turbo::program::Program<DeBruijn> = uplc_turbo::flat::decode(
+            &arena,
+            &flat_bytes,
+            plutus_version,
+            protocol_major_version as u32,
+        )
+        .map_err(|e| format!("Decode failed: {e:?}"))?;
         let start = std::time::Instant::now();
         let result = program.eval(&arena);
         let elapsed = start.elapsed();
@@ -226,6 +234,7 @@ pub fn evaluate_scripts(
     script_contexts: &[ScriptContext<'_>],
     scripts_table: &HashMap<ScriptHash, Arc<ReferenceScript>>,
     cost_models: &CostModels,
+    protocol_major_version: u64,
     is_valid: bool,
 ) -> Result<(), Phase2ValidationError> {
     if script_contexts.is_empty() {
@@ -236,7 +245,13 @@ pub fn evaluate_scripts(
     let script_result: Result<(), Phase2ValidationError> = evaluator_pool().install(|| {
         script_contexts.par_iter().try_for_each(|sc| {
             let arena = arena_pool().acquire();
-            evaluate_single_script(&arena, sc, scripts_table, cost_models)
+            evaluate_single_script(
+                &arena,
+                sc,
+                scripts_table,
+                cost_models,
+                protocol_major_version,
+            )
         })
     });
 
@@ -257,6 +272,7 @@ fn evaluate_single_script(
     sc: &ScriptContext<'_>,
     scripts_table: &HashMap<ScriptHash, Arc<ReferenceScript>>,
     cost_models: &CostModels,
+    protocol_major_version: u64,
 ) -> Result<(), Phase2ValidationError> {
     let common_plutus_version = match &sc.script_lang {
         ScriptLang::Plutus(version) => *version,
@@ -314,8 +330,13 @@ fn evaluate_single_script(
     };
 
     // 4. Flat-decode the script
-    let mut program = uplc_turbo::flat::decode::<DeBruijn>(arena, &script_bytes)
-        .map_err(|e| Phase2ValidationError::FlatDecodingError(e.to_string()))?;
+    let mut program = uplc_turbo::flat::decode::<DeBruijn>(
+        arena,
+        &script_bytes,
+        plutus_version,
+        protocol_major_version as u32,
+    )
+    .map_err(|e| Phase2ValidationError::FlatDecodingError(e.to_string()))?;
 
     // 5. Apply arguments to the program
     for arg in &args {
@@ -467,11 +488,13 @@ mod tests {
             build_script_contexts(&tx_info, &scripts_needed, &scripts_provided).unwrap();
 
         let cost_models = ctx.protocol_params.cost_models();
+        println!("protocol params: {:?}", ctx.protocol_params);
 
         evaluate_scripts(
             &script_contexts,
             &scripts_table,
             &cost_models,
+            ctx.protocol_params.protocol_version().unwrap().major,
             tx_deltas.is_valid,
         )
     }
@@ -508,6 +531,7 @@ mod tests {
             &script_contexts,
             &empty_table,
             &cost_models,
+            ctx.protocol_params.protocol_version().unwrap().major,
             tx_deltas.is_valid,
         );
 

@@ -1,4 +1,14 @@
 {
+  "protocol_params": {
+    "shelley": {
+      "protocolParams": {
+        "protocolVersion": {
+          "minor": 0,
+          "major": 8
+        }
+      }
+    }
+  },
   "utxos": {
     "09d1d4b6a55f1272043cbd15f3883e8a4b5b4e634264f931b81847b7fee8e285#0": {
       "address": "addr1qxdzj659w8zew3vm2nwu29tx3skdx4a7cv5ygyl5mykx0lwukcl75cytk4hqrfxvw0cj2x7eukmjfjstwud9atc0vzhqhx0ug3",
