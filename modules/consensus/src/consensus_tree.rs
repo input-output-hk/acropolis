@@ -1185,6 +1185,37 @@ mod tests {
     }
 
     #[test]
+    fn test_check_block_wanted_accepts_zero_number_child_of_genesis_root() {
+        let (mut tree, _) = make_tree(2160);
+        tree.set_genesis_root(hash(1));
+
+        let wanted = tree.check_block_wanted(hash(2), hash(1), 0, 1).unwrap();
+
+        assert_eq!(wanted, vec![hash(2)]);
+
+        let child = tree.get_block(&hash(2)).unwrap();
+        assert_eq!(child.number, 0);
+        assert_eq!(child.parent, Some(hash(1)));
+        assert_eq!(child.status, BlockValidationStatus::Wanted);
+    }
+
+    #[test]
+    fn test_check_block_wanted_rejects_non_zero_number_child_of_genesis_root() {
+        let (mut tree, _) = make_tree(2160);
+        tree.set_genesis_root(hash(1));
+
+        let result = tree.check_block_wanted(hash(2), hash(1), 1, 1);
+
+        assert!(matches!(
+            result,
+            Err(ConsensusTreeError::InvalidBlockNumber {
+                expected: 0,
+                got: 1
+            })
+        ));
+    }
+
+    #[test]
     fn test_check_block_wanted_returns_wanted_for_favoured_chain() {
         let (mut tree, _) = make_tree(2160);
         tree.set_root(hash(1), 0, 0);
