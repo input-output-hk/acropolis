@@ -186,12 +186,12 @@ impl AccountsState {
         verifier: &Verifier,
     ) -> Result<()> {
         // Wait for the snapshot bootstrap (if available)
+        // Skip genesis-specific initialization when starting from snapshot
+        // (pots are already loaded from snapshot bootstrap data)
         let snapshot_mode = readers.snapshot.is_some();
         if let Some(subscription) = readers.snapshot {
             Self::wait_for_bootstrap(history.clone(), subscription).await?;
         } else {
-            // Skip genesis-specific initialization when starting from snapshot
-            // (pots are already loaded from snapshot bootstrap data)
             if let RollbackWrapper::Rollback(_) = readers.params.read_with_rollbacks().await? {
                 bail!("Unexpected rollback while reading initial params");
             }
