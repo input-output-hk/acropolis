@@ -1629,7 +1629,7 @@ pub struct ProtocolConsts {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct MagicNumber(u32);
+pub struct MagicNumber(pub u32);
 
 impl MagicNumber {
     pub fn new(value: u32) -> Self {

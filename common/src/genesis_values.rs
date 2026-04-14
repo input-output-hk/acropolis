@@ -6,7 +6,7 @@ use crate::{
         slot_to_timestamp_with_params,
     },
     hash::Hash,
-    GenesisDelegates, MagicNumber, Pots,
+    GenesisDelegates, MagicNumber, NetworkId, Pots,
 };
 const MAINNET_SHELLEY_GENESIS_HASH: &str =
     "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81";
@@ -25,6 +25,13 @@ pub struct GenesisValues {
 }
 
 impl GenesisValues {
+    pub fn network_id(&self) -> NetworkId {
+        match self.magic_number {
+            MagicNumber(764824073) => NetworkId::Mainnet,
+            _ => NetworkId::Testnet,
+        }
+    }
+
     pub fn mainnet() -> Self {
         Self {
             byron_timestamp: 1506203091,
