@@ -76,11 +76,9 @@ dependencies = [
  "chrono",
  "config",
  "csv",
- "fjall",
  "hex",
  "imbl",
  "itertools 0.14.0",
- "tempfile",
  "tokio",
  "tracing",
 ]

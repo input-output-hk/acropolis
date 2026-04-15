@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
@@ -10,6 +11,7 @@ use acropolis_common::{
 };
 use rayon::prelude::*;
 use rayon::ThreadPool;
+use uplc_turbo::data::PlutusData;
 use uplc_turbo::{
     arena::Arena,
     binder::DeBruijn,
@@ -18,6 +20,9 @@ use uplc_turbo::{
     machine::{ExBudget, PlutusVersion},
     term::Term,
 };
+
+use crate::validations::phase_two::script_context::encode_tx_info;
+use crate::validations::phase_two::TxInfo;
 
 use super::script_context::ScriptContext;
 
@@ -231,6 +236,7 @@ pub fn build_scripts_table(
 ///
 /// If `is_valid` is false, scripts are expected to fail (per Alonzo spec).
 pub fn evaluate_scripts(
+    tx_info: &TxInfo,
     script_contexts: &[ScriptContext<'_>],
     scripts_table: &HashMap<ScriptHash, Arc<ReferenceScript>>,
     cost_models: &CostModels,
@@ -241,6 +247,24 @@ pub fn evaluate_scripts(
         return Ok(());
     }
 
+    let plutus_versions = script_contexts
+        .iter()
+        .filter_map(|sc| match sc.script_lang {
+            ScriptLang::Plutus(v) => Some(v),
+            ScriptLang::Native => None,
+        })
+        .collect::<HashSet<_>>();
+
+    // encode tx info first in parallel
+    let mut cached_tx_info_pd = HashMap::new();
+    let arena_for_tx_info = Arena::from_bump(Bump::with_capacity(ARENA_INITIAL_CAPACITY));
+    plutus_versions.iter().for_each(|common_version| {
+        let version = from_common_version(*common_version);
+        if let Ok(tx_info_pd) = encode_tx_info(tx_info, &arena_for_tx_info, version) {
+            cached_tx_info_pd.insert(*common_version, tx_info_pd);
+        }
+    });
+
     // Run all script evaluations in parallel on the evaluator thread pool
     let script_result: Result<(), Phase2ValidationError> = evaluator_pool().install(|| {
         script_contexts.par_iter().try_for_each(|sc| {
@@ -248,6 +272,7 @@ pub fn evaluate_scripts(
             evaluate_single_script(
                 &arena,
                 sc,
+                &cached_tx_info_pd,
                 scripts_table,
                 cost_models,
                 protocol_major_version,
@@ -270,6 +295,7 @@ pub fn evaluate_scripts(
 fn evaluate_single_script(
     arena: &Arena,
     sc: &ScriptContext<'_>,
+    cached_tx_info_pd: &HashMap<acropolis_common::PlutusVersion, &PlutusData<'_>>,
     scripts_table: &HashMap<ScriptHash, Arc<ReferenceScript>>,
     cost_models: &CostModels,
     protocol_major_version: u64,
@@ -280,9 +306,12 @@ fn evaluate_single_script(
     };
     let plutus_version = from_common_version(common_plutus_version);
 
+    // Get cached encoded tx info plutus data if exists
+    let tx_info_pd = cached_tx_info_pd.get(&common_plutus_version).copied();
+
     // 1. Build script arguments
     let args = sc
-        .to_script_args(arena, plutus_version)
+        .to_script_args(tx_info_pd, arena, plutus_version)
         .map_err(Phase2ValidationError::ScriptContextError)?;
 
     // 2. Look up script bytes
@@ -491,6 +520,7 @@ mod tests {
         println!("protocol params: {:?}", ctx.protocol_params);
 
         evaluate_scripts(
+            &tx_info,
             &script_contexts,
             &scripts_table,
             &cost_models,
@@ -528,6 +558,7 @@ mod tests {
         let cost_models = ctx.protocol_params.cost_models();
 
         let result = evaluate_scripts(
+            &tx_info,
             &script_contexts,
             &empty_table,
             &cost_models,

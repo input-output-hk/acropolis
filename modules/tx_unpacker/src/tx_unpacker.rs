@@ -308,7 +308,7 @@ impl TxUnpacker {
                     .for_each(|e| error!("Failed to publish: {e}"));
             }
 
-            if primary.should_read_epoch_transition_messages() {
+            if primary.should_read_epoch_messages() {
                 if let Some(ref mut reader) = params_reader {
                     match ctx.consume_sync("params_reader", reader.read_with_rollbacks().await)? {
                         RollbackWrapper::Normal((block_info, params)) => {

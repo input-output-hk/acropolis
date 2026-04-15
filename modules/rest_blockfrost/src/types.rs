@@ -62,7 +62,7 @@ pub struct BlockInfoREST(pub BlockInfo);
 // REST response structure for /epochs/{number}/stakes
 #[serde_as]
 #[derive(Serialize)]
-pub struct SPDDByEpochItemRest {
+pub struct _SPDDByEpochItemRest {
     pub stake_address: String,
     #[serde_as(as = "DisplayFromBech32<PoolPrefix>")]
     pub pool_id: PoolId,
@@ -73,7 +73,7 @@ pub struct SPDDByEpochItemRest {
 // REST response structure for /epochs/{number}/stakes/{pool_id}
 #[serde_as]
 #[derive(Serialize)]
-pub struct SPDDByEpochAndPoolItemRest {
+pub struct _SPDDByEpochAndPoolItemRest {
     pub stake_address: String,
     #[serde_as(as = "DisplayFromStr")]
     pub amount: u64,

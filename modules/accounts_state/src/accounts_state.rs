@@ -5,14 +5,14 @@ use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     declare_cardano_reader,
     messages::{
-        AccountsBootstrapMessage, CardanoMessage, EpochActivityMessage, GovernanceOutcomesMessage,
+        CardanoMessage, EpochActivityMessage, GenesisCompleteMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStateMessage,
         SnapshotMessage, SnapshotStateMessage, StakeAddressDeltasMessage, StateQueryResponse,
         StateTransitionMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     queries::{accounts::AccountsStateQueryResponse, errors::QueryError},
     state_history::{StateHistory, StateHistoryStore},
-    Era, Pots,
+    Era,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -46,9 +46,7 @@ use verifier::Verifier;
 
 use crate::{
     configuration::AccountsConfig, pots_publisher::PotsPublisher, queries::handle_accounts_query,
-    spo_distribution_store::SPDDStore,
 };
-mod spo_distribution_store;
 
 // Subscriptions
 declare_cardano_reader!(
@@ -80,11 +78,11 @@ declare_cardano_reader!(
     WithdrawalsMessage
 );
 declare_cardano_reader!(
-    PotsReader,
-    "pots-subscribe-topic",
-    "cardano.pots",
-    Pots,
-    Pots
+    GenesisReader,
+    "genesis-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+    GenesisComplete,
+    GenesisCompleteMessage
 );
 declare_cardano_reader!(
     StakeDeltasReader,
@@ -115,6 +113,34 @@ declare_cardano_reader!(
     GovernanceOutcomesMessage
 );
 
+struct AccountsReaders {
+    // Single use readers
+    pub genesis: GenesisReader,
+    pub snapshot: Option<Box<dyn Subscription<Message>>>,
+
+    // Block readers
+    pub certs: CertsReader,
+    pub withdrawals: WithdrawalsReader,
+    pub stake_deltas: StakeDeltasReader,
+    pub gov_procedures: GovProceduresReader,
+
+    // Epoch readers
+    pub params: ParamsReader,
+    pub spos: SPOReader,
+    pub epoch_activity: EpochActivityReader,
+    pub gov_outcomes: GovOutcomesReader,
+}
+
+// Publishers
+struct AccountsPublishers {
+    pub drep_distribution: DRepDistributionPublisher,
+    pub spo_distribution: SPODistributionPublisher,
+    pub spo_rewards: SPORewardsPublisher,
+    pub stake_reward_deltas: StakeRewardDeltasPublisher,
+    pub registration_updates: StakeRegistrationUpdatesPublisher,
+    pub pots: PotsPublisher,
+}
+
 /// Accounts State module
 #[module(
     message_type(Message),
@@ -124,136 +150,77 @@ declare_cardano_reader!(
 pub struct AccountsState;
 
 impl AccountsState {
-    /// Handle bootstrap message from snapshot
-    fn handle_bootstrap(state: &mut State, accounts_data: AccountsBootstrapMessage) -> Result<()> {
-        let epoch = accounts_data.epoch;
-        let accounts_len = accounts_data.accounts.len();
-
-        // Initialize accounts state from snapshot data
-        state.bootstrap(accounts_data)?;
-
-        info!(
-            "Accounts state bootstrapped successfully for epoch {} with {} accounts",
-            epoch, accounts_len
-        );
-
-        Ok(())
-    }
-
     /// Wait for and process snapshot bootstrap messages
     async fn wait_for_bootstrap(
         history: Arc<Mutex<StateHistory<State>>>,
-        mut snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut snapshot_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        let snapshot_subscription = match snapshot_subscription.as_mut() {
-            Some(sub) => sub,
-            None => {
-                info!("No snapshot subscription available, using default state");
-                return Ok(());
-            }
-        };
-
-        info!("Waiting for snapshot bootstrap messages...");
         loop {
             let (_, message) = snapshot_subscription.read().await?;
-            let message = Arc::try_unwrap(message).unwrap_or_else(|arc| (*arc).clone());
+            let message = Arc::try_unwrap(message).unwrap_or_else(Arc::unwrap_or_clone);
 
-            match message {
-                Message::Snapshot(SnapshotMessage::Startup) => {
-                    info!("Received snapshot startup signal, awaiting bootstrap data...");
-                }
-                Message::Snapshot(SnapshotMessage::Bootstrap(
-                    SnapshotStateMessage::AccountsState(accounts_data),
-                )) => {
-                    info!("Received AccountsState bootstrap message");
+            if let Message::Snapshot(SnapshotMessage::Bootstrap(
+                SnapshotStateMessage::AccountsState(accounts_data),
+            )) = message
+            {
+                let block_number = accounts_data.block_number;
 
-                    let block_number = accounts_data.block_number;
-                    let mut state = State::default();
+                let mut state = State::default();
+                state.bootstrap(accounts_data)?;
+                history.lock().await.bootstrap_init_with(state, block_number);
 
-                    Self::handle_bootstrap(&mut state, accounts_data)?;
-                    history.lock().await.bootstrap_init_with(state, block_number);
-                    info!("Accounts state bootstrap complete");
-                }
-                Message::Snapshot(SnapshotMessage::Complete) => {
-                    info!("Snapshot complete, exiting accounts state bootstrap loop");
-                    return Ok(());
-                }
-                _ => {
-                    // Ignore other messages (e.g., EpochState, SPOState bootstrap messages)
-                }
+                info!("Accounts state bootstrap complete");
+
+                return Ok(());
             }
         }
     }
 
     /// Async run loop
-    #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
-        spdd_store: Option<Arc<Mutex<SPDDStore>>>,
         context: Arc<Context<Message>>,
-        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut drep_publisher: DRepDistributionPublisher,
-        mut spo_publisher: SPODistributionPublisher,
-        mut spo_rewards_publisher: SPORewardsPublisher,
-        mut stake_reward_deltas_publisher: StakeRewardDeltasPublisher,
-        mut stake_registration_updates_publisher: StakeRegistrationUpdatesPublisher,
-        mut pots_publisher: PotsPublisher,
+        mut readers: AccountsReaders,
+        mut publishers: AccountsPublishers,
         validation_outcomes_topic: String,
-        mut spos_reader: SPOReader,
-        mut ea_reader: EpochActivityReader,
-        mut certs_reader: CertsReader,
-        mut withdrawals_reader: WithdrawalsReader,
-        mut initial_pots_reader: PotsReader,
-        mut stake_deltas_reader: StakeDeltasReader,
-        mut governance_procedures_reader: GovProceduresReader,
-        mut governance_outcomes_reader: GovOutcomesReader,
-        mut params_reader: ParamsReader,
         verifier: &Verifier,
-        is_snapshot_mode: bool,
     ) -> Result<()> {
         // Wait for the snapshot bootstrap (if available)
-        Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
-
         // Skip genesis-specific initialization when starting from snapshot
         // (pots are already loaded from snapshot bootstrap data)
-        if !is_snapshot_mode {
-            match params_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {}
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial params");
-                }
+        let snapshot_mode = readers.snapshot.is_some();
+        if let Some(subscription) = readers.snapshot {
+            Self::wait_for_bootstrap(history.clone(), subscription).await?;
+        } else {
+            if let RollbackWrapper::Rollback(_) = readers.params.read_with_rollbacks().await? {
+                bail!("Unexpected rollback while reading initial params");
             }
-            match governance_outcomes_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {}
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial gov outcomes");
-                }
-            }
-
-            // Initialisation messages
+            if let RollbackWrapper::Rollback(_) = readers.gov_outcomes.read_with_rollbacks().await?
             {
-                match initial_pots_reader.read_with_rollbacks().await? {
-                    RollbackWrapper::Normal((block_info, initial_pots)) => {
-                        let mut state = history.lock().await.get_current_state();
+                bail!("Unexpected rollback while reading initial gov outcomes");
+            }
 
-                        state
-                            .handle_initial_pots(&initial_pots)
-                            .inspect_err(|e| error!("Initial pots handling error: {e:#}"))
-                            .ok();
+            match readers.genesis.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, genesis_msg)) => {
+                    let mut state = State::default();
+                    state.handle_initial_pots(&genesis_msg.values.initial_pots)?;
+                    history.lock().await.commit(block_info.number, state);
 
-                        history.lock().await.commit(block_info.number, state);
-                    }
-                    RollbackWrapper::Rollback(_) => {
-                        bail!("Unexpected rollback while reading initial pots");
-                    }
+                    publishers
+                        .pots
+                        .publish_pots(&block_info, genesis_msg.values.initial_pots.clone())
+                        .await?;
+                }
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial pots");
                 }
             }
         }
 
-        // Track if this is the first epoch after snapshot bootstrap
-        // We skip rewards calculation on the first epoch since pot deltas were already applied
-        let mut skip_first_epoch_rewards = is_snapshot_mode;
+        // Initialize the rewards and undo log runtime
         let mut runtime = AccountsRuntime::default();
+
+        let mut skip_first_epoch_rewards = snapshot_mode;
 
         // Main loop of synchronised messages
         loop {
@@ -261,18 +228,22 @@ impl AccountsState {
                 ValidationContext::new(&context, &validation_outcomes_topic, "accounts_state");
 
             // Get a mutable state
-            let mut state = history.lock().await.get_current_state();
+            let mut state = {
+                let history = history.lock().await;
+                history.get_current_state()
+            };
+
             let mut stake_address_undo = BlockStakeAddressUndoRecorder::default();
 
             // Use certs_message as the synchroniser, but we have to handle it after the
             // epoch things, because they apply to the new epoch, not the last
             let primary = PrimaryRead::from_sync(
                 &mut ctx,
-                "certs_reader",
-                certs_reader.read_with_rollbacks().await,
+                "readers.certs",
+                readers.certs.read_with_rollbacks().await,
             )?;
 
-            if primary.is_rollback() {
+            if let Some(rollback_message) = primary.rollback_message() {
                 state.rollback_stake_addresses(
                     &mut runtime.stake_address_undo_history,
                     primary.block_info().number,
@@ -280,82 +251,55 @@ impl AccountsState {
                 state = history.lock().await.get_rolled_back_state(primary.block_info().number);
                 runtime.rewards.rollback_to(primary.block_info());
 
-                let rollback_message = primary
-                    .rollback_message()
-                    .cloned()
-                    .expect("rollback primary read should include rollback message");
-                drep_publisher.publish_message(rollback_message.clone()).await?;
-                spo_publisher.publish_message(rollback_message.clone()).await?;
-                spo_rewards_publisher.publish_message(rollback_message.clone()).await?;
-                stake_reward_deltas_publisher.publish_message(rollback_message.clone()).await?;
-                stake_registration_updates_publisher
-                    .publish_message(rollback_message.clone())
-                    .await?;
-                pots_publisher.publish_message(rollback_message).await?;
-            } else {
-                // Notify the state of the block (used to schedule reward calculations)
-                state.notify_block(primary.block_info(), &mut runtime.rewards);
+                publishers.drep_distribution.publish_message(rollback_message.clone()).await?;
+                publishers.spo_distribution.publish_message(rollback_message.clone()).await?;
+                publishers.spo_rewards.publish_message(rollback_message.clone()).await?;
+                publishers.stake_reward_deltas.publish_message(rollback_message.clone()).await?;
+                publishers.registration_updates.publish_message(rollback_message.clone()).await?;
             }
-
-            let epoch = primary.epoch();
 
             // Init drains the epoch-0 bootstrap messages, so the main loop only
             // synchronizes these side readers on rollbacks and real transitions.
             if primary.should_read_epoch_transition_messages() {
                 match ctx
-                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
+                    .consume_sync("readers.params", readers.params.read_with_rollbacks().await)?
                 {
                     RollbackWrapper::Normal((block_info, params_msg)) => {
-                        let span = info_span!(
-                            "account_state.handle_parameters",
-                            block = block_info.number
-                        );
-                        async {
-                            ctx.handle("handle_parameters", state.handle_parameters(&params_msg));
-                        }
-                        .instrument(span)
-                        .await;
+                        info_span!("account_state.handle_parameters", block = block_info.number)
+                            .in_scope(|| state.handle_parameters(&params_msg));
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
-                let mut stake_reward_deltas = if epoch.is_some() {
-                    let block_info = primary.block_info();
-                    // Applies rewards from previous epoch
-                    match state
-                        .complete_previous_epoch_rewards_calculation(
-                            verifier,
-                            skip_first_epoch_rewards,
-                            &mut runtime.rewards,
-                            &mut stake_address_undo,
-                        )
-                        .await
-                    {
-                        Ok((spo_rewards, stake_reward_deltas)) => {
-                            ctx.handle(
-                                "publish_spo_rewards",
-                                spo_rewards_publisher
-                                    .publish_spo_rewards(block_info, spo_rewards)
-                                    .await,
-                            );
-                            stake_reward_deltas
-                        }
-                        Err(e) => {
-                            ctx.handle_error("complete_previous_epoch_rewards_calculation", &e);
-                            Vec::new()
-                        }
-                    }
-                } else {
-                    Vec::new()
-                };
 
                 // EPOCH rule
                 // a. SNAP: Take the snapshot and pool distribution
                 // rotate the snapshots (mark, set, go)
                 // b. POOLREAP: for any retiring pools, refund,
                 // remove from pool registry, clear delegations
-
-                if primary.message().is_some() {
+                let mut stake_reward_deltas = if !primary.is_rollback() {
                     let block_info = primary.block_info();
+
+                    let (spo_rewards, stake_reward_deltas) = ctx.handle(
+                        "complete_previous_epoch_rewards_calculation",
+                        state
+                            .complete_previous_epoch_rewards_calculation(
+                                verifier,
+                                skip_first_epoch_rewards,
+                                &mut runtime.rewards,
+                                &mut stake_address_undo,
+                            )
+                            .await,
+                    );
+
+                    // Publish pool owner rewards
+                    ctx.handle(
+                        "publish_spo_rewards",
+                        publishers
+                            .spo_rewards
+                            .publish_spo_rewards(primary.block_info(), spo_rewards)
+                            .await,
+                    );
+
                     // Apply pending MIRs before generating SPDD so they're included in active stake
                     state.apply_pending_mirs(&mut stake_address_undo);
 
@@ -365,7 +309,7 @@ impl AccountsState {
                     // towards the stake distribution.
                     // Skip in snapshot mode: the snapshot already reflects post-Conway
                     // state, so applying the subtraction again would double-count.
-                    if block_info.is_new_era && block_info.era == Era::Conway && !is_snapshot_mode {
+                    if block_info.is_new_era && block_info.era == Era::Conway && !snapshot_mode {
                         ctx.handle(
                             "remove_pointer_address_stake",
                             state
@@ -377,88 +321,74 @@ impl AccountsState {
                         );
                     }
 
+                    // Verify and publish Stake Pool Delegation Distribution
                     let spdd = state.generate_spdd();
                     verifier.verify_spdd(block_info, &spdd);
                     ctx.handle(
                         "publish_spdd",
-                        spo_publisher.publish_spdd(block_info, spdd).await,
+                        publishers.spo_distribution.publish_spdd(block_info, spdd).await,
                     );
 
-                    // store spdd history if enabled
-                    let spdd_store_guard = match spdd_store.as_ref() {
-                        Some(s) => Some(s.lock().await),
-                        None => None,
-                    };
-                    if let Some(mut spdd_store) = spdd_store_guard {
-                        let spdd_state = state.dump_spdd_state();
-                        // stakes distribution taken at beginning of epoch i is active for epoch + 1
-                        ctx.handle(
-                            "store_spdd",
-                            spdd_store
-                                .store_spdd(block_info.epoch + 1, spdd_state)
-                                .map_err(|e| e.into()),
-                        );
-                    }
-                }
+                    stake_reward_deltas
+                } else {
+                    Vec::new()
+                };
 
                 // Handle SPOs
-                match ctx.consume_sync("spos_reader", spos_reader.read_with_rollbacks().await)? {
+                match ctx.consume_sync("readers.spos", readers.spos.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, spo_msg)) => {
-                        let span =
-                            info_span!("account_state.handle_spo_state", block = block_info.number);
-                        async {
-                            ctx.handle("handle_spo_state", state.handle_spo_state(&spo_msg));
-                        }
-                        .instrument(span)
-                        .await;
+                        info_span!("account_state.handle_spo_state", block = block_info.number)
+                            .in_scope(|| state.handle_spo_state(&spo_msg));
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
 
                 // Handle epoch activity
-                match ctx.consume_sync("ea_reader", ea_reader.read_with_rollbacks().await)? {
+                match ctx.consume_sync(
+                    "readers.epoch_activity",
+                    readers.epoch_activity.read_with_rollbacks().await,
+                )? {
                     RollbackWrapper::Normal((block_info, ea_msg)) => {
-                        let span = info_span!(
-                            "account_state.handle_epoch_activity",
-                            block = block_info.number
-                        );
                         async {
-                            match state
-                                .handle_epoch_activity(
-                                    context.clone(),
-                                    &ea_msg,
-                                    &block_info,
-                                    verifier,
-                                    &mut runtime.rewards,
-                                    &mut stake_address_undo,
-                                )
-                                .await
-                            {
-                                Ok(refund_deltas) => {
-                                    // publish stake reward deltas
-                                    stake_reward_deltas.extend(refund_deltas);
-                                    ctx.handle(
-                                        "publish_stake_reward_deltas",
-                                        stake_reward_deltas_publisher
-                                            .publish_stake_reward_deltas(
-                                                &block_info,
-                                                stake_reward_deltas,
-                                            )
-                                            .await,
-                                    );
-                                }
-                                Err(e) => {
-                                    ctx.handle_error("handle_epoch_activity", &e);
-                                }
-                            }
+                            // Add refund deltas to the stake reward deltas
+                            stake_reward_deltas.extend(
+                                ctx.handle(
+                                    "handle_epoch_activity",
+                                    state
+                                        .handle_epoch_activity(
+                                            context.clone(),
+                                            &ea_msg,
+                                            &block_info,
+                                            verifier,
+                                            &mut runtime.rewards,
+                                            &mut stake_address_undo,
+                                        )
+                                        .await,
+                                ),
+                            );
 
-                            let drdd = state.generate_drdd();
+                            // Publish stake account reward deltas
+                            ctx.handle(
+                                "publish_stake_reward_deltas",
+                                publishers
+                                    .stake_reward_deltas
+                                    .publish_stake_reward_deltas(&block_info, stake_reward_deltas)
+                                    .await,
+                            );
+
+                            // Publish DRep Delegation Distribution
                             ctx.handle(
                                 "publish_drdd",
-                                drep_publisher.publish_drdd(&block_info, drdd).await,
+                                publishers
+                                    .drep_distribution
+                                    .publish_drdd(&block_info, state.generate_drdd())
+                                    .await,
                             );
                         }
-                        .instrument(span)
+                        .instrument(info_span!(
+                            "account_state.handle_epoch_activity",
+                            block = block_info.number
+                        ))
                         .await;
                     }
                     RollbackWrapper::Rollback(_) => {}
@@ -466,14 +396,10 @@ impl AccountsState {
 
                 // Handle governance outcomes (enacted/expired proposals) at epoch boundary
                 match ctx.consume_sync(
-                    "governance_outcomes_reader",
-                    governance_outcomes_reader.read_with_rollbacks().await,
+                    "readers.gov_outcomes",
+                    readers.gov_outcomes.read_with_rollbacks().await,
                 )? {
                     RollbackWrapper::Normal((block_info, outcomes_msg)) => {
-                        let span = info_span!(
-                            "account_state.handle_governance_outcomes",
-                            block = block_info.number
-                        );
                         async {
                             ctx.handle(
                                 "handle_governance_outcomes",
@@ -483,7 +409,10 @@ impl AccountsState {
                                 ),
                             );
                         }
-                        .instrument(span)
+                        .instrument(info_span!(
+                            "account_state.handle_governance_outcomes",
+                            block = block_info.number
+                        ))
                         .await;
                     }
                     RollbackWrapper::Rollback(_) => {}
@@ -495,14 +424,16 @@ impl AccountsState {
                 // publish current pots after handling the epoch transition, so that the published pots reflect the new epoch's state
                 ctx.handle(
                     "publish_pots",
-                    pots_publisher.publish_pots(primary.block_info(), state.get_pots()).await,
+                    publishers.pots.publish_pots(primary.block_info(), state.get_pots()).await,
                 );
             }
 
             // Now handle the certs_message properly
             if let Some(tx_certs_msg) = primary.message() {
+                // Notify the state of the block (used to schedule reward calculations)
+                state.notify_block(primary.block_info(), &mut runtime.rewards);
+
                 let block_info = primary.block_info();
-                let span = info_span!("account_state.handle_certs", block = block_info.number);
                 async {
                     match state.handle_tx_certificates(
                         tx_certs_msg,
@@ -512,37 +443,38 @@ impl AccountsState {
                         &mut stake_address_undo,
                     ) {
                         Ok(updates) => ctx.handle(
-                            "stake_registration_updates_publisher.publish",
-                            stake_registration_updates_publisher.publish(block_info, updates).await,
+                            "publishers.registration_updates.publish",
+                            publishers.registration_updates.publish(block_info, updates).await,
                         ),
                         Err(e) => {
                             ctx.handle_error("handle_tx_certificates", &e);
                         }
                     }
                 }
-                .instrument(span)
+                .instrument(info_span!(
+                    "account_state.handle_tx_certificates",
+                    block = block_info.number
+                ))
                 .await;
             }
 
             // Handle withdrawals
             match ctx.consume_sync(
-                "withdrawals_reader",
-                withdrawals_reader.read_with_rollbacks().await,
+                "readers.withdrawals",
+                readers.withdrawals.read_with_rollbacks().await,
             )? {
                 RollbackWrapper::Normal((block_info, withdrawals_msg)) => {
-                    let span = info_span!(
+                    info_span!(
                         "account_state.handle_withdrawals",
                         block = block_info.number
-                    );
-                    async {
+                    )
+                    .in_scope(|| {
                         state.handle_withdrawals(
                             &withdrawals_msg,
                             &mut ctx,
                             &mut stake_address_undo,
                         );
-                    }
-                    .instrument(span)
-                    .await;
+                    });
                 }
                 RollbackWrapper::Rollback(_) => {}
             }
@@ -550,34 +482,32 @@ impl AccountsState {
             // Handle stake address deltas
             match ctx.consume_sync(
                 "stake_deltas_reader",
-                stake_deltas_reader.read_with_rollbacks().await,
+                readers.stake_deltas.read_with_rollbacks().await,
             )? {
                 RollbackWrapper::Normal((block_info, deltas_msg)) => {
-                    let span = info_span!(
+                    info_span!(
                         "account_state.handle_stake_deltas",
                         block = block_info.number
-                    );
-                    async {
+                    )
+                    .in_scope(|| {
                         state.handle_stake_deltas(&deltas_msg, &mut ctx, &mut stake_address_undo);
-                    }
-                    .instrument(span)
-                    .await;
+                    });
                 }
                 RollbackWrapper::Rollback(_) => {}
             }
 
             match ctx.consume_sync(
                 "governance_procedures_reader",
-                governance_procedures_reader.read_with_rollbacks().await,
+                readers.gov_procedures.read_with_rollbacks().await,
             )? {
                 RollbackWrapper::Normal((block_info, procedures)) => {
-                    let span = info_span!(
+                    info_span!(
                         "account_state.handle_governance_procedures",
                         block = block_info.number
-                    );
-                    async { state.handle_governance_procedures(&procedures) }
-                        .instrument(span)
-                        .await;
+                    )
+                    .in_scope(|| {
+                        state.handle_governance_procedures(&procedures);
+                    });
                 }
                 RollbackWrapper::Rollback(_) => {}
             }
@@ -585,8 +515,10 @@ impl AccountsState {
             // Commit the new state
             if primary.message().is_some() {
                 let block_info = primary.block_info();
+
                 runtime.stake_address_undo_history.commit(block_info.number, stake_address_undo);
                 history.lock().await.commit(block_info.number, state);
+
                 if primary.do_validation() {
                     ctx.publish().await;
                 }
@@ -599,7 +531,7 @@ impl AccountsState {
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let accounts_cfg = AccountsConfig::init(context.clone(), &config).await?;
+        let accounts_cfg = AccountsConfig::load(context.clone(), &config).await?;
 
         // History
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -609,11 +541,8 @@ impl AccountsState {
         let history_query = history.clone();
         let history_tick = history.clone();
 
-        let spdd_store_query = accounts_cfg.spdd_store.clone();
-
         context.handle(&accounts_cfg.accounts_query_topic, move |message| {
             let history = history_query.clone();
-            let spdd_store = spdd_store_query.clone();
             async move {
                 let guard = history.lock().await;
 
@@ -628,12 +557,7 @@ impl AccountsState {
                     }
                 };
 
-                let spdd_store_guard = match spdd_store.as_ref() {
-                    Some(s) => Some(s.lock().await),
-                    None => None,
-                };
-
-                handle_accounts_query(state, spdd_store_guard.as_deref(), message.as_ref())
+                handle_accounts_query(state, message.as_ref())
             }
         });
 
@@ -660,27 +584,11 @@ impl AccountsState {
         context.run(async move {
             Self::run(
                 history,
-                accounts_cfg.spdd_store,
                 context_copy,
-                accounts_cfg.snapshot_subscription,
-                accounts_cfg.drep_publisher,
-                accounts_cfg.spo_publisher,
-                accounts_cfg.spo_rewards_publisher,
-                accounts_cfg.stake_reward_deltas_publisher,
-                accounts_cfg.stake_registration_updates_publisher,
-                accounts_cfg.pots_publisher,
+                accounts_cfg.readers,
+                accounts_cfg.publishers,
                 accounts_cfg.validation_outcomes_topic,
-                accounts_cfg.spos_reader,
-                accounts_cfg.ea_reader,
-                accounts_cfg.certs_reader,
-                accounts_cfg.withdrawals_reader,
-                accounts_cfg.pot_deltas_reader,
-                accounts_cfg.stake_deltas_reader,
-                accounts_cfg.governance_procedures_reader,
-                accounts_cfg.governance_outcomes_reader,
-                accounts_cfg.params_reader,
                 &accounts_cfg.verifier,
-                accounts_cfg.is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

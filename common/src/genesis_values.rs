@@ -6,7 +6,7 @@ use crate::{
         slot_to_timestamp_with_params,
     },
     hash::Hash,
-    GenesisDelegates, MagicNumber,
+    GenesisDelegates, MagicNumber, Pots,
 };
 const MAINNET_SHELLEY_GENESIS_HASH: &str =
     "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81";
@@ -21,6 +21,7 @@ pub struct GenesisValues {
     pub genesis_delegs: GenesisDelegates,
     pub magic_number: MagicNumber,
     pub security_param: u64,
+    pub initial_pots: Pots,
 }
 
 impl GenesisValues {
@@ -84,6 +85,11 @@ impl GenesisValues {
             .unwrap(),
             magic_number: MagicNumber::new(764824073),
             security_param: 2160,
+            initial_pots: Pots {
+                reserves: 13887515255000000,
+                treasury: 0,
+                deposits: 0,
+            },
         }
     }
 

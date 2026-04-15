@@ -45,6 +45,7 @@ pub fn validate_tx_phase_two(
     let script_contexts = build_script_contexts(&tx_info, scripts_needed, scripts_provided)?;
 
     evaluate_scripts(
+        &tx_info,
         &script_contexts,
         &scripts_table,
         cost_models,

@@ -251,10 +251,14 @@ impl ScriptContext<'_> {
     /// V3: `[script_context]`
     pub fn to_script_args<'a>(
         &self,
+        tx_info_pd: Option<&'a PlutusData<'a>>,
         arena: &'a Arena,
         version: PlutusVersion,
     ) -> Result<Vec<&'a PlutusData<'a>>, ScriptContextError> {
-        let tx_info_pd = encode_tx_info(self.tx_info, arena, version)?;
+        let tx_info_pd = match tx_info_pd {
+            Some(pd) => pd,
+            None => encode_tx_info(self.tx_info, arena, version)?,
+        };
 
         match version {
             PlutusVersion::V1 | PlutusVersion::V2 => {
@@ -284,7 +288,7 @@ impl ScriptContext<'_> {
 // TxInfo encoding
 // ============================================================================
 
-fn encode_tx_info<'a>(
+pub fn encode_tx_info<'a>(
     tx_info: &TxInfo,
     arena: &'a Arena,
     version: PlutusVersion,
@@ -782,7 +786,7 @@ mod tests {
         let sc = &contexts[0];
 
         let arena = Arena::new();
-        let args = sc.to_script_args(&arena, PlutusVersion::V1).unwrap();
+        let args = sc.to_script_args(None, &arena, PlutusVersion::V1).unwrap();
 
         // V1 spending: [datum, redeemer, context]
         assert_eq!(args.len(), 3, "V1 spending should produce 3 args");

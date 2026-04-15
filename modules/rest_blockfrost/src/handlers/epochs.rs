@@ -1,8 +1,6 @@
 use crate::{
     handlers_config::HandlersConfig,
-    types::{
-        EpochActivityRest, ProtocolParamsRest, SPDDByEpochAndPoolItemRest, SPDDByEpochItemRest,
-    },
+    types::{EpochActivityRest, ProtocolParamsRest},
 };
 use acropolis_common::queries::{
     blocks::{BlocksStateQuery, BlocksStateQueryResponse},
@@ -476,49 +474,10 @@ pub async fn handle_epoch_total_stakes_blockfrost(
         return Err(RESTError::not_found("Epoch not found"));
     }
 
-    // Query SPDD by epoch from accounts-state
-    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetSPDDByEpoch {
-            epoch: epoch_number,
-        },
-    )));
-    let spdd = query_state(
-        &context,
-        &handlers_config.accounts_query_topic,
-        msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::SPDDByEpoch(res),
-            )) => Ok(res),
-            Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::Error(e),
-            )) => Err(e),
-            _ => Err(QueryError::internal_error(
-                "Unexpected message type while retrieving SPDD by epoch",
-            )),
-        },
-    )
-    .await?;
-
-    let spdd_response = spdd
-        .into_iter()
-        .map(|(pool_id, stake_address, amount)| {
-            let bech32 = stake_address.to_string().map_err(|e| {
-                RESTError::InternalServerError(format!(
-                    "Failed to convert stake address to string: {}",
-                    e
-                ))
-            })?;
-            Ok(SPDDByEpochItemRest {
-                pool_id,
-                stake_address: bech32,
-                amount,
-            })
-        })
-        .collect::<Result<Vec<_>, RESTError>>()?;
-
-    let json = serde_json::to_string_pretty(&spdd_response)?;
-    Ok(RESTResponse::with_json(200, &json))
+    // TODO: store historical per-accounts SPDD in historical accounts state
+    Err(RESTError::NotImplemented(
+        "Unsupported until historical_accounts_state indexes per-account spdd".to_string(),
+    ))
 }
 
 pub async fn handle_epoch_pool_stakes_blockfrost(
@@ -538,7 +497,7 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         .parse::<u64>()
         .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
 
-    let pool_id = PoolId::from_bech32(pool_id_str)
+    let _pool_id = PoolId::from_bech32(pool_id_str)
         .map_err(|_| RESTError::invalid_param("pool_id", "invalid Bech32 stake pool ID"))?;
 
     // Query latest epoch from epochs-state
@@ -567,49 +526,9 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
         return Err(RESTError::not_found("Epoch not found"));
     }
 
-    // Query SPDD by epoch and pool from accounts-state
-    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
-        AccountsStateQuery::GetSPDDByEpochAndPool {
-            epoch: epoch_number,
-            pool_id,
-        },
-    )));
-    let spdd = query_state(
-        &context,
-        &handlers_config.accounts_query_topic,
-        msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::SPDDByEpochAndPool(res),
-            )) => Ok(res),
-            Message::StateQueryResponse(StateQueryResponse::Accounts(
-                AccountsStateQueryResponse::Error(e),
-            )) => Err(e),
-            _ => Err(QueryError::internal_error(
-                "Unexpected message type while retrieving SPDD by epoch and pool",
-            )),
-        },
-    )
-    .await?;
-
-    let spdd_response = spdd
-        .into_iter()
-        .map(|(stake_address, amount)| {
-            let bech32 = stake_address.to_string().map_err(|e| {
-                RESTError::InternalServerError(format!(
-                    "Failed to convert stake address to string: {}",
-                    e
-                ))
-            })?;
-            Ok(SPDDByEpochAndPoolItemRest {
-                stake_address: bech32,
-                amount,
-            })
-        })
-        .collect::<Result<Vec<_>, RESTError>>()?;
-
-    let json = serde_json::to_string_pretty(&spdd_response)?;
-    Ok(RESTResponse::with_json(200, &json))
+    Err(RESTError::NotImplemented(
+        "Unsupported until historical_accounts_state indexes per-account spdd".to_string(),
+    ))
 }
 
 pub async fn handle_epoch_total_blocks_blockfrost(
