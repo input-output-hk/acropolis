@@ -423,12 +423,7 @@ impl ConsensusRuntime {
                         "Adding Immutable genesis block {} from Mithril bootstrap",
                         block_info.number
                     );
-                    if let Err(e) =
-                        self.tree.set_root(genesis_root, block_info.number.wrapping_sub(1), 0)
-                    {
-                        error!("Failed to set root for Immutable genesis: {e}");
-                        return;
-                    }
+                    self.tree.set_genesis_root(genesis_root);
                     if let Err(e) = self.tree.check_block_wanted(
                         block_info.hash,
                         genesis_root,
@@ -482,19 +477,7 @@ impl ConsensusRuntime {
         raw_block: RawBlockMessage,
         parent_hash: BlockHash,
     ) {
-        if self.tree.is_empty() {
-            // Same rule as offered flow: for block 0 we need parent_number = u64::MAX,
-            // so use wrapping_sub(1) instead of saturating_sub(1).
-            let parent_number = block_info.number.wrapping_sub(1);
-            if let Err(e) = self.tree.set_root(parent_hash, parent_number, 0) {
-                error!("Failed to set root for Mithril bootstrap: {e}");
-                return;
-            }
-            debug!(
-                "Tree root set to parent {parent_hash} (block {}) for Mithril bootstrap",
-                parent_number
-            );
-        }
+        self.set_maybe_bootstrap_tree_root(parent_hash, block_info.number);
 
         let wanted = match self.tree.check_block_wanted(
             block_info.hash,
@@ -541,17 +524,7 @@ impl ConsensusRuntime {
         slot: u64,
     ) {
         // Bootstrap the tree with a virtual root when the first offer arrives.
-        // For block 0 (genesis/first block), wrapping_sub(1) yields u64::MAX, so
-        // 0 == parent_number + 1 remains true under wrapping arithmetic.
-        if self.tree.is_empty() {
-            let parent_number = number.wrapping_sub(1);
-
-            if let Err(e) = self.tree.set_root(parent_hash, parent_number, 0) {
-                error!("Failed to set tree root from offered block: {e}");
-                return;
-            }
-            debug!("Tree root set to parent {parent_hash} (block {parent_number})");
-        }
+        self.set_maybe_bootstrap_tree_root(parent_hash, number);
 
         if self.tree.get_block(&parent_hash).is_none() {
             self.stats.parent_missing += 1;
@@ -793,6 +766,17 @@ impl ConsensusRuntime {
         }
 
         messages
+    }
+
+    fn set_maybe_bootstrap_tree_root(&mut self, hash: BlockHash, number: u64) {
+        if self.tree.is_empty() {
+            if number == 0 {
+                self.tree.set_genesis_root(hash);
+            } else {
+                self.tree.set_root(hash, number - 1, 0);
+            }
+            debug!("Tree root set to parent {hash}");
+        }
     }
 
     fn block_info_for_proposal(&mut self, info: &BlockInfo) -> BlockInfo {
@@ -1073,7 +1057,7 @@ mod tests {
                 events: event_queue.clone(),
             }),
         );
-        tree.set_root(hash(1), 2370, 420_859).unwrap();
+        tree.set_root(hash(1), 2370, 420_859);
 
         let mut block_data = HashMap::new();
         block_data.insert(hash(1), (block_info(2370, hash(1)), raw_block(1)));

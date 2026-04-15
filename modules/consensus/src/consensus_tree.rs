@@ -45,22 +45,29 @@ impl ConsensusTree {
         }
     }
 
-    /// Set the root of the tree (genesis or snapshot starting point).
+    /// Set the root of the tree to a known block.
     ///
     /// This must be called before any other operation. The root block
     /// has no parent and is immediately Validated.
-    pub fn set_root(
-        &mut self,
-        hash: BlockHash,
-        number: u64,
-        slot: u64,
-    ) -> Result<(), ConsensusTreeError> {
+    pub fn set_root(&mut self, hash: BlockHash, number: u64, slot: u64) {
         let mut block = TreeBlock::new(hash, number, slot, None, BlockValidationStatus::Validated);
         block.body = Some(Vec::new()); // Root has an empty body sentinel
         self.blocks.insert(hash, block);
         self.root = Some(hash);
         self.favoured_tip = Some(hash);
-        Ok(())
+    }
+
+    /// Set the root of the tree when starting from genesis (Origin).
+    ///
+    /// Inserts a synthetic root node representing the non-existent parent
+    /// of the first real block.
+    pub fn set_genesis_root(&mut self, hash: BlockHash) {
+        let mut block = TreeBlock::new(hash, 0, 0, None, BlockValidationStatus::Validated);
+        block.body = Some(Vec::new());
+        block.is_genesis_root = true;
+        self.blocks.insert(hash, block);
+        self.root = Some(hash);
+        self.favoured_tip = Some(hash);
     }
 
     /// Returns a reference to the block with the given hash, if present.
@@ -266,28 +273,21 @@ impl ConsensusTree {
         hash: BlockHash,
         number: u64,
         slot: u64,
-        parent: BlockHash,
+        parent_hash: BlockHash,
         status: BlockValidationStatus,
     ) -> Result<(), ConsensusTreeError> {
         // Validate parent exists
-        if !self.blocks.contains_key(&parent) {
-            return Err(ConsensusTreeError::ParentNotFound { hash: parent });
+        if !self.blocks.contains_key(&parent_hash) {
+            return Err(ConsensusTreeError::ParentNotFound { hash: parent_hash });
         }
 
-        // Validate block number
-        let parent_number = self.blocks[&parent].number;
-        if number != parent_number + 1 {
-            return Err(ConsensusTreeError::InvalidBlockNumber {
-                expected: parent_number + 1,
-                got: number,
-            });
-        }
+        self.is_block_number_valid(parent_hash, number)?;
 
-        let block = TreeBlock::new(hash, number, slot, Some(parent), status);
+        let block = TreeBlock::new(hash, number, slot, Some(parent_hash), status);
         self.blocks.insert(hash, block);
 
         // Add to parent's children
-        if let Some(parent_block) = self.blocks.get_mut(&parent) {
+        if let Some(parent_block) = self.blocks.get_mut(&parent_hash) {
             parent_block.children.push(hash);
         }
 
@@ -356,14 +356,7 @@ impl ConsensusTree {
             return Err(ConsensusTreeError::ParentNotFound { hash: parent_hash });
         }
 
-        // Validate block number
-        let parent_number = self.blocks[&parent_hash].number;
-        if number != parent_number + 1 {
-            return Err(ConsensusTreeError::InvalidBlockNumber {
-                expected: parent_number + 1,
-                got: number,
-            });
-        }
+        self.is_block_number_valid(parent_hash, number)?;
 
         let old_tip = self.favoured_tip;
 
@@ -432,6 +425,31 @@ impl ConsensusTree {
                 }
             }
         }
+    }
+
+    fn is_block_number_valid(
+        &self,
+        parent_hash: BlockHash,
+        number: u64,
+    ) -> Result<(), ConsensusTreeError> {
+        let parent = &self.blocks[&parent_hash];
+
+        if parent.is_genesis_root {
+            if number != 0 {
+                return Err(ConsensusTreeError::InvalidBlockNumber {
+                    expected: 0,
+                    got: number,
+                });
+            }
+        } else if number != parent.number + 1 {
+            // The current number must be 1 greater than parent's
+            return Err(ConsensusTreeError::InvalidBlockNumber {
+                expected: parent.number + 1,
+                got: number,
+            });
+        }
+
+        Ok(())
     }
 
     /// Handle a chain switch: fire rollback, transition Offered→Wanted
@@ -875,7 +893,7 @@ mod tests {
     fn test_set_root_creates_single_block_tree() {
         let (mut tree, _) = make_tree(2160);
         let root_hash = hash(1);
-        tree.set_root(root_hash, 0, 0).unwrap();
+        tree.set_root(root_hash, 0, 0);
 
         assert_eq!(tree.len(), 1);
         assert_eq!(tree.root(), Some(root_hash));
@@ -890,7 +908,7 @@ mod tests {
     #[test]
     fn test_get_favoured_chain_single_block_returns_root_for_single_block_tree() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         assert_eq!(tree.get_favoured_chain(), Some(hash(1)));
     }
@@ -898,7 +916,7 @@ mod tests {
     #[test]
     fn test_get_favoured_chain_returns_longer_branch() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Fork at root: branch A (2->3) and branch B (4->5->6)
         insert_with_body(&mut tree, 2, 1, 1, BlockValidationStatus::Validated);
@@ -914,7 +932,7 @@ mod tests {
     #[test]
     fn test_get_favoured_chain_equal_length_retains_current_tip() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Two branches of equal length from root
         insert_with_body(&mut tree, 2, 1, 1, BlockValidationStatus::Validated);
@@ -934,7 +952,7 @@ mod tests {
     #[test]
     fn test_find_common_ancestor_for_diverging_tips() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // A: 1->2->3->4
         insert_with_body(&mut tree, 2, 1, 1, BlockValidationStatus::Validated);
@@ -953,7 +971,7 @@ mod tests {
     #[test]
     fn test_chain_contains() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Chain: 1->2->3
         insert_with_body(&mut tree, 2, 1, 1, BlockValidationStatus::Validated);
@@ -975,7 +993,7 @@ mod tests {
     #[test]
     fn test_fork_depth() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Favoured chain: 1->2->3->4
         insert_with_body(&mut tree, 2, 1, 1, BlockValidationStatus::Validated);
@@ -1004,7 +1022,7 @@ mod tests {
     fn test_fork_topologies() {
         // 1. Linear chain
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         for i in 2..=5u8 {
             tree.check_block_wanted(hash(i), hash(i - 1), i as u64 - 1, i as u64 - 1).unwrap();
         }
@@ -1012,7 +1030,7 @@ mod tests {
 
         // 2. Single fork — longer branch wins
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         tree.check_block_wanted(hash(3), hash(2), 2, 2).unwrap();
         tree.check_block_wanted(hash(4), hash(1), 1, 1).unwrap(); // fork
@@ -1020,7 +1038,7 @@ mod tests {
 
         // 3. Multi-fork — three branches, longest wins
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         tree.check_block_wanted(hash(3), hash(1), 1, 1).unwrap();
         tree.check_block_wanted(hash(4), hash(1), 1, 1).unwrap();
@@ -1030,7 +1048,7 @@ mod tests {
 
         // 4. Deep tree — single long chain
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         for i in 2..=10u8 {
             tree.check_block_wanted(hash(i), hash(i - 1), i as u64 - 1, i as u64 - 1).unwrap();
         }
@@ -1038,7 +1056,7 @@ mod tests {
 
         // 5. Balanced — two equal forks, current tip retained
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         tree.check_block_wanted(hash(3), hash(1), 1, 1).unwrap();
         // Tip should be hash(2) (first inserted, became favoured)
@@ -1047,7 +1065,7 @@ mod tests {
 
         // 6. Skewed — one very long branch, one short
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         for i in 3..=8u8 {
             tree.check_block_wanted(hash(i), hash(i - 1), i as u64 - 1, i as u64 - 1).unwrap();
@@ -1057,7 +1075,7 @@ mod tests {
 
         // 7. Chain-of-forks — fork at every block
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         tree.check_block_wanted(hash(3), hash(2), 2, 2).unwrap();
         tree.check_block_wanted(hash(10), hash(1), 1, 1).unwrap(); // fork at 1
@@ -1069,7 +1087,7 @@ mod tests {
         // since different paths = different hashes, but test that both
         // branches are tracked independently)
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         tree.check_block_wanted(hash(3), hash(1), 1, 1).unwrap();
         tree.check_block_wanted(hash(4), hash(2), 2, 2).unwrap();
@@ -1080,7 +1098,7 @@ mod tests {
 
         // 9. Zigzag — alternating forks
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         tree.check_block_wanted(hash(3), hash(2), 2, 2).unwrap();
         tree.check_block_wanted(hash(4), hash(2), 2, 2).unwrap(); // fork at 2
@@ -1091,7 +1109,7 @@ mod tests {
 
         // 10. Lopsided — one branch much longer after late fork
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         for i in 2..=6u8 {
             tree.check_block_wanted(hash(i), hash(i - 1), i as u64 - 1, i as u64 - 1).unwrap();
         }
@@ -1106,7 +1124,7 @@ mod tests {
     fn test_bounded_maxvalid_rejects_deep_fork() {
         let (mut tree, _) = make_tree(3); // k=3 for easy testing
 
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         // Favoured chain: 1->2->3->4->5
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         tree.check_block_wanted(hash(3), hash(2), 2, 2).unwrap();
@@ -1127,7 +1145,7 @@ mod tests {
     fn test_deterministic_chain_selection_same_insert_same_tip() {
         for _ in 0..10 {
             let (mut tree, _) = make_tree(2160);
-            tree.set_root(hash(1), 0, 0).unwrap();
+            tree.set_root(hash(1), 0, 0);
             tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
             tree.check_block_wanted(hash(3), hash(2), 2, 2).unwrap();
             tree.check_block_wanted(hash(4), hash(1), 1, 1).unwrap();
@@ -1141,7 +1159,7 @@ mod tests {
     #[test]
     fn test_unknown_parent_returns_error() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         let result = tree.check_block_wanted(hash(2), hash(99), 1, 1);
         assert!(matches!(
@@ -1153,7 +1171,7 @@ mod tests {
     #[test]
     fn test_invalid_block_number_returns_error() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Parent is root (number 0), so expected number is 1, but we pass 5
         let result = tree.check_block_wanted(hash(2), hash(1), 5, 5);
@@ -1167,9 +1185,40 @@ mod tests {
     }
 
     #[test]
+    fn test_check_block_wanted_accepts_zero_number_child_of_genesis_root() {
+        let (mut tree, _) = make_tree(2160);
+        tree.set_genesis_root(hash(1));
+
+        let wanted = tree.check_block_wanted(hash(2), hash(1), 0, 1).unwrap();
+
+        assert_eq!(wanted, vec![hash(2)]);
+
+        let child = tree.get_block(&hash(2)).unwrap();
+        assert_eq!(child.number, 0);
+        assert_eq!(child.parent, Some(hash(1)));
+        assert_eq!(child.status, BlockValidationStatus::Wanted);
+    }
+
+    #[test]
+    fn test_check_block_wanted_rejects_non_zero_number_child_of_genesis_root() {
+        let (mut tree, _) = make_tree(2160);
+        tree.set_genesis_root(hash(1));
+
+        let result = tree.check_block_wanted(hash(2), hash(1), 1, 1);
+
+        assert!(matches!(
+            result,
+            Err(ConsensusTreeError::InvalidBlockNumber {
+                expected: 0,
+                got: 1
+            })
+        ));
+    }
+
+    #[test]
     fn test_check_block_wanted_returns_wanted_for_favoured_chain() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         let wanted = tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         assert!(wanted.contains(&hash(2)));
@@ -1181,7 +1230,7 @@ mod tests {
     #[test]
     fn test_check_block_wanted_not_wanted_for_unfavoured_fork() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Build favoured chain: 1->2->3
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
@@ -1200,7 +1249,7 @@ mod tests {
     #[test]
     fn test_add_block_fires_block_proposed() {
         let (mut tree, obs) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         tree.check_block_wanted(hash(3), hash(2), 2, 2).unwrap();
@@ -1224,7 +1273,7 @@ mod tests {
     #[test]
     fn test_add_block_out_of_order_stops_at_gap() {
         let (mut tree, obs) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         tree.check_block_wanted(hash(3), hash(2), 2, 2).unwrap();
@@ -1257,7 +1306,7 @@ mod tests {
     #[test]
     fn test_add_block_idempotent() {
         let (mut tree, obs) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         tree.add_block(hash(2), vec![2]).unwrap();
@@ -1274,7 +1323,7 @@ mod tests {
     #[test]
     fn test_check_block_wanted_idempotent_for_existing_header() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         let first = tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         let second = tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
@@ -1289,7 +1338,7 @@ mod tests {
     #[test]
     fn test_add_block_not_in_tree_returns_error() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         let result = tree.add_block(hash(99), vec![99]);
         assert!(matches!(
@@ -1301,7 +1350,7 @@ mod tests {
     #[test]
     fn test_chain_switch_fires_rollback() {
         let (mut tree, obs) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Favoured: 1->2->3
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
@@ -1329,7 +1378,7 @@ mod tests {
     #[test]
     fn test_multi_level_rollback() {
         let (mut tree, obs) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Favoured: 1->2->3->4->5
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
@@ -1353,7 +1402,7 @@ mod tests {
     #[test]
     fn test_rollback_fires_proposed_for_fetched_blocks_on_new_chain() {
         let (mut tree, obs) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Favoured: 1->2->3
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
@@ -1380,7 +1429,7 @@ mod tests {
     #[test]
     fn test_chain_switch_transitions_offered_to_wanted() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Favoured: 1->2->3
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
@@ -1410,7 +1459,7 @@ mod tests {
     #[test]
     fn test_mark_validated() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
         tree.add_block(hash(2), vec![2]).unwrap();
 
@@ -1424,7 +1473,7 @@ mod tests {
     #[test]
     fn test_mark_rejected() {
         let (mut tree, obs) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         insert_with_body(&mut tree, 2, 1, 1, BlockValidationStatus::Fetched);
         insert_no_body(&mut tree, 3, 2, 2, BlockValidationStatus::Wanted);
@@ -1446,7 +1495,7 @@ mod tests {
     #[test]
     fn test_remove_block_removes_descendants() {
         let (mut tree, _) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Use insert_block directly to avoid check_block_wanted side effects
         insert_no_body(&mut tree, 2, 1, 1, BlockValidationStatus::Wanted);
@@ -1465,7 +1514,7 @@ mod tests {
     #[test]
     fn test_remove_block_chain_switch_fires_rollback() {
         let (mut tree, obs) = make_tree(2160);
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
 
         // Favoured: 1->2->3->4
         insert_no_body(&mut tree, 2, 1, 1, BlockValidationStatus::Wanted);
@@ -1497,7 +1546,7 @@ mod tests {
     fn test_prune_removes_old_blocks() {
         let (mut tree, _) = make_tree(3); // k=3
 
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         for i in 2..=6u8 {
             tree.check_block_wanted(hash(i), hash(i - 1), i as u64 - 1, i as u64 - 1).unwrap();
             tree.add_block(hash(i), vec![i]).unwrap();
@@ -1518,7 +1567,7 @@ mod tests {
     fn test_prune_removes_unfavoured_branch_rooted_before_prune_boundary() {
         let (mut tree, _) = make_tree(3); // k=3
 
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         // Favoured: 1->2->3->4->5->6
         for i in 2..=6u8 {
             insert_with_body(
@@ -1544,7 +1593,7 @@ mod tests {
     fn test_prune_preserves_fork_after_prune_boundary() {
         let (mut tree, _) = make_tree(3); // k=3
 
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         // Favoured: 1->2->3->4->5->6
         for i in 2..=6u8 {
             tree.check_block_wanted(hash(i), hash(i - 1), i as u64 - 1, i as u64 - 1).unwrap();
@@ -1564,7 +1613,7 @@ mod tests {
     fn test_prune_updates_root_to_new_oldest_block() {
         let (mut tree, _) = make_tree(3); // k=3
 
-        tree.set_root(hash(1), 0, 0).unwrap();
+        tree.set_root(hash(1), 0, 0);
         for i in 2..=6u8 {
             tree.check_block_wanted(hash(i), hash(i - 1), i as u64 - 1, i as u64 - 1).unwrap();
             tree.add_block(hash(i), vec![i]).unwrap();
