@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
-use acropolis_common::{validation::UTxOWValidationError, ReferenceScript, ScriptHash};
+use acropolis_common::{
+    protocol_params::ProtocolParams, validation::UTxOWValidationError, ReferenceScript, ScriptHash,
+};
 use rayon::prelude::*;
-use uplc_turbo::{arena::Arena, binder::DeBruijn, flat, program::Program};
+use uplc_turbo::{arena::Arena, binder::DeBruijn, flat, machine::PlutusVersion, program::Program};
 
 /// NEW Babbage Validation Rules
 /// Since Babbage introduces **reference scripts** and **inline datums**, this requires new UTxOW validation rules.
@@ -10,8 +12,15 @@ use uplc_turbo::{arena::Arena, binder::DeBruijn, flat, program::Program};
 /// 1. MalformedReferenceScripts
 pub fn validate(
     created_reference_scripts: HashMap<ScriptHash, &ReferenceScript>,
+    protocol_params: &ProtocolParams,
 ) -> Result<(), Box<UTxOWValidationError>> {
-    validate_reference_scripts(created_reference_scripts)?;
+    let protocol_version = protocol_params.protocol_version().ok_or_else(|| {
+        Box::new(UTxOWValidationError::Other(
+            "Protocol version is not set".to_string(),
+        ))
+    })?;
+    let protocol_major_version = protocol_version.major;
+    validate_reference_scripts(created_reference_scripts, protocol_major_version)?;
 
     Ok(())
 }
@@ -21,9 +30,10 @@ pub fn validate(
 /// (via HashMap), so each script is only validated once.
 pub fn validate_reference_scripts(
     reference_scripts: HashMap<ScriptHash, &ReferenceScript>,
+    protocol_major_version: u64,
 ) -> Result<(), Box<UTxOWValidationError>> {
     reference_scripts.par_iter().try_for_each(|(script_hash, reference_script)| {
-        validate_script_wellformedness(script_hash, reference_script)
+        validate_script_wellformedness(script_hash, reference_script, protocol_major_version)
     })?;
 
     Ok(())
@@ -32,18 +42,26 @@ pub fn validate_reference_scripts(
 fn validate_script_wellformedness(
     script_hash: &ScriptHash,
     reference_script: &ReferenceScript,
+    protocol_major_version: u64,
 ) -> Result<(), Box<UTxOWValidationError>> {
-    let script_bytes = match reference_script {
-        ReferenceScript::PlutusV1(bytes) => bytes,
-        ReferenceScript::PlutusV2(bytes) => bytes,
-        ReferenceScript::PlutusV3(bytes) => bytes,
+    let (plutus_version, script_bytes) = match reference_script {
+        ReferenceScript::PlutusV1(bytes) => (PlutusVersion::V1, bytes),
+        ReferenceScript::PlutusV2(bytes) => (PlutusVersion::V2, bytes),
+        ReferenceScript::PlutusV3(bytes) => (PlutusVersion::V3, bytes),
         _ => return Ok(()),
     };
 
     let arena = Arena::new();
-    let _: &Program<DeBruijn> = flat::decode(&arena, script_bytes).map_err(|e| {
+    let _: &Program<DeBruijn> = flat::decode(
+        &arena,
+        script_bytes,
+        plutus_version,
+        protocol_major_version as u32,
+    )
+    .map_err(|e| {
         Box::new(UTxOWValidationError::MalformedReferenceScripts {
             script_hash: *script_hash,
+            protocol_major_version,
             reason: format!("Invalid script: {}", e),
         })
     })?;
@@ -69,7 +87,7 @@ mod tests {
     )]
     #[allow(clippy::result_large_err)]
     fn babbage_utxow_test(
-        (_ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
     ) -> Result<(), UTxOWValidationError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let raw_tx = tx.encode();
@@ -93,6 +111,6 @@ mod tests {
             .map(|(k, v)| (*k, v))
             .collect::<HashMap<ScriptHash, &ReferenceScript>>();
 
-        validate(created_reference_scripts).map_err(|e| *e)
+        validate(created_reference_scripts, &ctx.protocol_params).map_err(|e| *e)
     }
 }

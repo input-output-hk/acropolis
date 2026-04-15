@@ -260,16 +260,22 @@ pub enum UTxOWValidationError {
     },
 
     /// **Cause:** Malformed Script Witnesses
-    #[error("Malformed script witnesses: script_hash={script_hash}, reason={reason}")]
+    #[error(
+        "Malformed script witnesses: script_hash={script_hash}, protocol_major_version={protocol_major_version}, reason={reason}"
+    )]
     MalformedScriptWitnesses {
         script_hash: ScriptHash,
+        protocol_major_version: u64,
         reason: String,
     },
 
     /// **Cause:** Malformed Reference Script
-    #[error("Malformed reference scripts: script_hash={script_hash}, reason={reason}")]
+    #[error(
+        "Malformed reference scripts: script_hash={script_hash}, protocol_major_version={protocol_major_version}, reason={reason}"
+    )]
     MalformedReferenceScripts {
         script_hash: ScriptHash,
+        protocol_major_version: u64,
         reason: String,
     },
 

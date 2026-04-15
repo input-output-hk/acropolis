@@ -1,5 +1,13 @@
 {
   "protocol_params": {
+    "shelley": {
+      "protocolParams": {
+        "protocolVersion": {
+          "minor": 0,
+          "major": 5
+        }
+      }
+    },
     "alonzo": {
       "plutus_v1_cost_model": [
         197209, 0, 1, 1, 396231, 621, 0, 1, 150000, 1000, 0, 1, 150000, 32,

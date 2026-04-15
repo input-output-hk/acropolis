@@ -1,5 +1,13 @@
 {
   "protocol_params": {
+    "shelley": {
+      "protocolParams": {
+        "protocolVersion": {
+          "minor": 0,
+          "major": 9
+        }
+      }
+    },
     "babbage": {
       "plutus_v2_cost_model": [
         100788, 420, 1, 1, 1000, 173, 0, 1, 1000, 59957, 4, 1, 11183, 32,
