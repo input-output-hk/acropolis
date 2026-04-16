@@ -188,7 +188,10 @@ struct FjallBlockStore {
 
 impl FjallBlockStore {
     fn new(database: &Database) -> Result<Self> {
-        let blocks = database.keyspace(BLOCKS_KEYSPACE, fjall::KeyspaceCreateOptions::default)?;
+        let blocks = database.keyspace(BLOCKS_KEYSPACE, || {
+            fjall::KeyspaceCreateOptions::default()
+                .with_kv_separation(Some(fjall::KvSeparationOptions::default()))
+        })?;
         let block_hashes_by_slot = database.keyspace(
             BLOCK_HASHES_BY_SLOT_KEYSPACE,
             fjall::KeyspaceCreateOptions::default,
