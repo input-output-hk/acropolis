@@ -202,9 +202,7 @@ impl ToPlutusData for GovernanceAction {
         match self {
             GovernanceAction::ParameterChange(pca) => {
                 let prev = pca.previous_action_id.to_plutus_data(arena, version)?;
-                // TODO:
-                // implement a proper encoding for the parameters instead of just using an integer placeholder
-                let params = integer(arena, 0);
+                let params = pca.protocol_param_update.as_ref().to_plutus_data(arena, version)?;
                 let script = match &pca.script_hash {
                     Some(h) => constr(arena, 0, vec![h.to_plutus_data(arena, version)?]),
                     None => constr(arena, 1, vec![]),

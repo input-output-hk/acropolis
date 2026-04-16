@@ -477,6 +477,13 @@ mod tests {
     )]
     #[test_case(validation_fixture!(
         "conway",
+        "51f495aa23f4b3b3aa90afde4a0e67823bb7ac4ac65f5ffbb138373b863f2f74"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 7 - with Propose Script"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
         "332aac636f8476b1a91c0071a445103d8f55309c23bfddaf242732630efcf0ec",
         "always_fail"
     ) =>
@@ -517,7 +524,6 @@ mod tests {
             build_script_contexts(&tx_info, &scripts_needed, &scripts_provided).unwrap();
 
         let cost_models = ctx.protocol_params.cost_models();
-        println!("protocol params: {:?}", ctx.protocol_params);
 
         evaluate_scripts(
             &tx_info,
