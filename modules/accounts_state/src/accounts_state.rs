@@ -25,6 +25,8 @@ mod drep_distribution_publisher;
 use drep_distribution_publisher::DRepDistributionPublisher;
 mod spo_distribution_publisher;
 use spo_distribution_publisher::SPODistributionPublisher;
+mod spo_default_vote_publisher;
+use spo_default_vote_publisher::SPODefaultVotePublisher;
 mod spo_rewards_publisher;
 use spo_rewards_publisher::SPORewardsPublisher;
 mod registration_updates_publisher;
@@ -135,6 +137,7 @@ struct AccountsReaders {
 struct AccountsPublishers {
     pub drep_distribution: DRepDistributionPublisher,
     pub spo_distribution: SPODistributionPublisher,
+    pub spo_default_vote: SPODefaultVotePublisher,
     pub spo_rewards: SPORewardsPublisher,
     pub stake_reward_deltas: StakeRewardDeltasPublisher,
     pub registration_updates: StakeRegistrationUpdatesPublisher,
@@ -253,6 +256,7 @@ impl AccountsState {
 
                 publishers.drep_distribution.publish_message(rollback_message.clone()).await?;
                 publishers.spo_distribution.publish_message(rollback_message.clone()).await?;
+                publishers.spo_default_vote.publish_message(rollback_message.clone()).await?;
                 publishers.spo_rewards.publish_message(rollback_message.clone()).await?;
                 publishers.stake_reward_deltas.publish_message(rollback_message.clone()).await?;
                 publishers.registration_updates.publish_message(rollback_message.clone()).await?;
@@ -329,6 +333,15 @@ impl AccountsState {
                         publishers.spo_distribution.publish_spdd(block_info, spdd).await,
                     );
 
+                    let default_vote = state.generate_default_vote();
+                    ctx.handle(
+                        "publish_spo_default_vote",
+                        publishers
+                            .spo_default_vote
+                            .publish_spo_default_vote(block_info, default_vote.clone())
+                            .await,
+                    );
+
                     stake_reward_deltas
                 } else {
                     Vec::new()
@@ -350,7 +363,6 @@ impl AccountsState {
                 )? {
                     RollbackWrapper::Normal((block_info, ea_msg)) => {
                         async {
-                            // Add refund deltas to the stake reward deltas
                             stake_reward_deltas.extend(
                                 ctx.handle(
                                     "handle_epoch_activity",
@@ -367,15 +379,6 @@ impl AccountsState {
                                 ),
                             );
 
-                            // Publish stake account reward deltas
-                            ctx.handle(
-                                "publish_stake_reward_deltas",
-                                publishers
-                                    .stake_reward_deltas
-                                    .publish_stake_reward_deltas(&block_info, stake_reward_deltas)
-                                    .await,
-                            );
-
                             // Publish DRep Delegation Distribution
                             ctx.handle(
                                 "publish_drdd",
@@ -389,10 +392,10 @@ impl AccountsState {
                             "account_state.handle_epoch_activity",
                             block = block_info.number
                         ))
-                        .await;
+                        .await
                     }
                     RollbackWrapper::Rollback(_) => {}
-                }
+                };
 
                 // Handle governance outcomes (enacted/expired proposals) at epoch boundary
                 match ctx.consume_sync(
@@ -401,13 +404,14 @@ impl AccountsState {
                 )? {
                     RollbackWrapper::Normal((block_info, outcomes_msg)) => {
                         async {
-                            ctx.handle(
+                            let refund_deltas = ctx.handle(
                                 "handle_governance_outcomes",
                                 state.handle_governance_outcomes(
                                     &outcomes_msg,
                                     &mut stake_address_undo,
                                 ),
                             );
+                            stake_reward_deltas.extend(refund_deltas);
                         }
                         .instrument(info_span!(
                             "account_state.handle_governance_outcomes",
@@ -418,7 +422,24 @@ impl AccountsState {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                // Clear the skip flag after first transition handling.
+                // publish stake reward deltas if we're not in rollback
+                if !primary.is_rollback() {
+                    async {
+                        ctx.handle(
+                            "publish_stake_reward_deltas",
+                            publishers
+                                .stake_reward_deltas
+                                .publish_stake_reward_deltas(
+                                    primary.block_info(),
+                                    stake_reward_deltas,
+                                )
+                                .await,
+                        )
+                    }
+                    .await;
+                }
+
+                // Clear the skip flag after first epoch transition
                 skip_first_epoch_rewards = false;
 
                 // publish current pots after handling the epoch transition, so that the published pots reflect the new epoch's state

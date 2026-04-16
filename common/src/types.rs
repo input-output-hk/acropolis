@@ -1351,6 +1351,14 @@ pub struct PoolEpochState {
     pub spo_reward: u64,
 }
 
+/// Pool default vote (for SPDD)
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum DelegatedStakeDefaultVote {
+    AlwaysNoConfidence,
+    AlwaysAbstain,
+    NoDefault,
+}
+
 /// SPO total delegation data (for SPDD)
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct DelegatedStake {
@@ -1961,6 +1969,8 @@ pub struct TreasuryWithdrawalsAction {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CommitteeChange {
     pub removed_committee_members: HashSet<CommitteeCredential>,
+
+    /// Committee members, with expiration epoch.
     #[serde_as(as = "Vec<(_, _)>")]
     pub new_committee_members: HashMap<CommitteeCredential, u64>,
     pub terms: RationalNumber,
@@ -2262,8 +2272,8 @@ impl<E: FromStr + Display> FromStr for VoteResult<E> {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VotingOutcome {
     pub procedure: ProposalProcedure,
-    pub votes_cast: VoteResult<VoteCount>,
-    pub votes_threshold: VoteResult<RationalNumber>,
+    pub votes_cast: Option<VoteResult<VoteCount>>,
+    pub votes_threshold: Option<VoteResult<RationalNumber>>,
     pub accepted: bool,
 }
 

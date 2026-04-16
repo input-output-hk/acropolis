@@ -319,6 +319,16 @@ pub struct SPOStakeDistributionMessage {
     pub spos: Vec<(PoolId, DelegatedStake)>,
 }
 
+/// Default vote for each SPO, published at epoch boundary.
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SPODefaultVoteMessage {
+    /// Epoch which has ended
+    pub epoch: u64,
+
+    /// Default vote by pool ID; appeared as bugfix in Cardano from Version 10.
+    pub default_vote: Vec<(PoolId, DelegatedStakeDefaultVote)>,
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SPORewardsMessage {
     /// Epoch which has ended
@@ -389,6 +399,7 @@ pub enum CardanoMessage {
     DRepStakeDistribution(DRepStakeDistributionMessage), // Info about drep stake
     SPOStakeDistribution(SPOStakeDistributionMessage),   // SPO delegation distribution (SPDD)
     SPORewards(SPORewardsMessage),                       // SPO rewards distribution (SPRD)
+    SPODefaultVote(SPODefaultVoteMessage),               // SPO default vote
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
     StakeRewardDeltas(StakeRewardDeltasMessage),         // Stake Reward Deltas
 

@@ -8,18 +8,20 @@ use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     messages::{
         DRepStakeDistributionMessage, DRepStateMessage, GovernanceOutcomesMessage,
-        GovernanceProceduresMessage, ProtocolParamsMessage, SPOStakeDistributionMessage,
+        GovernanceProceduresMessage, ProtocolParamsMessage, SPODefaultVoteMessage,
+        SPOStakeDistributionMessage,
     },
     protocol_params::ProtocolVersion,
     validation::{GovernanceValidationError, ValidationError},
-    BlockInfo, DRepCredential, DelegatedStake, Era, GovActionId, Lovelace, PoolId,
-    ProposalProcedure, TxHash, Voter, VotingProcedure,
+    BlockInfo, DRepCredential, DelegatedStake, DelegatedStakeDefaultVote, Era, GovActionId,
+    Lovelace, PoolId, ProposalProcedure, TxHash, Voter, VotingProcedure,
 };
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
 use std::collections::HashMap;
 use tracing::info;
 
+#[derive(Default)]
 pub struct State {
     pub drep_stake_messages_count: usize,
 
@@ -28,6 +30,7 @@ pub struct State {
     drep_no_confidence: u64,
     drep_abstain: u64,
     spo_stake: HashMap<PoolId, DelegatedStake>,
+    spo_default_vote: Vec<(PoolId, DelegatedStakeDefaultVote)>,
 
     alonzo_babbage_voting: AlonzoBabbageVoting,
     conway_voting: ConwayVoting,
@@ -37,20 +40,16 @@ impl State {
     pub fn new(
         verification_output_file: Option<String>,
         verify_votes_files: Option<String>,
-    ) -> Self {
-        Self {
-            drep_stake_messages_count: 0,
-
-            current_era: Era::default(),
-
-            alonzo_babbage_voting: AlonzoBabbageVoting::default(),
-            conway_voting: ConwayVoting::new(verification_output_file, verify_votes_files),
-
-            drep_stake: HashMap::new(),
-            drep_no_confidence: 0,
-            drep_abstain: 0,
-            spo_stake: HashMap::new(),
-        }
+        verify_aggregated_votes_file: Option<String>,
+    ) -> Result<Self> {
+        Ok(Self {
+            conway_voting: ConwayVoting::new(
+                verification_output_file,
+                verify_votes_files,
+                verify_aggregated_votes_file,
+            )?,
+            ..Default::default()
+        })
     }
 
     /// Update current fields to new epoch values. The function should be called
@@ -87,6 +86,7 @@ impl State {
         drep_message: &DRepStakeDistributionMessage,
         drep_state_message: &DRepStateMessage,
         spo_message: &SPOStakeDistributionMessage,
+        spo_default_vote_message: &SPODefaultVoteMessage,
     ) -> Result<()> {
         self.drep_stake_messages_count += 1;
         let filtered_dreps = drep_message
@@ -100,6 +100,7 @@ impl State {
         self.drep_no_confidence = drep_message.drdd.no_confidence;
         self.drep_abstain = drep_message.drdd.abstain;
         self.spo_stake = HashMap::from_iter(spo_message.spos.iter().cloned());
+        self.spo_default_vote = spo_default_vote_message.default_vote.clone();
 
         Ok(())
     }
@@ -201,6 +202,7 @@ impl State {
                 &voting_state,
                 &self.drep_stake,
                 &self.spo_stake,
+                &self.spo_default_vote,
             )?;
             self.conway_voting.update_action_status_with_outcomes(new_block.epoch, &ratified)?;
             self.conway_voting.include_pending_votes()?;

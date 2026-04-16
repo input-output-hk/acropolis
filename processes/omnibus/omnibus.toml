@@ -153,6 +153,7 @@ stake-drep-distribution-topic = "cardano.drep.distribution"
 stake-spo-distribution-topic = "cardano.spo.distribution"
 verification-output-file = "../../modules/governance_state/data/verification.csv"
 verify-votes-files = "../../modules/governance_state/votes-mainnet/mainnet.{epoch}.{action_id}.csv"
+verify-aggregate-votes-file = "../../modules/governance_state/votes-mainnet/mainnet.votes.csv"
 
 [module.parameters-state]
 # Listen for governance actions
