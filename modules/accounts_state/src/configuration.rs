@@ -8,6 +8,7 @@ use acropolis_common::{
 use caryatid_sdk::Context;
 use config::Config;
 
+use crate::spo_default_vote_publisher::SPODefaultVotePublisher;
 use crate::{
     drep_distribution_publisher::DRepDistributionPublisher, pots_publisher::PotsPublisher,
     registration_updates_publisher::StakeRegistrationUpdatesPublisher,
@@ -26,6 +27,8 @@ const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) = (
 );
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
     ("publish-spo-distribution-topic", "cardano.spo.distribution");
+const DEFAULT_SPO_DEFAULT_VOTE_TOPIC: (&str, &str) =
+    ("publish-spo-default-vote-topic", "cardano.spo.default-vote");
 const DEFAULT_SPO_REWARDS_TOPIC: (&str, &str) =
     ("publish-spo-rewards-topic", "cardano.spo.rewards");
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: (&str, &str) = (
@@ -66,7 +69,7 @@ impl AccountsConfig {
             verifier.set_rewards_template(&verify_rewards_files);
         }
         if let Ok(verify_spdd_files) = config.get_string("verify-spdd-files") {
-            verifier.set_spdd_template(&verify_spdd_files);
+            verifier.set_spdd_template(&verify_spdd_files)?;
         }
 
         let snapshot = match StartupMode::from_config(config.as_ref()).is_snapshot() {
@@ -99,6 +102,10 @@ impl AccountsConfig {
                 spo_distribution: SPODistributionPublisher::new(
                     context.clone(),
                     get_string_flag(config, DEFAULT_SPO_DISTRIBUTION_TOPIC),
+                ),
+                spo_default_vote: SPODefaultVotePublisher::new(
+                    context.clone(),
+                    get_string_flag(config, DEFAULT_SPO_DEFAULT_VOTE_TOPIC),
                 ),
                 spo_rewards: SPORewardsPublisher::new(
                     context.clone(),

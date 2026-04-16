@@ -1,7 +1,7 @@
 use crate::{
     math::update_value_with_delta, messages::DRepDelegationDistribution, DRepChoice,
-    DRepCredential, DelegatedStake, Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress,
-    StakeAddressDelta, Withdrawal,
+    DRepCredential, DelegatedStake, DelegatedStakeDefaultVote, Lovelace, PoolId, PoolLiveStakeInfo,
+    PoolRegistration, StakeAddress, StakeAddressDelta, Withdrawal,
 };
 use anyhow::{anyhow, bail, Result};
 use dashmap::DashMap;
@@ -381,6 +381,30 @@ impl StakeAddressMap {
 
         // Collect into a plain BTreeMap, so that it is ordered on output
         spo_stakes.iter().map(|entry| (*entry.key(), *entry.value())).collect()
+    }
+
+    // In Conway, before v. 10.0, all SPOs vote by default as "No". Since protocol v. 10.0,
+    // it became possible to specify the default vote rule for an SPO (in a similar way as with
+    // DReps): SPO default vote rule is that of the SPO reward account delegated vote
+    // (alwaysAbstain or noConfidence), if any --- or "default No" otherwise.
+    // TODO: Make a separate module to compute such excerpts from SPO/DRep data, to reduce
+    // account_state module burden.
+    pub fn generate_default_vote(
+        &self,
+        pool_info: &OrdMap<PoolId, PoolRegistration>,
+    ) -> BTreeMap<PoolId, DelegatedStakeDefaultVote> {
+        pool_info
+            .iter()
+            .filter_map(|(pool_id, reg)| {
+                use DelegatedStakeDefaultVote::*;
+                let sas = self.inner.get(&reg.reward_account)?;
+                match sas.delegated_drep {
+                    Some(DRepChoice::Abstain) => Some((*pool_id, AlwaysAbstain)),
+                    Some(DRepChoice::NoConfidence) => Some((*pool_id, AlwaysNoConfidence)),
+                    Some(_) | None => None,
+                }
+            })
+            .collect()
     }
 
     /// Dump current Stake Pool Delegation Distribution State

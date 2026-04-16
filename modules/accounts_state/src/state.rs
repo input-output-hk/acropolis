@@ -6,22 +6,20 @@ use crate::rewards::{
 };
 use crate::runtime::{BlockStakeAddressUndoRecorder, RewardRuntime, StakeAddressUndoHistory};
 use crate::verifier::Verifier;
-use acropolis_common::caryatid::ValidationContext;
-use acropolis_common::epoch_snapshot::EpochSnapshot;
-use acropolis_common::messages::{
-    GovernanceProceduresMessage, Message, StateQuery, StateQueryResponse,
-};
-use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::{
+    caryatid::ValidationContext,
     certificate::TxCertificateIdentifier,
+    epoch_snapshot::EpochSnapshot,
     math::update_value_with_delta,
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, EpochActivityMessage,
-        GovernanceOutcomesMessage, ProtocolParamsMessage, SPOStateMessage,
-        StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+        GovernanceOutcomesMessage, GovernanceProceduresMessage, Message, ProtocolParamsMessage,
+        SPOStateMessage, StakeAddressDeltasMessage, StateQuery, StateQueryResponse,
+        TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::{ProtocolParams, ShelleyParams},
     queries::{
+        accounts::OptimalPoolSizing,
         get_query_topic,
         stake_deltas::{
             StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
@@ -29,19 +27,21 @@ use acropolis_common::{
         utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
     },
     stake_addresses::{StakeAddressMap, StakeAddressState},
-    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
-    InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
-    PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind,
-    SPORewards, ShelleyAddressPointer, StakeAddress, StakeRewardDelta, TxCertificate,
+    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, DelegatedStakeDefaultVote, Era,
+    GovernanceOutcomeVariant, InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace,
+    MoveInstantaneousReward, PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange,
+    RegistrationChangeKind, SPORewards, ShelleyAddressPointer, StakeAddress,
+    StakeRegistrationOutcome, StakeRegistrationUpdate, StakeRewardDelta, TxCertificate,
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
-use acropolis_common::{StakeRegistrationOutcome, StakeRegistrationUpdate};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use imbl::{HashMap as ImHashMap, OrdMap, OrdSet};
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::mem::take;
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    mem::take,
+    sync::{Arc, Mutex},
+};
 use tokio::task::spawn_blocking;
 use tracing::{debug, error, info, warn, Level};
 
@@ -104,11 +104,8 @@ pub struct State {
     /// All registered DReps
     dreps: OrdMap<DRepCredential, Lovelace>,
 
-    /// Protocol parameters that apply during this epoch
-    protocol_parameters: Option<ProtocolParams>,
-
-    /// Protocol parameters that applied in the previous epoch
-    previous_protocol_parameters: Option<ProtocolParams>,
+    /// Protocol parameters (valid in current epoch).
+    protocol_parameters: ProtocolParams,
 
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<(PoolId, StakeAddress)>,
@@ -334,13 +331,10 @@ impl State {
     pub fn get_optimal_pool_sizing(&self) -> Option<OptimalPoolSizing> {
         // Get Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
-        let shelley_params = match &self.protocol_parameters {
-            Some(ProtocolParams {
-                shelley: Some(sp), ..
-            }) => sp,
+        let shelley_params = match &self.protocol_parameters.shelley {
+            Some(sp) => sp.clone(),
             _ => return None,
-        }
-        .clone();
+        };
 
         let total_supply =
             shelley_params.max_lovelace_supply - self.epoch_snapshots.mark.pots.reserves;
@@ -619,18 +613,10 @@ impl State {
         // rewards to calculate
         // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
         // have to use the genesis parameters we just received
-        let shelley_params = match &self.previous_protocol_parameters {
-            Some(ProtocolParams {
-                shelley: Some(sp), ..
-            }) => sp,
-            _ => match &self.protocol_parameters {
-                Some(ProtocolParams {
-                    shelley: Some(sp), ..
-                }) => sp,
-                _ => return Ok(vec![]),
-            },
-        }
-        .clone();
+        let shelley_params = match &self.protocol_parameters.shelley {
+            Some(sp) => sp.clone(),
+            _ => return Ok(vec![]),
+        };
         // Compute the randomness stabilization window (4k/f) from Shelley genesis params.
         // This is when Cardano captures `addrsRew` and starts the rewards calculation.
         let f = &shelley_params.active_slots_coeff;
@@ -928,8 +914,8 @@ impl State {
         // Get pool deposit amount from parameters, or default
         let deposit = self
             .protocol_parameters
+            .shelley
             .as_ref()
-            .and_then(|pp| pp.shelley.as_ref())
             .map(|sp| sp.protocol_params.pool_deposit)
             .unwrap_or(DEFAULT_POOL_DEPOSIT);
 
@@ -1167,6 +1153,15 @@ impl State {
         stake_addresses.generate_spdd()
     }
 
+    /// Derive the Default Vote distribution - a map of votes, associated with each SPO,
+    /// (based on the current delegation of their rewards stake address - it's considered the
+    /// default vote of SPO, which may be different from 'No').
+    /// This is an addition of 10.0 protocol.
+    pub fn generate_default_vote(&self) -> BTreeMap<PoolId, DelegatedStakeDefaultVote> {
+        let stake_addresses = self.stake_addresses.lock().unwrap();
+        stake_addresses.generate_default_vote(&self.spos)
+    }
+
     /// Derive the DRep Delegation Distribution (DRDD) - the total amount
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
     pub fn generate_drdd(&self) -> DRepDelegationDistribution {
@@ -1176,21 +1171,8 @@ impl State {
 
     /// Handle an ProtocolParamsMessage with the latest parameters at the start of a new
     /// epoch
-    ///
-    /// IMPORTANT: We always rotate parameters at epoch boundaries, even if unchanged.
-    /// This is because rewards calculation uses `previous_protocol_parameters` which must
-    /// contain the params that were ACTIVE during the epoch being rewarded.
-    ///
-    /// Example: When entering epoch 235 to calculate epoch 234 rewards:
-    /// - `previous_protocol_parameters` must be epoch 234's params (used for rewards calc)
-    /// - `protocol_parameters` becomes epoch 235's params
-    ///
-    /// If params don't change between epochs (e.g., k=500 in both 234 and 235), we still
-    /// need to rotate so that `previous_protocol_parameters` reflects epoch 234's params,
-    /// not stale params from when they last changed (e.g., epoch 233's k=150).
     pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) {
-        self.previous_protocol_parameters = self.protocol_parameters.clone();
-        self.protocol_parameters = Some(params_msg.params.clone());
+        self.protocol_parameters = params_msg.params.clone();
     }
 
     /// Complete the previous epoch rewards calculation
@@ -1353,8 +1335,8 @@ impl State {
         // Get pool deposit amount from parameters, or default
         let deposit = self
             .protocol_parameters
+            .shelley
             .as_ref()
-            .and_then(|pp| pp.shelley.as_ref())
             .map(|sp| sp.protocol_params.pool_deposit)
             .unwrap_or(DEFAULT_POOL_DEPOSIT);
 
@@ -1443,8 +1425,8 @@ impl State {
                 None => {
                     // Get stake deposit amount from parameters, or default
                     self.protocol_parameters
+                        .shelley
                         .as_ref()
-                        .and_then(|pp| pp.shelley.as_ref())
                         .map(|sp| sp.protocol_params.key_deposit)
                         .unwrap_or(DEFAULT_KEY_DEPOSIT)
                 }
@@ -1496,8 +1478,8 @@ impl State {
                 None => {
                     // Get stake deposit amount from parameters, or default
                     self.protocol_parameters
+                        .shelley
                         .as_ref()
-                        .and_then(|pp| pp.shelley.as_ref())
                         .map(|sp| sp.protocol_params.key_deposit)
                         .unwrap_or(DEFAULT_KEY_DEPOSIT)
                 }
@@ -1562,7 +1544,7 @@ impl State {
         // 2. Delegated to NoConfidence or Abstain
         //    We remove the account from its previous DReps account set in the `drep_delegators` map.
         //    This behavior produces a distribution which matches DB Sync.
-        if self.is_chang() {
+        if self.is_chang()? {
             match DRepChoice::to_credential(drep) {
                 Some(drep) => {
                     self.drep_delegators.entry(drep).or_default().insert(stake_address.clone());
@@ -1583,13 +1565,13 @@ impl State {
         &mut self,
         drep: &DRepCredential,
         undo: &mut BlockStakeAddressUndoRecorder,
-    ) {
+    ) -> Result<()> {
         self.dreps.remove(drep);
 
         // In PV9 we need to remove the current delegation of all accounts that have ever delegated to
         // this DRep (Excluding accounts that delegated to No Confidence or Abstain after delegating to
         // the DRep).
-        if self.is_chang() {
+        if self.is_chang()? {
             if let Some(delegators) = self.drep_delegators.remove(drep) {
                 self.mutate_stake_addresses(
                     undo,
@@ -1610,6 +1592,7 @@ impl State {
                 stake_addresses.deregister_drep(drep);
             });
         }
+        Ok(())
     }
 
     /// Handle TxCertificates
@@ -1774,7 +1757,7 @@ impl State {
                 }
 
                 TxCertificate::DRepDeregistration(dereg) => {
-                    self.record_drep_deregistration(&dereg.credential, undo);
+                    self.record_drep_deregistration(&dereg.credential, undo)?;
                 }
 
                 _ => (),
@@ -1865,7 +1848,7 @@ impl State {
         &mut self,
         outcomes_msg: &GovernanceOutcomesMessage,
         undo: &mut BlockStakeAddressUndoRecorder,
-    ) -> Result<()> {
+    ) -> Result<Vec<StakeRewardDelta>> {
         for outcome in &outcomes_msg.conway_outcomes {
             let proposal = &outcome.voting.procedure;
             let deposit = proposal.deposit;
@@ -1912,7 +1895,14 @@ impl State {
             );
         }
 
-        Ok(())
+        let mut reward_deltas = Vec::new();
+        reward_deltas.extend(self.pay_proposal_refunds(undo));
+        info!(
+            "Refunds: {}, rewards: {}",
+            self.proposal_refunds.len(),
+            reward_deltas.len()
+        );
+        Ok(reward_deltas)
     }
 
     // Remove an account from a DReps delegation set
@@ -1940,13 +1930,13 @@ impl State {
         }
     }
 
-    // Retrieve the major protocol version from the previous protocol parameters
-    // During bootstrap we use the current protocol parameters for the first epoch
-    fn is_chang(&self) -> bool {
-        self.previous_protocol_parameters
-            .as_ref()
-            .or(self.protocol_parameters.as_ref())
-            .is_some_and(|p| p.major_protocol_version() == Some(9))
+    // Retrieve the major protocol version from the protocol parameters
+    fn is_chang(&self) -> Result<bool> {
+        if let Some(v) = self.protocol_parameters.protocol_version() {
+            v.is_chang()
+        } else {
+            Ok(false)
+        }
     }
 }
 
@@ -2602,7 +2592,7 @@ mod tests {
         state.handle_parameters(&msg);
 
         assert_eq!(
-            state.protocol_parameters.unwrap().conway.unwrap().pool_voting_thresholds,
+            state.protocol_parameters.conway.unwrap().pool_voting_thresholds,
             params.conway.unwrap().pool_voting_thresholds
         );
     }

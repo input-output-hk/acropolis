@@ -7,9 +7,9 @@ use acropolis_common::{
     declare_cardano_reader,
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, DRepStateMessage,
-        GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
-        SnapshotMessage, SnapshotStateMessage, StateQuery, StateQueryResponse,
-        StateTransitionMessage,
+        GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPODefaultVoteMessage,
+        SPOStakeDistributionMessage, SnapshotMessage, SnapshotStateMessage, StateQuery,
+        StateQueryResponse, StateTransitionMessage,
     },
     queries::{
         errors::QueryError,
@@ -74,6 +74,14 @@ declare_cardano_reader!(
     DRepStateMessage
 );
 
+declare_cardano_reader!(
+    SPODefaultVoteReader,
+    "spo-default-vote-topic",
+    "cardano.spo.default-vote",
+    SPODefaultVote,
+    SPODefaultVoteMessage
+);
+
 const CONFIG_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 const CONFIG_VALIDATION_OUTCOME_TOPIC: (&str, &str) =
     ("validation-outcome-topic", "cardano.validation.governance");
@@ -82,6 +90,7 @@ const CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 
 const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 const VERIFY_VOTES_FILES: &str = "verify-votes-files";
+const VERIFY_AGGREGATE_VOTES_FILE: &str = "verify-aggregate-votes-file";
 
 /// Governance State module
 #[module(
@@ -98,12 +107,14 @@ pub struct GovernanceStateConfig {
     snapshot_subscribe_topic: String,
     verification_output_file: Option<String>,
     verify_votes_files: Option<String>,
+    verify_aggregated_votes_file: Option<String>,
 }
 
 struct Readers {
     pub gov_reader: GovReader,
     pub drep_reader: DRepReader,
     pub drep_state_reader: DRepStateReader,
+    pub spo_default_vote_reader: SPODefaultVoteReader,
     pub spo_reader: SPOReader,
     pub param_reader: ParamReader,
 }
@@ -120,6 +131,10 @@ impl GovernanceStateConfig {
                 .map(Some)
                 .unwrap_or(None),
             verify_votes_files: config.get_string(VERIFY_VOTES_FILES).map(Some).unwrap_or_default(),
+            verify_aggregated_votes_file: config
+                .get_string(VERIFY_AGGREGATE_VOTES_FILE)
+                .map(Some)
+                .unwrap_or_default(),
         })
     }
 }
@@ -154,7 +169,9 @@ impl GovernanceState {
                         .map(|p| p.gov_action_lifetime as u64)
                         .unwrap_or(6); // Default to 6 epochs if not set
 
-                    locked.get_conway_voting_mut().bootstrap_from_snapshot(gov_msg, voting_length);
+                    locked
+                        .get_conway_voting_mut()
+                        .bootstrap_from_snapshot(gov_msg, voting_length)?;
                     info!(
                         "Snapshot Bootstrap message received, {} proposals loaded",
                         gov_msg.proposals.len()
@@ -196,34 +213,46 @@ impl GovernanceState {
             RollbackWrapper::Rollback(_) => None,
         };
 
+        let spo_default_vote = match vld.consume_sync(
+            "spo_default_vote_reader",
+            readers.spo_default_vote_reader.read_with_rollbacks().await,
+        )? {
+            RollbackWrapper::Normal((_, default_vote)) => Some(default_vote),
+            RollbackWrapper::Rollback(_) => None,
+        };
+
         if let Some((blk_spo, d_spo)) = spo_msg {
             if let Some(drep_state) = drep_state {
                 if let Some(d_drep) = d_drep {
-                    if blk_spo.epoch != d_spo.epoch + 1 {
-                        vld.handle_error(
-                            "spo",
-                            &anyhow!(
-                                "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
-                                d_spo.epoch
-                            ),
+                    if let Some(spo_default_vote) = spo_default_vote {
+                        if blk_spo.epoch != d_spo.epoch + 1 {
+                            vld.handle_error(
+                                "spo",
+                                &anyhow!(
+                                    "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
+                                    d_spo.epoch
+                                ),
+                            );
+                        }
+
+                        if drep_state.epoch != d_drep.epoch {
+                            vld.handle_error(
+                                "drep_state",
+                                &anyhow!(
+                                    "DRep state {} epoch != DRep epoch ({})",
+                                    drep_state.epoch,
+                                    d_drep.epoch
+                                ),
+                            );
+                        }
+
+                        let mut sl = state.lock().await;
+                        vld.handle(
+                            "handle_drep_stake",
+                            sl.handle_drep_stake(&d_drep, &drep_state, &d_spo, &spo_default_vote)
+                                .await,
                         );
                     }
-
-                    if drep_state.epoch != d_drep.epoch {
-                        vld.handle_error(
-                            "drep_state",
-                            &anyhow!(
-                                "DRep state {} epoch != DRep epoch ({})",
-                                drep_state.epoch,
-                                d_drep.epoch
-                            ),
-                        );
-                    }
-
-                    vld.handle(
-                        "handle_drep_stake",
-                        state.lock().await.handle_drep_stake(&d_drep, &drep_state, &d_spo).await,
-                    );
                 }
             }
         }
@@ -240,7 +269,8 @@ impl GovernanceState {
         let state = Arc::new(Mutex::new(State::new(
             config.verification_output_file.clone(),
             config.verify_votes_files.clone(),
-        )));
+            config.verify_aggregated_votes_file.clone(),
+        )?));
 
         // Wait for snapshot bootstrap if subscription is provided
         if let Some(subscription) = snapshot_subscription {
@@ -430,6 +460,7 @@ impl GovernanceState {
             drep_state_reader: DRepStateReader::new(&context, &config).await?,
             spo_reader: SPOReader::new(&context, &config).await?,
             param_reader: ParamReader::new(&context, &config).await?,
+            spo_default_vote_reader: SPODefaultVoteReader::new(&context, &config).await?,
         });
 
         tokio::spawn(async move {
