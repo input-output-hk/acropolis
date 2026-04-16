@@ -5,7 +5,9 @@ use crate::state::State;
 use crate::stores::{fjall::FjallStore, Store};
 
 use acropolis_common::configuration::get_string_flag;
+use acropolis_common::messages::GenesisCompleteMessage;
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::NetworkId;
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
     declare_cardano_reader,
@@ -16,14 +18,13 @@ use acropolis_common::{
     queries::blocks::{BlocksStateQueryResponse, DEFAULT_BLOCKS_QUERY_TOPIC},
     queries::transactions::{TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
-    NetworkId,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::message_bus::Subscription;
 use caryatid_sdk::{module, Context};
 use config::Config;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::info;
 
 mod helpers;
@@ -49,6 +50,13 @@ declare_cardano_reader!(
     ProtocolParams,
     ProtocolParamsMessage
 );
+declare_cardano_reader!(
+    GenesisReader,
+    "genesis-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+    GenesisComplete,
+    GenesisCompleteMessage
+);
 
 #[module(
     message_type(Message),
@@ -64,8 +72,8 @@ impl ChainStore {
         let validation_topic = get_string_flag(&config, DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC);
         info!("Publishing validation outcomes on '{validation_topic}'");
 
-        let network_id: NetworkId =
-            config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
+        // Network ID is set from the GenesisValues (Wrapped in Arc<RwLock<>> to share with txs query handler)
+        let network_id: Arc<RwLock<Option<NetworkId>>> = Arc::new(RwLock::new(None));
 
         let store_type = get_string_flag(&config, DEFAULT_STORE);
         let store: Arc<dyn Store> = match store_type.as_str() {
@@ -107,9 +115,10 @@ impl ChainStore {
         });
 
         let query_store = store.clone();
+        let network_id_for_txs = network_id.clone();
         context.handle(&txs_queries_topic, move |req| {
             let query_store = query_store.clone();
-            let network_id = network_id.clone();
+            let network_id = network_id_for_txs.clone();
             async move {
                 let Message::StateQuery(StateQuery::Transactions(query)) = req.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(
@@ -118,7 +127,24 @@ impl ChainStore {
                         )),
                     ));
                 };
-                let res = handle_txs_query(&query_store, query, network_id).unwrap_or_else(|err| {
+
+                let network = {
+                    let guard = network_id.read().await;
+                    match &*guard {
+                        Some(n) => n.clone(),
+                        None => {
+                            return Arc::new(Message::StateQueryResponse(
+                                StateQueryResponse::Transactions(
+                                    TransactionsStateQueryResponse::Error(
+                                        QueryError::internal_error("network not initialized"),
+                                    ),
+                                ),
+                            ));
+                        }
+                    }
+                };
+
+                let res = handle_txs_query(&query_store, query, network).unwrap_or_else(|err| {
                     TransactionsStateQueryResponse::Error(QueryError::internal_error(
                         err.to_string(),
                     ))
@@ -131,9 +157,26 @@ impl ChainStore {
 
         let mut params_reader = ParamsReader::new(&context, &config).await?;
         let mut blocks_reader = BlocksReader::new(&context, &config).await?;
+        let mut genesis_reader = GenesisReader::new(&context, &config).await?;
         let run_ctx = context.clone();
 
         context.run::<Result<(), anyhow::Error>, _>(async move {
+            match genesis_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((_, genesis)) => {
+                    let mut guard = network_id.write().await;
+
+                    if let Some(existing) = guard.as_ref() {
+                        if *existing != genesis.values.network_id() {
+                            panic!("NetworkId mismatch");
+                        }
+                    } else {
+                        *guard = Some(genesis.values.network_id());
+                    }
+                }
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading genesis values");
+                }
+            }
             match blocks_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal((block_info, block)) => {
                     if let Err(err) =

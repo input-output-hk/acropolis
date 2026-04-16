@@ -3,6 +3,7 @@
 use crate::StakeDeltaFilterParams;
 use crate::{process_message, PointerCache, Tracker};
 use acropolis_common::caryatid::RollbackAwarePublisher;
+use acropolis_common::NetworkId;
 use acropolis_common::{
     messages::{
         AddressDeltasMessage, CardanoMessage, Message, StakeAddressDeltasMessage,
@@ -15,7 +16,6 @@ use caryatid_sdk::Context;
 use serde_with::serde_as;
 use std::collections::HashMap;
 use std::{fs, io::Write, sync::Arc};
-use tracing::info;
 
 #[allow(dead_code)]
 #[serde_as]
@@ -103,33 +103,21 @@ impl State {
         }
     }
 
-    pub fn info(&self) {
-        info!(
-            "pointer cache size: {}, max slot: {}",
-            self.pointer_cache.pointer_map.len(),
-            self.pointer_cache.max_slot
-        );
-        self.tracker.info();
-    }
-
-    pub fn save(&mut self) -> Result<()> {
+    pub fn save(&mut self, network: &NetworkId) -> Result<()> {
         let used_pointers = self.tracker.get_used_pointers();
 
         if self.params.write_full_cache {
-            self.pointer_cache.try_save(&self.params.get_cache_file_name(".json")?)?;
+            self.pointer_cache.try_save(&self.params.get_cache_file_name(".json", network)?)?;
         } else {
-            self.pointer_cache
-                .try_save_filtered(&self.params.get_cache_file_name("")?, &used_pointers)?;
+            self.pointer_cache.try_save_filtered(
+                &self.params.get_cache_file_name("", network)?,
+                &used_pointers,
+            )?;
         }
 
-        let mut file = fs::File::create(self.params.get_cache_file_name(".track.log")?)?;
+        let mut file = fs::File::create(self.params.get_cache_file_name(".track.log", network)?)?;
         file.write_all(self.tracker.report().as_bytes())?;
 
-        Ok(())
-    }
-
-    pub async fn tick(&self) -> Result<()> {
-        self.info();
         Ok(())
     }
 }

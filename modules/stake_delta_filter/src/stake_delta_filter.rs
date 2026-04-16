@@ -3,27 +3,20 @@
 
 use acropolis_common::{
     caryatid::{PrimaryRead, RollbackWrapper, ValidationContext},
-    configuration::{conf_enum, get_bool_flag, get_string_flag, StartupMode},
     declare_cardano_reader,
     messages::{
-        AddressDeltasMessage, CardanoMessage, Message, StateQuery, StateQueryResponse,
+        AddressDeltasMessage, CardanoMessage, GenesisCompleteMessage, Message,
         StateTransitionMessage, TxCertificatesMessage,
-    },
-    queries::{
-        errors::QueryError,
-        stake_deltas::{
-            StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
-        },
     },
     state_history::{StateHistory, StateHistoryStore},
     NetworkId,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{error, info};
 
 declare_cardano_reader!(
     AddressDeltasReader,
@@ -39,32 +32,13 @@ declare_cardano_reader!(
     TxCertificates,
     TxCertificatesMessage
 );
-
-const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str, &str) =
-    ("publishing-stake-delta-topic", "cardano.stake.deltas");
-const DEFAULT_VALIDATION_TOPIC: (&str, &str) = (
-    "publishing-validation-topic",
-    "cardano.validation.stake.filter",
+declare_cardano_reader!(
+    GenesisReader,
+    "genesis-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+    GenesisComplete,
+    GenesisCompleteMessage
 );
-
-/// Directory to put cached shelley address pointers into. Depending on the address
-/// cache mode, these cached pointers can be used instead of tracking current pointer
-/// values in blockchain (which can be quite resource-consuming).
-const DEFAULT_CACHE_DIR: (&str, &str) = ("cache-dir", "cache");
-
-/// Cache mode: use built-in; always build cache; always read cache (error if missing);
-/// build if missing, read otherwise.
-const DEFAULT_CACHE_MODE: (&str, CacheMode) = ("cache-mode", CacheMode::Predefined);
-
-/// Cache remembers all stake addresses that could potentially be referenced by pointers. However
-/// only a few addressed are actually referenced by pointers in real blockchain.
-/// `true` means that all possible addresses should be written to disk (as potential pointers).
-/// `false` means that only addresses used in actual pointers should be written to disk.
-const DEFAULT_WRITE_FULL_CACHE: (&str, bool) = ("write-full-cache", false);
-
-/// Network: currently only Main/Test. Parameter is necessary to distinguish caches.
-/// TODO: Read NetworkId from genesis message
-const DEFAULT_NETWORK: (&str, NetworkId) = ("network", NetworkId::Mainnet);
 
 /// Stake Delta Filter module
 #[module(
@@ -74,195 +48,147 @@ const DEFAULT_NETWORK: (&str, NetworkId) = ("network", NetworkId::Mainnet);
 )]
 pub struct StakeDeltaFilter;
 
+mod configuration;
 mod predefined;
+mod queries;
 mod state;
 mod utils;
 
 use state::{DeltaPublisher, State};
 use utils::{process_message, CacheMode, PointerCache, Tracker};
 
-#[derive(Clone, Debug, Default)]
-struct StakeDeltaFilterParams {
-    stake_address_delta_topic: String,
-    validation_topic: String,
-    network: NetworkId,
-
-    cache_dir: String,
-    cache_mode: CacheMode,
-    write_full_cache: bool,
-}
-
-impl StakeDeltaFilterParams {
-    fn get_cache_file_name(&self, modifier: &str) -> Result<String> {
-        let path = Path::new(&self.cache_dir);
-        let full = path.join(format!("{}{}", self.get_network_name(), modifier).to_lowercase());
-        let str =
-            full.to_str().ok_or_else(|| anyhow!("Cannot produce cache file name".to_string()))?;
-        Ok(str.to_string())
-    }
-
-    fn get_network_name(&self) -> String {
-        format!("{:?}", self.network)
-    }
-
-    fn init(cfg: Arc<Config>) -> Result<Arc<Self>> {
-        let params = Self {
-            stake_address_delta_topic: get_string_flag(&cfg, DEFAULT_STAKE_ADDRESS_DELTA_TOPIC),
-            validation_topic: get_string_flag(&cfg, DEFAULT_VALIDATION_TOPIC),
-            cache_dir: get_string_flag(&cfg, DEFAULT_CACHE_DIR),
-            cache_mode: conf_enum::<CacheMode>(&cfg, DEFAULT_CACHE_MODE)?,
-            write_full_cache: get_bool_flag(&cfg, DEFAULT_WRITE_FULL_CACHE),
-            network: conf_enum::<NetworkId>(&cfg, DEFAULT_NETWORK)?,
-        };
-
-        info!("Cache mode {:?}", params.cache_mode);
-        if params.cache_mode == CacheMode::Read {
-            if !Path::new(&params.cache_dir).try_exists()? {
-                return Err(anyhow!(
-                    "Pointer cache directory '{}' does not exist.",
-                    params.cache_dir
-                ));
-            }
-            info!("Reading (writing) caches from (to) {}", params.cache_dir);
-        } else if params.cache_mode != CacheMode::Predefined {
-            std::fs::create_dir_all(&params.cache_dir)?;
-        }
-
-        Ok(Arc::new(params))
-    }
-}
+use crate::{
+    configuration::StakeDeltaFilterParams,
+    queries::{register_query_handler, register_query_handler_stateful},
+    utils::get_network_name,
+};
 
 impl StakeDeltaFilter {
-    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let address_delta_reader = AddressDeltasReader::new(&context, &config).await?;
-        let params = StakeDeltaFilterParams::init(config.clone())?;
-        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
-        let cache_path = params.get_cache_file_name(".json")?;
-        let publisher = DeltaPublisher::new(context.clone(), params.clone());
+    async fn run(
+        context: Arc<Context<Message>>,
+        mut genesis_reader: GenesisReader,
+        address_delta_reader: AddressDeltasReader,
+        certs_reader: CertsReader,
+        publisher: DeltaPublisher,
+        params: Arc<StakeDeltaFilterParams>,
+    ) -> Result<()> {
+        let network_id = match genesis_reader.read_with_rollbacks().await? {
+            RollbackWrapper::Normal((_, genesis_values)) => genesis_values.values.network_id(),
+            RollbackWrapper::Rollback(_) => {
+                bail!("Unexpected rollback while reading genesis values")
+            }
+        };
 
-        match params.cache_mode {
+        match params.as_ref().cache_mode {
             CacheMode::Predefined => {
-                Self::stateless_init(
-                    PointerCache::try_load_predefined(&params.get_network_name())?,
-                    context,
+                let cache = PointerCache::try_load_predefined(&get_network_name(network_id))?;
+                register_query_handler(&context, &context.config, cache.clone());
+
+                Self::stateless_run(
+                    cache,
                     publisher,
                     address_delta_reader,
-                    is_snapshot_mode,
+                    certs_reader,
+                    params.is_snapshot_mode,
                 )
-                .await
+                .await?;
             }
-
             CacheMode::Read => {
-                Self::stateless_init(
-                    PointerCache::try_load(&cache_path)?,
-                    context,
+                let cache =
+                    PointerCache::try_load(&params.get_cache_file_name(".json", &network_id)?)?;
+                register_query_handler(&context, &context.config, cache.clone());
+
+                Self::stateless_run(
+                    cache,
                     publisher,
                     address_delta_reader,
-                    is_snapshot_mode,
+                    certs_reader,
+                    params.is_snapshot_mode,
                 )
-                .await
+                .await?;
             }
 
-            CacheMode::WriteIfAbsent => match PointerCache::try_load(&cache_path) {
-                Ok(cache) => {
-                    Self::stateless_init(
-                        cache,
-                        context,
-                        publisher,
-                        address_delta_reader,
-                        is_snapshot_mode,
-                    )
-                    .await
-                }
-                Err(e) => {
-                    info!("Cannot load cache: {}, building from scratch", e);
-                    let certs_reader = CertsReader::new(&context, &config).await?;
-                    Self::stateful_init(
-                        params,
-                        context,
-                        certs_reader,
-                        address_delta_reader,
-                        publisher,
-                        is_snapshot_mode,
-                    )
-                    .await
-                }
-            },
+            CacheMode::WriteIfAbsent => {
+                match PointerCache::try_load(&params.get_cache_file_name(".json", &network_id)?) {
+                    Ok(cache) => {
+                        register_query_handler(&context, &context.config, cache.clone());
+
+                        Self::stateless_run(
+                            cache,
+                            publisher,
+                            address_delta_reader,
+                            certs_reader,
+                            params.is_snapshot_mode,
+                        )
+                        .await?;
+                    }
+                    Err(e) => {
+                        info!("Cannot load cache: {}, building from scratch", e);
+                        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+                            "stake_delta_filter",
+                            StateHistoryStore::default_block_store(),
+                        )));
+                        register_query_handler_stateful(&context, &context.config, history.clone());
+
+                        Self::stateful_run(
+                            history,
+                            certs_reader,
+                            address_delta_reader,
+                            publisher,
+                            network_id,
+                            params,
+                            context,
+                        )
+                        .await?;
+                    }
+                };
+            }
 
             CacheMode::Write => {
-                let certs_reader = CertsReader::new(&context, &config).await?;
-                Self::stateful_init(
-                    params,
-                    context,
+                let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+                    "stake_delta_filter",
+                    StateHistoryStore::default_block_store(),
+                )));
+                register_query_handler_stateful(&context, &context.config, history.clone());
+
+                Self::stateful_run(
+                    history,
                     certs_reader,
                     address_delta_reader,
                     publisher,
-                    is_snapshot_mode,
+                    network_id,
+                    params,
+                    context,
                 )
-                .await
+                .await?;
             }
         }
+
+        Ok(())
     }
 
-    /// Register a query handler that resolves pointer addresses using the given cache.
-    fn register_query_handler(
-        context: &Arc<Context<Message>>,
-        config: &Arc<Config>,
-        cache: Arc<PointerCache>,
-    ) {
-        let query_topic = config
-            .get_string(DEFAULT_STAKE_DELTAS_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_STAKE_DELTAS_QUERY_TOPIC.1.to_string());
-        info!("Registering query handler on '{query_topic}'");
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        let genesis_reader = GenesisReader::new(&context, &config).await?;
+        let address_delta_reader = AddressDeltasReader::new(&context, &config).await?;
+        let certs_reader = CertsReader::new(&context, &config).await?;
 
-        context.handle(&query_topic, move |message| {
-            let cache = cache.clone();
-            async move {
-                let Message::StateQuery(StateQuery::StakeDeltas(query)) = message.as_ref() else {
-                    return Arc::new(Message::StateQueryResponse(
-                        StateQueryResponse::StakeDeltas(StakeDeltaQueryResponse::Error(
-                            QueryError::internal_error("Invalid message for stake-delta-filter"),
-                        )),
-                    ));
-                };
+        let params = StakeDeltaFilterParams::init(config.clone())?;
+        let publisher = DeltaPublisher::new(context.clone(), params.clone());
 
-                let response = match query {
-                    StakeDeltaQuery::ResolvePointers { pointers } => {
-                        let mut resolved = std::collections::HashMap::new();
-                        for ptr in pointers {
-                            if let Some(Some(stake_addr)) = cache.decode_pointer(ptr) {
-                                resolved.insert(ptr.clone(), stake_addr.clone());
-                            }
-                        }
-                        StakeDeltaQueryResponse::ResolvedPointers(resolved)
-                    }
-                };
-
-                Arc::new(Message::StateQueryResponse(
-                    StateQueryResponse::StakeDeltas(response),
-                ))
-            }
+        // Start run task
+        let run_ctx = context.clone();
+        context.run(async move {
+            Self::run(
+                run_ctx,
+                genesis_reader,
+                address_delta_reader,
+                certs_reader,
+                publisher,
+                params,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed: {e}"));
         });
-    }
-
-    async fn stateless_init(
-        cache: Arc<PointerCache>,
-        context: Arc<Context<Message>>,
-        publisher: DeltaPublisher,
-        address_delta_reader: AddressDeltasReader,
-        is_snapshot_mode: bool,
-    ) -> Result<()> {
-        info!("Stateless init: using stake pointer cache");
-
-        // Register query handler for pointer resolution
-        Self::register_query_handler(&context, &context.config, cache.clone());
-
-        context.clone().run(Self::stateless_run(
-            cache,
-            publisher,
-            address_delta_reader,
-            is_snapshot_mode,
-        ));
 
         Ok(())
     }
@@ -271,6 +197,7 @@ impl StakeDeltaFilter {
         cache: Arc<PointerCache>,
         mut publisher: DeltaPublisher,
         mut address_delta_reader: AddressDeltasReader,
+        mut certs_reader: CertsReader,
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
@@ -283,6 +210,9 @@ impl StakeDeltaFilter {
         }
         loop {
             let primary = PrimaryRead::from_read(address_delta_reader.read_with_rollbacks().await?);
+
+            // Read certs to keep messages aligned
+            certs_reader.read_with_rollbacks().await?;
 
             if let Some(address_deltas) = primary.message() {
                 let msg = process_message(&cache, address_deltas, primary.block_info(), None);
@@ -300,129 +230,16 @@ impl StakeDeltaFilter {
         }
     }
 
-    /// Register a query handler for stateful mode, where the cache is behind a Mutex.
-    fn register_query_handler_stateful(
-        context: &Arc<Context<Message>>,
-        config: &Arc<Config>,
-        history: Arc<Mutex<StateHistory<State>>>,
-    ) {
-        let query_topic = config
-            .get_string(DEFAULT_STAKE_DELTAS_QUERY_TOPIC.0)
-            .unwrap_or(DEFAULT_STAKE_DELTAS_QUERY_TOPIC.1.to_string());
-        info!("Registering stateful query handler on '{query_topic}'");
-
-        context.handle(&query_topic, move |message| {
-            let history = history.clone();
-            async move {
-                let Message::StateQuery(StateQuery::StakeDeltas(query)) = message.as_ref() else {
-                    return Arc::new(Message::StateQueryResponse(
-                        StateQueryResponse::StakeDeltas(StakeDeltaQueryResponse::Error(
-                            QueryError::internal_error("Invalid message for stake-delta-filter"),
-                        )),
-                    ));
-                };
-
-                let locked = history.lock().await;
-                let state = match locked.current() {
-                    Some(state) => state,
-                    None => {
-                        return Arc::new(Message::StateQueryResponse(
-                            StateQueryResponse::StakeDeltas(StakeDeltaQueryResponse::Error(
-                                QueryError::internal_error(
-                                    "Invalid message for stake-delta-filter",
-                                ),
-                            )),
-                        ))
-                    }
-                };
-
-                let response = match query {
-                    StakeDeltaQuery::ResolvePointers { pointers } => {
-                        let mut resolved = std::collections::HashMap::new();
-                        for ptr in pointers {
-                            if let Some(Some(stake_addr)) = state.pointer_cache.decode_pointer(ptr)
-                            {
-                                resolved.insert(ptr.clone(), stake_addr.clone());
-                            }
-                        }
-                        StakeDeltaQueryResponse::ResolvedPointers(resolved)
-                    }
-                };
-
-                Arc::new(Message::StateQueryResponse(
-                    StateQueryResponse::StakeDeltas(response),
-                ))
-            }
-        });
-    }
-
-    async fn stateful_init(
-        params: Arc<StakeDeltaFilterParams>,
-        context: Arc<Context<Message>>,
-        certs_reader: CertsReader,
-        address_deltas_reader: AddressDeltasReader,
-        publisher: DeltaPublisher,
-        is_snapshot_mode: bool,
-    ) -> Result<()> {
-        info!("Stateful init: creating stake pointer cache");
-
-        // State
-        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "stake_delta_filter",
-            StateHistoryStore::default_block_store(),
-        )));
-        let history_tick = history.clone();
-
-        // Register query handler for pointer resolution (stateful)
-        Self::register_query_handler_stateful(&context, &context.config, history.clone());
-
-        let context_run = context.clone();
-        context.run(Self::stateful_run(
-            history,
-            certs_reader,
-            address_deltas_reader,
-            publisher,
-            params,
-            context_run,
-            is_snapshot_mode,
-        ));
-
-        // Ticker to log stats
-        let mut subscription = context.subscribe("clock.tick").await?;
-        context.run(async move {
-            loop {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
-                if let Message::Clock(message) = message.as_ref() {
-                    if (message.number % 60) == 0 {
-                        let span = info_span!("stake_delta_filter.tick", number = message.number);
-                        async {
-                            let history = history_tick.lock().await;
-                            if let Some(state) = history.current() {
-                                state.tick().await.inspect_err(|e| error!("Tick error: {e}")).ok();
-                            }
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-                }
-            }
-        });
-
-        Ok(())
-    }
-
     async fn stateful_run(
         history: Arc<Mutex<StateHistory<State>>>,
         mut certs_reader: CertsReader,
         mut address_deltas_reader: AddressDeltasReader,
         mut publisher: DeltaPublisher,
+        network: NetworkId,
         params: Arc<StakeDeltaFilterParams>,
         context: Arc<Context<Message>>,
-        is_snapshot_mode: bool,
     ) -> Result<()> {
-        if !is_snapshot_mode {
+        if !params.is_snapshot_mode {
             match address_deltas_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal(_) => {}
                 RollbackWrapper::Rollback(_) => {
@@ -469,7 +286,7 @@ impl StakeDeltaFilter {
 
             if primary.message().is_some() {
                 let block_info = primary.block_info();
-                state.save()?;
+                state.save(&network)?;
                 history.lock().await.commit(block_info.number, state);
 
                 if primary.do_validation() {
