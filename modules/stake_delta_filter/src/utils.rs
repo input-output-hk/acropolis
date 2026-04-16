@@ -1,6 +1,6 @@
 use acropolis_common::{
     messages::{AddressDeltasMessage, StakeAddressDeltasMessage},
-    Address, AddressDelta, BlockInfo, Era, ShelleyAddress, ShelleyAddressDelegationPart,
+    Address, AddressDelta, BlockInfo, Era, NetworkId, ShelleyAddress, ShelleyAddressDelegationPart,
     ShelleyAddressPointer, StakeAddress, StakeAddressDelta, StakeCredential, TxIdentifier,
 };
 use anyhow::{anyhow, Result};
@@ -14,6 +14,10 @@ use std::{
     sync::Arc,
 };
 use tracing::error;
+
+pub fn get_network_name(network: NetworkId) -> String {
+    format!("{:?}", network)
+}
 
 #[serde_as]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -218,27 +222,6 @@ impl Tracker {
             (true, true) => Some(OccurrenceInfoKind::Mixed),
             _ => None,
         }
-    }
-
-    pub fn info(&self) {
-        let mut valid_ptrs = 0;
-        let mut invalid_ptrs = 0;
-        let mut mixed_ptrs = 0;
-        for (_k, v) in self.occurrence.iter() {
-            if let Some(kind) = Self::get_kind(v) {
-                match kind {
-                    OccurrenceInfoKind::Valid => valid_ptrs += 1,
-                    OccurrenceInfoKind::Invalid => invalid_ptrs += 1,
-                    OccurrenceInfoKind::Mixed => mixed_ptrs += 1,
-                }
-            }
-        }
-        tracing::info!(
-            "Pointers dereferencing stats: valid {}, invalid {}, mixed {}",
-            valid_ptrs,
-            invalid_ptrs,
-            mixed_ptrs
-        )
     }
 
     fn join_hash_set(hs: HashSet<String>, mid: &str) -> String {
@@ -467,7 +450,7 @@ mod test {
         match network {
             Network::Mainnet => Ok(NetworkId::Mainnet),
             Network::Testnet => Ok(NetworkId::Testnet),
-            _ => Err(anyhow!("Unknown network in address")),
+            _ => Err(anyhow::anyhow!("Unknown network in address")),
         }
     }
 
