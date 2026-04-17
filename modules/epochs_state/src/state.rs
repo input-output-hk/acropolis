@@ -328,6 +328,7 @@ mod tests {
         state_history::{StateHistory, StateHistoryStore},
         BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
     };
+    use acropolis_test_utils::mainnet_genesis_values;
     use tokio::sync::Mutex;
 
     fn make_block(epoch: u64) -> BlockInfo {
@@ -383,7 +384,7 @@ mod tests {
 
     #[test]
     fn initial_state_is_zeroed() {
-        let state = State::new(&GenesisValues::mainnet());
+        let state = State::new(&mainnet_genesis_values());
         assert_eq!(state.epoch_blocks, 0);
         assert_eq!(state.epoch_txs, 0);
         assert_eq!(state.epoch_outputs, 0);
@@ -393,7 +394,7 @@ mod tests {
 
     #[test]
     fn handle_mint_single_issuer_records_counts() {
-        let mut state = State::new(&GenesisValues::mainnet());
+        let mut state = State::new(&mainnet_genesis_values());
         let issuer = b"issuer_key";
         let mut block = make_block(100);
         state.handle_mint(&block, Some(issuer), false);
@@ -410,7 +411,7 @@ mod tests {
 
     #[test]
     fn handle_mint_without_issuer() {
-        let mut state = State::new(&GenesisValues::mainnet());
+        let mut state = State::new(&mainnet_genesis_values());
         let mut block = make_block(100);
         state.handle_mint(&block, None, false);
         block.number += 1;
@@ -426,7 +427,7 @@ mod tests {
 
     #[test]
     fn handle_mint_multiple_issuer_records_counts() {
-        let mut state = State::new(&GenesisValues::mainnet());
+        let mut state = State::new(&mainnet_genesis_values());
         let mut block = make_block(100);
         state.handle_mint(&block, Some(b"issuer_1"), false);
         block.number += 1;
@@ -460,7 +461,7 @@ mod tests {
 
     #[test]
     fn handle_block_txs_correctly() {
-        let mut state = State::new(&GenesisValues::mainnet());
+        let mut state = State::new(&mainnet_genesis_values());
         let mut block = make_block(100);
 
         state.handle_block_txs(
@@ -488,7 +489,7 @@ mod tests {
 
     #[test]
     fn end_epoch_resets_and_returns_message() {
-        let genesis = GenesisValues::mainnet();
+        let genesis = mainnet_genesis_values();
         let mut state = State::new(&genesis);
         let block = make_block(1);
         state.handle_mint(&block, Some(b"issuer_1"), false);
@@ -599,9 +600,9 @@ mod tests {
 
     #[test]
     fn test_epoch_208_nonce() {
-        let mut state = State::new(&GenesisValues::mainnet());
+        let mut state = State::new(&mainnet_genesis_values());
         state.praos_params = Some(PraosParams::mainnet());
-        let genesis_value = GenesisValues::mainnet();
+        let genesis_value = mainnet_genesis_values();
 
         let e_208_first_block_header_cbor =
             hex::decode(include_str!("../data/4490511.cbor")).unwrap();
@@ -627,9 +628,9 @@ mod tests {
 
     #[test]
     fn test_nonce_evolving() {
-        let mut state = State::new(&GenesisValues::mainnet());
+        let mut state = State::new(&mainnet_genesis_values());
         state.praos_params = Some(PraosParams::mainnet());
-        let genesis_value = GenesisValues::mainnet();
+        let genesis_value = mainnet_genesis_values();
 
         let e_208_first_block_header_cbor =
             hex::decode(include_str!("../data/4490511.cbor")).unwrap();
@@ -662,9 +663,9 @@ mod tests {
 
     #[test]
     fn test_epoch_209_nonce() {
-        let mut state = State::new(&GenesisValues::mainnet());
+        let mut state = State::new(&mainnet_genesis_values());
         state.praos_params = Some(PraosParams::mainnet());
-        let genesis_value = GenesisValues::mainnet();
+        let genesis_value = mainnet_genesis_values();
         let e_208_candidate = Nonce::from(
             NonceHash::try_from(
                 hex::decode("ea98cb2dac7208296ac89030f24cdc0dc6fbfebc4bf1f5b7a8331ec47e3bb311")
@@ -721,9 +722,9 @@ mod tests {
 
     #[test]
     fn test_epoch_210_nonce() {
-        let mut state = State::new(&GenesisValues::mainnet());
+        let mut state = State::new(&mainnet_genesis_values());
         state.praos_params = Some(PraosParams::mainnet());
-        let genesis_value = GenesisValues::mainnet();
+        let genesis_value = mainnet_genesis_values();
         let e_209_lab = Nonce::from(
             NonceHash::try_from(
                 hex::decode("e5e914ba8c727baf3c3465ae6a62508186772eb20649aa7a99a637328f62803e")

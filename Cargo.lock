@@ -120,6 +120,7 @@ name = "acropolis_module_block_kes_validator"
 version = "0.1.0"
 dependencies = [
  "acropolis_common",
+ "acropolis_test_utils",
  "anyhow",
  "caryatid_sdk",
  "config",
@@ -150,6 +151,7 @@ name = "acropolis_module_block_vrf_validator"
 version = "0.1.0"
 dependencies = [
  "acropolis_common",
+ "acropolis_test_utils",
  "anyhow",
  "blake2 0.10.6",
  "caryatid_sdk",
@@ -254,6 +256,7 @@ name = "acropolis_module_epochs_state"
 version = "0.1.0"
 dependencies = [
  "acropolis_common",
+ "acropolis_test_utils",
  "anyhow",
  "caryatid_sdk",
  "config",
@@ -425,6 +428,7 @@ version = "0.2.0"
 dependencies = [
  "acropolis_common",
  "acropolis_module_consensus",
+ "acropolis_test_utils",
  "anyhow",
  "caryatid_sdk",
  "config",
@@ -465,6 +469,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_codec",
  "acropolis_common",
+ "acropolis_test_utils",
  "anyhow",
  "async-compression",
  "caryatid_sdk",
@@ -588,6 +593,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_codec",
  "acropolis_common",
+ "acropolis_test_utils",
  "anyhow",
  "async-trait",
  "caryatid_sdk",
@@ -799,6 +805,13 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "acropolis_test_utils"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
 ]
 
 [[package]]

@@ -6,6 +6,7 @@ members = [
     "cardano",
     "codec",
     "common",
+    "test_utils",
 
     # Modules
     "modules/genesis_bootstrapper",         # Genesis bootstrap UTXOs

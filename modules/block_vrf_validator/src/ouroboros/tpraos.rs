@@ -181,18 +181,18 @@ fn leader_vrf_cert<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
 mod tests {
     use acropolis_common::{
         crypto::keyhash_256,
-        genesis_values::GenesisValues,
         protocol_params::NonceHash,
         serialization::Bech32Conversion,
         validation::{VrfLeaderValueTooBigError, WrongLeaderVrfKeyError},
         BlockHash, BlockIntent, BlockStatus, Era,
     };
+    use acropolis_test_utils::mainnet_genesis_values;
 
     use super::*;
 
     #[test]
     fn test_4490511_block_produced_by_genesis_key() {
-        let genesis_value = GenesisValues::mainnet();
+        let genesis_value = mainnet_genesis_values();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_4556956_block() {
-        let genesis_value = GenesisValues::mainnet();
+        let genesis_value = mainnet_genesis_values();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_4576496_block() {
-        let genesis_value = GenesisValues::mainnet();
+        let genesis_value = mainnet_genesis_values();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_4576496_block_as_unknown_pool() {
-        let genesis_value = GenesisValues::mainnet();
+        let genesis_value = mainnet_genesis_values();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_4576496_block_as_wrong_leader_vrf_key() {
-        let genesis_value = GenesisValues::mainnet();
+        let genesis_value = mainnet_genesis_values();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")
@@ -502,7 +502,7 @@ mod tests {
 
     #[test]
     fn test_4576496_block_with_small_active_stake() {
-        let genesis_value = GenesisValues::mainnet();
+        let genesis_value = mainnet_genesis_values();
         let epoch_nonce = Nonce::from(
             NonceHash::try_from(
                 hex::decode("3fac34ac3d7d1ac6c976ba68b1509b1ee3aafdbf6de96e10789e488e13e16bd7")

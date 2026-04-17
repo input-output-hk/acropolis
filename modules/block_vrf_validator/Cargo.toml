@@ -29,5 +29,8 @@ dashu-int = "0.4.1"
 # The vrf crate has not been fully tested in production environments and still has several upstream issues that are open PRs but not merged yet.
 vrf_dalek = { package = "pallas_vrf", git = "https://github.com/txpipe/vrf", rev = "62ef4c7252ed05df98611da191e20c0dd144f025" }
 
+[dev-dependencies]
+acropolis_test_utils = { path = "../../test_utils" }
+
 [lib]
 path = "src/block_vrf_validator.rs"

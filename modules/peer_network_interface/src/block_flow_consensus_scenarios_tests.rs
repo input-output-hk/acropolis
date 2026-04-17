@@ -12,9 +12,9 @@ use acropolis_common::messages::{
 };
 use acropolis_common::{
     BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, configuration::BlockFlowMode,
-    genesis_values::GenesisValues,
 };
 use acropolis_module_consensus::Consensus;
+use acropolis_test_utils::mainnet_genesis_values;
 use caryatid_sdk::{Context, Subscription, mock_bus::MockBus};
 use config::{Config, FileFormat};
 use pallas::network::miniprotocols::Point;
@@ -114,7 +114,7 @@ async fn make_harness() -> TestHarness {
             Arc::new(Message::Cardano((
                 genesis_block_info,
                 CardanoMessage::GenesisComplete(GenesisCompleteMessage {
-                    values: GenesisValues::mainnet(),
+                    values: mainnet_genesis_values(),
                 }),
             ))),
         )
@@ -166,7 +166,7 @@ async fn make_harness() -> TestHarness {
     let sink = BlockSink {
         context: context.clone(),
         topic: "cardano.block.available".to_string(),
-        genesis_values: GenesisValues::mainnet(),
+        genesis_values: mainnet_genesis_values(),
         upstream_cache: None,
         last_epoch: None,
         era: None,
