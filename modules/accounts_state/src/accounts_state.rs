@@ -270,7 +270,7 @@ impl AccountsState {
                 {
                     RollbackWrapper::Normal((block_info, params_msg)) => {
                         info_span!("account_state.handle_parameters", block = block_info.number)
-                            .in_scope(|| state.handle_parameters(&params_msg));
+                            .in_scope(|| state.handle_parameters(block_info.epoch, &params_msg))?;
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }

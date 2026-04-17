@@ -82,6 +82,20 @@ pub struct PendingRewardsPlan {
     pub staking: Arc<EpochSnapshot>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ProtocolParametersState {
+    /// Initialized when parameters are updated, contains number of the
+    /// epoch being started.
+    current_epoch: u64,
+
+    /// Protocol parameters (used for account calculations in current epoch).
+    current: Arc<ProtocolParams>,
+
+    /// Protocol parameters (should be used for calculations in next epoch).
+    /// In Conway -- same as current. In earlier eras field is used for parameter application delay.
+    future: Arc<ProtocolParams>,
+}
+
 /// Overall state - stored per block
 #[derive(Debug, Default, Clone)]
 pub struct State {
@@ -104,8 +118,7 @@ pub struct State {
     /// All registered DReps
     dreps: OrdMap<DRepCredential, Lovelace>,
 
-    /// Protocol parameters (valid in current epoch).
-    protocol_parameters: ProtocolParams,
+    protocol_parameters: ProtocolParametersState,
 
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<(PoolId, StakeAddress)>,
@@ -331,10 +344,7 @@ impl State {
     pub fn get_optimal_pool_sizing(&self) -> Option<OptimalPoolSizing> {
         // Get Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
-        let shelley_params = match &self.protocol_parameters.shelley {
-            Some(sp) => sp.clone(),
-            _ => return None,
-        };
+        let shelley_params = self.protocol_parameters.get_shelley()?;
 
         let total_supply =
             shelley_params.max_lovelace_supply - self.epoch_snapshots.mark.pots.reserves;
@@ -613,10 +623,10 @@ impl State {
         // rewards to calculate
         // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
         // have to use the genesis parameters we just received
-        let shelley_params = match &self.protocol_parameters.shelley {
-            Some(sp) => sp.clone(),
-            _ => return Ok(vec![]),
+        let Some(shelley_params) = self.protocol_parameters.get_shelley().cloned() else {
+            return Ok(vec![]);
         };
+
         // Compute the randomness stabilization window (4k/f) from Shelley genesis params.
         // This is when Cardano captures `addrsRew` and starts the rewards calculation.
         let f = &shelley_params.active_slots_coeff;
@@ -914,9 +924,7 @@ impl State {
         // Get pool deposit amount from parameters, or default
         let deposit = self
             .protocol_parameters
-            .shelley
-            .as_ref()
-            .map(|sp| sp.protocol_params.pool_deposit)
+            .get_shelley_param(|sp| sp.protocol_params.pool_deposit)
             .unwrap_or(DEFAULT_POOL_DEPOSIT);
 
         let refunds = take(&mut self.pool_refunds);
@@ -1171,8 +1179,12 @@ impl State {
 
     /// Handle an ProtocolParamsMessage with the latest parameters at the start of a new
     /// epoch
-    pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) {
-        self.protocol_parameters = params_msg.params.clone();
+    pub fn handle_parameters(
+        &mut self,
+        new_epoch: u64,
+        params_msg: &ProtocolParamsMessage,
+    ) -> Result<()> {
+        self.protocol_parameters.update(new_epoch, &params_msg.params)
     }
 
     /// Complete the previous epoch rewards calculation
@@ -1335,9 +1347,7 @@ impl State {
         // Get pool deposit amount from parameters, or default
         let deposit = self
             .protocol_parameters
-            .shelley
-            .as_ref()
-            .map(|sp| sp.protocol_params.pool_deposit)
+            .get_shelley_param(|sp| sp.protocol_params.pool_deposit)
             .unwrap_or(DEFAULT_POOL_DEPOSIT);
 
         // Check for how many new SPOs
@@ -1425,9 +1435,7 @@ impl State {
                 None => {
                     // Get stake deposit amount from parameters, or default
                     self.protocol_parameters
-                        .shelley
-                        .as_ref()
-                        .map(|sp| sp.protocol_params.key_deposit)
+                        .get_shelley_param(|sp| sp.protocol_params.key_deposit)
                         .unwrap_or(DEFAULT_KEY_DEPOSIT)
                 }
             };
@@ -1478,9 +1486,7 @@ impl State {
                 None => {
                     // Get stake deposit amount from parameters, or default
                     self.protocol_parameters
-                        .shelley
-                        .as_ref()
-                        .map(|sp| sp.protocol_params.key_deposit)
+                        .get_shelley_param(|sp| sp.protocol_params.key_deposit)
                         .unwrap_or(DEFAULT_KEY_DEPOSIT)
                 }
             };
@@ -1544,7 +1550,7 @@ impl State {
         // 2. Delegated to NoConfidence or Abstain
         //    We remove the account from its previous DReps account set in the `drep_delegators` map.
         //    This behavior produces a distribution which matches DB Sync.
-        if self.is_chang()? {
+        if self.protocol_parameters.is_chang()? {
             match DRepChoice::to_credential(drep) {
                 Some(drep) => {
                     self.drep_delegators.entry(drep).or_default().insert(stake_address.clone());
@@ -1571,7 +1577,7 @@ impl State {
         // In PV9 we need to remove the current delegation of all accounts that have ever delegated to
         // this DRep (Excluding accounts that delegated to No Confidence or Abstain after delegating to
         // the DRep).
-        if self.is_chang()? {
+        if self.protocol_parameters.is_chang()? {
             if let Some(delegators) = self.drep_delegators.remove(drep) {
                 self.mutate_stake_addresses(
                     undo,
@@ -1929,14 +1935,82 @@ impl State {
             self.drep_delegators = self.drep_delegators.update(prev_cred, updated);
         }
     }
+}
 
-    // Retrieve the major protocol version from the protocol parameters
-    fn is_chang(&self) -> Result<bool> {
-        if let Some(v) = self.protocol_parameters.protocol_version() {
+/// This structure concentrates knowledge about parameter handling.
+impl ProtocolParametersState {
+    pub fn is_chang(&self) -> Result<bool> {
+        if let Some(v) = self.current.protocol_version() {
             v.is_chang()
         } else {
             Ok(false)
         }
+    }
+
+    /// Returns true if the current protocol version is before Conway (i.e. major version < 9).
+    /// If there is no protocol version, it means that the structure was not initialized.
+    /// We suppose that it's before Conway/Shelley (that is, Byron).
+    fn is_before_conway(&self) -> bool {
+        self.current.protocol_version().is_none_or(|x| x.major < 9)
+    }
+
+    pub fn get_shelley(&self) -> Option<&ShelleyParams> {
+        match &self.current.shelley {
+            Some(sp) => Some(sp),
+            _ => None,
+        }
+    }
+
+    pub fn get_shelley_param<T>(&self, param: impl FnOnce(&ShelleyParams) -> T) -> Option<T> {
+        self.get_shelley().map(param)
+    }
+
+    fn update_immediately(&mut self, new_params: Arc<ProtocolParams>) {
+        self.current = new_params.clone();
+        self.future = new_params;
+    }
+
+    fn update_delayed(&mut self, new_params: Arc<ProtocolParams>) {
+        self.current = self.future.clone();
+        self.future = new_params;
+    }
+
+    /// Updates protocol parameters. This function keeps all parameters processing logic in
+    /// one place.
+    ///
+    /// Protocol update algorithm reflects voting processing time in different eras. In particular:
+    /// * Before Conway (Shelley+): parameter update is effective next epoch after vote.
+    /// * At and after Conway: parameter update is effective at two epochs after vote. That is,
+    ///   one epoch later than in Shelley.
+    ///
+    /// However, rewards computation always supposes that parameters become actual two epochs after
+    /// vote. Thus, parameters for pre-conway epochs must be delayed for 1 epoch (in general).
+    /// However, there are exeptions for initial parameters (Shelley initialization).
+    pub fn update(&mut self, new_epoch: u64, new_params: &ProtocolParams) -> Result<()> {
+        let new_params = Arc::new(new_params.clone());
+
+        if self.current_epoch + 1 != new_epoch && self.current_epoch != 0 {
+            anyhow::bail!(
+                "Epoch updates must be sequential. Current epoch {} + 1 != new epoch {}",
+                self.current_epoch,
+                new_epoch
+            );
+        }
+        self.current_epoch = new_epoch;
+
+        if self.current.shelley.is_none() {
+            // Everything before Shelley, including first Shelley epoch parameter set
+            // (self is not Shelley yet, new is Shelley already) initializes without delay.
+            self.update_immediately(new_params);
+        } else if self.is_before_conway() {
+            // Shelley or after, but before Conway: parameters are delayed, active 1 epoch later,
+            // to mitigate quick governance voting in pre-Conway.
+            self.update_delayed(new_params);
+        } else {
+            // Conway or later: parameters are activated immediately.
+            self.update_immediately(new_params);
+        }
+        Ok(())
     }
 }
 
@@ -2589,10 +2663,10 @@ mod tests {
         };
         let mut state = State::default();
 
-        state.handle_parameters(&msg);
+        state.handle_parameters(0, &msg).unwrap();
 
         assert_eq!(
-            state.protocol_parameters.conway.unwrap().pool_voting_thresholds,
+            state.protocol_parameters.current.conway.as_ref().unwrap().pool_voting_thresholds,
             params.conway.unwrap().pool_voting_thresholds
         );
     }
