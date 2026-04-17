@@ -18,8 +18,9 @@ use acropolis_common::{
             ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
         },
     },
+    state_history::{StateHistory, StateHistoryStore},
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
@@ -142,7 +143,8 @@ impl GovernanceStateConfig {
 impl GovernanceState {
     /// Wait for and process snapshot bootstrap messages
     async fn wait_for_bootstrap(
-        state: Arc<Mutex<State>>,
+        history: Arc<Mutex<StateHistory<State>>>,
+        config: &GovernanceStateConfig,
         mut snapshot_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         info!("Waiting for governance state snapshot bootstrap messages...");
@@ -160,18 +162,27 @@ impl GovernanceState {
                 Message::Snapshot(SnapshotMessage::Bootstrap(
                     SnapshotStateMessage::GovernanceState(gov_msg),
                 )) => {
-                    let mut locked = state.lock().await;
+                    let mut state = history.lock().await.get_or_init_with(|| {
+                        State::new(
+                            config.verification_output_file.clone(),
+                            config.verify_votes_files.clone(),
+                            config.verify_aggregated_votes_file.clone(),
+                        )
+                        .expect("failed to initialize State")
+                    });
                     // Use a default voting length if conway params not yet available
                     // The actual voting length will be set when protocol params arrive
-                    let voting_length = locked
+                    let voting_length = state
                         .get_conway_voting()
                         .get_conway_params()
                         .map(|p| p.gov_action_lifetime as u64)
                         .unwrap_or(6); // Default to 6 epochs if not set
 
-                    locked
+                    state
                         .get_conway_voting_mut()
                         .bootstrap_from_snapshot(gov_msg, voting_length)?;
+
+                    history.lock().await.bootstrap_init_with(state, gov_msg.block_number);
                     info!(
                         "Snapshot Bootstrap message received, {} proposals loaded",
                         gov_msg.proposals.len()
@@ -186,99 +197,20 @@ impl GovernanceState {
         }
     }
 
-    async fn process_drep_spo(
-        vld: &mut ValidationContext,
-        state: Arc<Mutex<State>>,
-        readers: &mut Box<Readers>,
-    ) -> Result<()> {
-        let d_drep = match vld.consume_sync(
-            "drep_reader",
-            readers.drep_reader.read_with_rollbacks().await,
-        )? {
-            RollbackWrapper::Normal((_, d_drep)) => Some(d_drep),
-            RollbackWrapper::Rollback(_) => None,
-        };
-
-        let spo_msg =
-            match vld.consume_sync("spo_reader", readers.spo_reader.read_with_rollbacks().await)? {
-                RollbackWrapper::Normal((blk_spo, d_spo)) => Some((blk_spo, d_spo)),
-                RollbackWrapper::Rollback(_) => None,
-            };
-
-        let drep_state = match vld.consume_sync(
-            "drep_state_reader",
-            readers.drep_state_reader.read_with_rollbacks().await,
-        )? {
-            RollbackWrapper::Normal((_, drep_state)) => Some(drep_state),
-            RollbackWrapper::Rollback(_) => None,
-        };
-
-        let spo_default_vote = match vld.consume_sync(
-            "spo_default_vote_reader",
-            readers.spo_default_vote_reader.read_with_rollbacks().await,
-        )? {
-            RollbackWrapper::Normal((_, default_vote)) => Some(default_vote),
-            RollbackWrapper::Rollback(_) => None,
-        };
-
-        if let Some((blk_spo, d_spo)) = spo_msg {
-            if let Some(drep_state) = drep_state {
-                if let Some(d_drep) = d_drep {
-                    if let Some(spo_default_vote) = spo_default_vote {
-                        if blk_spo.epoch != d_spo.epoch + 1 {
-                            vld.handle_error(
-                                "spo",
-                                &anyhow!(
-                                    "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
-                                    d_spo.epoch
-                                ),
-                            );
-                        }
-
-                        if drep_state.epoch != d_drep.epoch {
-                            vld.handle_error(
-                                "drep_state",
-                                &anyhow!(
-                                    "DRep state {} epoch != DRep epoch ({})",
-                                    drep_state.epoch,
-                                    d_drep.epoch
-                                ),
-                            );
-                        }
-
-                        let mut sl = state.lock().await;
-                        vld.handle(
-                            "handle_drep_stake",
-                            sl.handle_drep_stake(&d_drep, &drep_state, &d_spo, &spo_default_vote)
-                                .await,
-                        );
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     async fn run(
+        history: Arc<Mutex<StateHistory<State>>>,
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut readers: Box<Readers>,
     ) -> Result<()> {
-        let state = Arc::new(Mutex::new(State::new(
-            config.verification_output_file.clone(),
-            config.verify_votes_files.clone(),
-            config.verify_aggregated_votes_file.clone(),
-        )?));
-
         // Wait for snapshot bootstrap if subscription is provided
         if let Some(subscription) = snapshot_subscription {
-            Self::wait_for_bootstrap(state.clone(), subscription).await?;
+            Self::wait_for_bootstrap(history.clone(), config.as_ref(), subscription).await?;
         }
 
         // Ticker to log stats
-        let state_tick = state.clone();
+        let history_tick = history.clone();
         let mut subscription = context.subscribe("clock.tick").await?;
         context.run(async move {
             loop {
@@ -289,13 +221,9 @@ impl GovernanceState {
                     if (message.number % 60) == 0 {
                         let span = info_span!("governance_state.tick", number = message.number);
                         async {
-                            state_tick
-                                .lock()
-                                .await
-                                .tick()
-                                .await
-                                .inspect_err(|e| error!("Tick error: {e}"))
-                                .ok();
+                            if let Some(state) = history_tick.lock().await.current() {
+                                state.log_stats();
+                            }
                         }
                         .instrument(span)
                         .await;
@@ -304,9 +232,9 @@ impl GovernanceState {
             }
         });
 
-        let query_state = state.clone();
+        let query_history = history.clone();
         context.handle(&config.governance_query_topic, move |message| {
-            let state_handle = query_state.clone();
+            let state_handle = query_history.clone();
             async move {
                 let Message::StateQuery(StateQuery::Governance(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(StateQueryResponse::Governance(
@@ -316,7 +244,7 @@ impl GovernanceState {
                     )));
                 };
 
-                let locked = state_handle.lock().await;
+                let locked = state_handle.lock().await.get_current_state();
 
                 let response = match query {
                     GovernanceStateQuery::GetProposalsList => {
@@ -364,6 +292,15 @@ impl GovernanceState {
                 "governance_state",
             );
 
+            let mut state = history.lock().await.get_or_init_with(|| {
+                State::new(
+                    config.verification_output_file.clone(),
+                    config.verify_votes_files.clone(),
+                    config.verify_aggregated_votes_file.clone(),
+                )
+                .expect("Failed to initialize state")
+            });
+
             let primary = PrimaryRead::from_sync(
                 &mut vld,
                 "gov_reader",
@@ -380,7 +317,6 @@ impl GovernanceState {
                     if blk_g.new_epoch {
                         // New governance from new epoch means that we must prepare all governance
                         // outcome for the previous epoch.
-                        let mut state = state.lock().await;
                         let gov_outcomes = state.process_new_epoch(blk_g);
                         if let Some(gov_outcomes) =
                             vld.handle("process outcome", gov_outcomes.map(Some))
@@ -399,47 +335,50 @@ impl GovernanceState {
                     // Governance may present in any block -- not only in 'new epoch' blocks.
                     vld.handle(
                         "handle_governance",
-                        state.lock().await.handle_governance(blk_g, gov_procs).await,
+                        state.handle_governance(blk_g, gov_procs).await,
                     );
 
                     if blk_g.new_epoch {
-                        match vld.consume_sync(
+                        if let Some(params) = vld.consume_sync_opt(
                             "param_reader",
                             readers.param_reader.read_with_rollbacks().await,
                         )? {
-                            RollbackWrapper::Normal((blk_g, params)) => {
-                                vld.handle(
-                                    "handle_protocol_parameters",
-                                    state.lock().await.handle_protocol_parameters(&params).await,
-                                );
+                            vld.handle(
+                                "handle_protocol_parameters",
+                                state.handle_protocol_parameters(&params).await,
+                            );
 
-                                if blk_g.epoch > 0 {
-                                    Self::process_drep_spo(&mut vld, state.clone(), &mut readers)
-                                        .await?;
-                                }
-
-                                vld.handle(
-                                    "advance_epoch",
-                                    state.lock().await.advance_epoch(&blk_g),
-                                );
+                            if blk_g.epoch > 0 {
+                                state
+                                    .process_drep_spo(blk_g.as_ref(), &mut vld, &mut readers)
+                                    .await?;
                             }
-                            RollbackWrapper::Rollback(_) => {}
+
+                            vld.handle("advance_epoch", state.advance_epoch(blk_g));
                         }
                     }
                 } else {
+                    // If the primary message was a rollback still read the other readers to keep synchronization aligned
                     vld.consume_sync(
                         "param_reader",
                         readers.param_reader.read_with_rollbacks().await,
                     )?;
-                    Self::process_drep_spo(&mut vld, state.clone(), &mut readers).await?;
+                    state
+                        .process_drep_spo(primary.block_info().as_ref(), &mut vld, &mut readers)
+                        .await?;
                 }
 
                 Ok::<(), anyhow::Error>(())
             }
             .await?;
 
-            if primary.do_validation() {
-                vld.publish().await;
+            // Commit the new state
+            if primary.message().is_some() {
+                history.lock().await.commit(primary.block_info().number, state);
+
+                if primary.do_validation() {
+                    vld.publish().await;
+                }
             }
         }
     }
@@ -454,6 +393,11 @@ impl GovernanceState {
             None
         };
 
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "governance_state",
+            StateHistoryStore::default_block_store(),
+        )));
+
         let readers = Box::new(Readers {
             gov_reader: GovReader::new(&context, &config).await?,
             drep_reader: DRepReader::new(&context, &config).await?,
@@ -464,7 +408,7 @@ impl GovernanceState {
         });
 
         tokio::spawn(async move {
-            Self::run(context, cfg, snapshot_subscription, readers)
+            Self::run(history, context, cfg, snapshot_subscription, readers)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });

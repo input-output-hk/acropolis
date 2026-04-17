@@ -3,9 +3,9 @@ use acropolis_common::{
     ProposalProcedure, ProtocolParamType, ProtocolParamUpdate, VoteCount, VoteResult,
 };
 use anyhow::{bail, Result};
+use imbl::HashMap;
 use std::{
     cmp::max,
-    collections::HashMap,
     fmt,
     fmt::Display,
     fs::File,

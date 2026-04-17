@@ -1,9 +1,11 @@
 //! Acropolis Governance State: State storage
 
+use crate::Readers;
 use crate::{
     alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting,
     VotingRegistrationState,
 };
+use acropolis_common::caryatid::ValidationContext;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     messages::{
@@ -18,10 +20,10 @@ use acropolis_common::{
 };
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
-use std::collections::HashMap;
-use tracing::info;
+use imbl::HashMap;
+use tracing::{debug, info};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct State {
     pub drep_stake_messages_count: usize,
 
@@ -215,7 +217,7 @@ impl State {
                 ratified.len()
             );
 
-            info!(
+            debug!(
                 "Conway voting: new epoch {}, outcomes: {ratified:?}",
                 new_block.epoch
             );
@@ -226,7 +228,7 @@ impl State {
         Ok(output)
     }
 
-    fn log_stats(&self) {
+    pub fn log_stats(&self) {
         info!(
             "{}, {}, drep stake msgs (size): {} ({})",
             self.alonzo_babbage_voting.get_stats(),
@@ -250,19 +252,14 @@ impl State {
     pub fn get_proposal_votes(
         &self,
         proposal_id: &GovActionId,
-    ) -> Result<HashMap<Voter, (TxHash, VotingProcedure)>> {
+    ) -> Result<std::collections::HashMap<Voter, (TxHash, VotingProcedure)>> {
         match self.conway_voting.votes.get(proposal_id) {
-            Some(all_votes) => Ok(all_votes.clone()),
+            Some(all_votes) => Ok(all_votes.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
             None => Err(anyhow::anyhow!(
                 "Governance action: {:?} not found",
                 proposal_id
             )),
         }
-    }
-
-    pub async fn tick(&self) -> Result<()> {
-        self.log_stats();
-        Ok(())
     }
 
     /// Get a reference to the conway voting state
@@ -273,5 +270,67 @@ impl State {
     /// Get a mutable reference to the conway voting state
     pub fn get_conway_voting_mut(&mut self) -> &mut ConwayVoting {
         &mut self.conway_voting
+    }
+
+    pub async fn process_drep_spo(
+        &mut self,
+        block_info: &BlockInfo,
+        vld: &mut ValidationContext,
+        readers: &mut Box<Readers>,
+    ) -> Result<()> {
+        let d_drep = vld.consume_sync_opt(
+            "drep_reader",
+            readers.drep_reader.read_with_rollbacks().await,
+        )?;
+
+        let spo_msg =
+            vld.consume_sync_opt("spo_reader", readers.spo_reader.read_with_rollbacks().await)?;
+
+        let drep_state = vld.consume_sync_opt(
+            "drep_state_reader",
+            readers.drep_state_reader.read_with_rollbacks().await,
+        )?;
+
+        let spo_default_vote = vld.consume_sync_opt(
+            "spo_default_vote_reader",
+            readers.spo_default_vote_reader.read_with_rollbacks().await,
+        )?;
+
+        if let Some(d_spo) = spo_msg {
+            if let Some(drep_state) = drep_state {
+                if let Some(d_drep) = d_drep {
+                    if let Some(spo_default_vote) = spo_default_vote {
+                        if block_info.epoch != d_spo.epoch + 1 {
+                            vld.handle_error(
+                                "spo",
+                                &anyhow!(
+                                    "SPO distibution {block_info:?} != SPO epoch + 1 ({})",
+                                    d_spo.epoch
+                                ),
+                            );
+                        }
+
+                        if drep_state.epoch != d_drep.epoch {
+                            vld.handle_error(
+                                "drep_state",
+                                &anyhow!(
+                                    "DRep state {} epoch != DRep epoch ({})",
+                                    drep_state.epoch,
+                                    d_drep.epoch
+                                ),
+                            );
+                        }
+
+                        vld.handle(
+                            "handle_drep_stake",
+                            self.handle_drep_stake(&d_drep, &drep_state, &d_spo, &spo_default_vote)
+                                .await,
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }

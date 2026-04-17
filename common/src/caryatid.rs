@@ -342,6 +342,17 @@ impl ValidationContext {
         inp
     }
 
+    pub fn consume_sync_opt<T>(
+        &mut self,
+        handler: &str,
+        inp: Result<RollbackWrapper<T>>,
+    ) -> Result<Option<Arc<T>>> {
+        match self.consume_sync(handler, inp)? {
+            RollbackWrapper::Normal((_blk, msg)) => Ok(Some(msg.clone())),
+            RollbackWrapper::Rollback((_blk, _msg)) => Ok(None),
+        }
+    }
+
     pub async fn publish(&mut self) {
         if let Some(blk) = &self.current_block {
             if let Err(e) = self
