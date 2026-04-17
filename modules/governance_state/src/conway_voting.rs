@@ -579,7 +579,7 @@ impl ConwayVoting {
                 };
 
                 let Some(stake) = spo_stake.get(pool) else {
-                    warn!("Pool {pool}: has no stake, although has default vote {vote:?}");
+                    debug!("Pool {pool}: has no stake, although has default vote {vote:?}");
                     continue;
                 };
 
@@ -592,7 +592,7 @@ impl ConwayVoting {
 
     /// Checks whether action is expired at the beginning of new_epoch
     pub fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> Result<bool> {
-        info!(
+        debug!(
             "Checking whether {} is expired at new epoch {}",
             action_id, new_epoch
         );
@@ -670,11 +670,11 @@ impl ConwayVoting {
         if let Some(ref_file) = self.apply_votes_pattern(action_id, new_epoch - 1) {
             let ref_path = Path::new(&ref_file);
             if ref_path.exists() {
-                info!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}'...");
+                debug!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}'...");
                 let reference_votes = CastVotes::new_from_file(ref_path)?;
                 cast_votes.compare(new_epoch, action_id, &reference_votes);
             } else {
-                info!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}' not found, skipping");
+                debug!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}' not found, skipping");
             }
         }
 
@@ -693,15 +693,15 @@ impl ConwayVoting {
             self.reference_aggregates.get(&(new_epoch - 1, action_id.clone()))
         {
             if ref_v != &aggregated {
-                warn!("Verifying {action_id} at {new_epoch}: computed {aggregated} != reference {ref_v}");
+                error!("Verifying {action_id} at {new_epoch}: computed {aggregated} != reference {ref_v}");
             } else {
-                info!("Verifying {action_id} at {new_epoch}: votes {aggregated}, ok");
+                debug!("Verifying {action_id} at {new_epoch}: votes {aggregated}, ok");
             }
 
             if ref_oc != &aggregated_outcome {
                 error!("Verifying voting outcome: {action_id} at {new_epoch}: computed {aggregated_outcome} != reference {ref_oc}");
             } else {
-                info!("Verifying voting outcome: {action_id} at {new_epoch}: {ref_oc}, ok");
+                debug!("Verifying voting outcome: {action_id} at {new_epoch}: {ref_oc}, ok");
             }
         }
 
@@ -828,7 +828,7 @@ impl ConwayVoting {
 
         let proposals = self.proposal_order.clone();
         for action_id in proposals.iter() {
-            info!(
+            debug!(
                 "Epoch {} started: processing action {}; delaying {}",
                 new_block.epoch, action_id, delay_ratification
             );
@@ -903,12 +903,12 @@ impl ConwayVoting {
                     format!(" {p:?} ")
                 }
             };
-            info!("Epoch start {new_epoch}, {action_id}: {proposal} => {voting_procedure:?}",)
+            debug!("Epoch start {new_epoch}, {action_id}: {proposal} => {voting_procedure:?}",)
         }
 
         if !proposal_procedures.is_empty() {
             let pp = proposal_procedures.into_iter().map(|x| format!("{x},")).collect::<String>();
-            info!(
+            debug!(
                 "Proposal procedures at {new_epoch} without 'votes' records: [{}]",
                 pp
             );

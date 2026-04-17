@@ -21,7 +21,7 @@ use acropolis_common::{
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
 use std::collections::HashMap;
-use tracing::info;
+use tracing::{debug, info};
 
 #[derive(Default, Clone)]
 pub struct State {
@@ -217,7 +217,7 @@ impl State {
                 ratified.len()
             );
 
-            info!(
+            debug!(
                 "Conway voting: new epoch {}, outcomes: {ratified:?}",
                 new_block.epoch
             );
