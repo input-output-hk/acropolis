@@ -5,7 +5,7 @@ use crate::{
     alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting,
     VotingRegistrationState,
 };
-use acropolis_common::caryatid::{RollbackWrapper, ValidationContext};
+use acropolis_common::caryatid::ValidationContext;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     messages::{
@@ -274,48 +274,37 @@ impl State {
 
     pub async fn process_drep_spo(
         &mut self,
+        block_info: &BlockInfo,
         vld: &mut ValidationContext,
         readers: &mut Box<Readers>,
     ) -> Result<()> {
-        let d_drep = match vld.consume_sync(
+        let d_drep = vld.consume_sync_opt(
             "drep_reader",
             readers.drep_reader.read_with_rollbacks().await,
-        )? {
-            RollbackWrapper::Normal((_, d_drep)) => Some(d_drep),
-            RollbackWrapper::Rollback(_) => None,
-        };
+        )?;
 
         let spo_msg =
-            match vld.consume_sync("spo_reader", readers.spo_reader.read_with_rollbacks().await)? {
-                RollbackWrapper::Normal((blk_spo, d_spo)) => Some((blk_spo, d_spo)),
-                RollbackWrapper::Rollback(_) => None,
-            };
+            vld.consume_sync_opt("spo_reader", readers.spo_reader.read_with_rollbacks().await)?;
 
-        let drep_state = match vld.consume_sync(
+        let drep_state = vld.consume_sync_opt(
             "drep_state_reader",
             readers.drep_state_reader.read_with_rollbacks().await,
-        )? {
-            RollbackWrapper::Normal((_, drep_state)) => Some(drep_state),
-            RollbackWrapper::Rollback(_) => None,
-        };
+        )?;
 
-        let spo_default_vote = match vld.consume_sync(
+        let spo_default_vote = vld.consume_sync_opt(
             "spo_default_vote_reader",
             readers.spo_default_vote_reader.read_with_rollbacks().await,
-        )? {
-            RollbackWrapper::Normal((_, default_vote)) => Some(default_vote),
-            RollbackWrapper::Rollback(_) => None,
-        };
+        )?;
 
-        if let Some((blk_spo, d_spo)) = spo_msg {
+        if let Some(d_spo) = spo_msg {
             if let Some(drep_state) = drep_state {
                 if let Some(d_drep) = d_drep {
                     if let Some(spo_default_vote) = spo_default_vote {
-                        if blk_spo.epoch != d_spo.epoch + 1 {
+                        if block_info.epoch != d_spo.epoch + 1 {
                             vld.handle_error(
                                 "spo",
                                 &anyhow!(
-                                    "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
+                                    "SPO distibution {block_info:?} != SPO epoch + 1 ({})",
                                     d_spo.epoch
                                 ),
                             );

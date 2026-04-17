@@ -339,31 +339,33 @@ impl GovernanceState {
                     );
 
                     if blk_g.new_epoch {
-                        match vld.consume_sync(
+                        if let Some(params) = vld.consume_sync_opt(
                             "param_reader",
                             readers.param_reader.read_with_rollbacks().await,
                         )? {
-                            RollbackWrapper::Normal((blk_g, params)) => {
-                                vld.handle(
-                                    "handle_protocol_parameters",
-                                    state.handle_protocol_parameters(&params).await,
-                                );
+                            vld.handle(
+                                "handle_protocol_parameters",
+                                state.handle_protocol_parameters(&params).await,
+                            );
 
-                                if blk_g.epoch > 0 {
-                                    state.process_drep_spo(&mut vld, &mut readers).await?;
-                                }
-
-                                vld.handle("advance_epoch", state.advance_epoch(&blk_g));
+                            if blk_g.epoch > 0 {
+                                state
+                                    .process_drep_spo(blk_g.as_ref(), &mut vld, &mut readers)
+                                    .await?;
                             }
-                            RollbackWrapper::Rollback(_) => {}
+
+                            vld.handle("advance_epoch", state.advance_epoch(blk_g));
                         }
                     }
                 } else {
+                    // If the primary message was a rollback still read the other readers to keep synchronization aligned
                     vld.consume_sync(
                         "param_reader",
                         readers.param_reader.read_with_rollbacks().await,
                     )?;
-                    state.process_drep_spo(&mut vld, &mut readers).await?;
+                    state
+                        .process_drep_spo(primary.block_info().as_ref(), &mut vld, &mut readers)
+                        .await?;
                 }
 
                 Ok::<(), anyhow::Error>(())
