@@ -713,6 +713,7 @@ mod tests {
     use crate::test_utils::{to_era, to_pallas_era, TestContext};
     use crate::validation_fixture;
     use acropolis_common::{NetworkId, TxIdentifier};
+    use acropolis_test_utils::mainnet_genesis_values;
     use pallas::ledger::traverse::MultiEraTx;
 
     fn build_test_deltas(_ctx: &TestContext, raw_tx: &[u8], era: &str) -> TxUTxODeltas {
@@ -736,7 +737,7 @@ mod tests {
             "a95d16e891e51f98a3b1d3fe862ed355ebc8abffb7a7269d86f775553d9e653f"
         );
         let tx_deltas = build_test_deltas(&ctx, &raw_tx, era);
-        let genesis_values = GenesisValues::mainnet();
+        let genesis_values = mainnet_genesis_values();
 
         let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
 
@@ -757,7 +758,7 @@ mod tests {
             "a95d16e891e51f98a3b1d3fe862ed355ebc8abffb7a7269d86f775553d9e653f"
         );
         let tx_deltas = build_test_deltas(&ctx, &raw_tx, era);
-        let genesis_values = GenesisValues::mainnet();
+        let genesis_values = mainnet_genesis_values();
 
         let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
         let scripts_needed = crate::utils::get_scripts_needed(&tx_deltas, &ctx.utxos);
@@ -777,7 +778,7 @@ mod tests {
             "a95d16e891e51f98a3b1d3fe862ed355ebc8abffb7a7269d86f775553d9e653f"
         );
         let tx_deltas = build_test_deltas(&ctx, &raw_tx, era);
-        let genesis_values = GenesisValues::mainnet();
+        let genesis_values = mainnet_genesis_values();
 
         let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
         let scripts_needed = crate::utils::get_scripts_needed(&tx_deltas, &ctx.utxos);

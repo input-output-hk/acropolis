@@ -24,5 +24,8 @@ pallas = { workspace = true }
 
 kes-summed-ed25519 = { git = "https://github.com/txpipe/kes", rev = "f69fb357d46f6a18925543d785850059569d7e78" }
 
+[dev-dependencies]
+acropolis_test_utils = { path = "../../test_utils" }
+
 [lib]
 path = "src/block_kes_validator.rs"

@@ -256,7 +256,8 @@ fn body_signature<'a>(header: &'a MultiEraHeader) -> Option<&'a [u8]> {
 
 #[cfg(test)]
 mod tests {
-    use acropolis_common::{genesis_values::GenesisValues, serialization::Bech32Conversion, Era};
+    use acropolis_common::{serialization::Bech32Conversion, Era};
+    use acropolis_test_utils::mainnet_genesis_values;
     use pallas::ledger::traverse::MultiEraHeader;
 
     use super::*;
@@ -265,7 +266,7 @@ mod tests {
     fn test_4490511_block_produced_by_genesis_key() {
         let slots_per_kes_period = 129600;
         let max_kes_evolutions = 62;
-        let genesis_values = GenesisValues::mainnet();
+        let genesis_values = mainnet_genesis_values();
 
         let block_header_4490511: Vec<u8> =
             hex::decode(include_str!("./data/4490511.cbor")).unwrap();
@@ -295,7 +296,7 @@ mod tests {
     fn test_4556956_block() {
         let slots_per_kes_period = 129600;
         let max_kes_evolutions = 62;
-        let genesis_values = GenesisValues::mainnet();
+        let genesis_values = mainnet_genesis_values();
 
         let block_header_4556956: Vec<u8> =
             hex::decode(include_str!("./data/4556956.cbor")).unwrap();
@@ -332,7 +333,7 @@ mod tests {
     fn test_4556956_block_with_wrong_ocert_counter() {
         let slots_per_kes_period = 129600;
         let max_kes_evolutions = 62;
-        let genesis_values = GenesisValues::mainnet();
+        let genesis_values = mainnet_genesis_values();
 
         let block_header_4556956: Vec<u8> =
             hex::decode(include_str!("./data/4556956.cbor")).unwrap();
@@ -377,7 +378,7 @@ mod tests {
     fn test_4556956_block_with_missing_ocert_counter_and_active_spos() {
         let slots_per_kes_period = 129600;
         let max_kes_evolutions = 62;
-        let genesis_values = GenesisValues::mainnet();
+        let genesis_values = mainnet_genesis_values();
 
         let block_header_4556956: Vec<u8> =
             hex::decode(include_str!("./data/4556956.cbor")).unwrap();
@@ -416,7 +417,7 @@ mod tests {
     fn test_7854823_praos_block() {
         let slots_per_kes_period = 129600;
         let max_kes_evolutions = 62;
-        let genesis_values = GenesisValues::mainnet();
+        let genesis_values = mainnet_genesis_values();
 
         let block_header_7854823: Vec<u8> =
             hex::decode(include_str!("./data/7854823.cbor")).unwrap();
@@ -452,7 +453,7 @@ mod tests {
     fn test_7854823_praos_block_with_overincremented_ocert_counter() {
         let slots_per_kes_period = 129600;
         let max_kes_evolutions = 62;
-        let genesis_values = GenesisValues::mainnet();
+        let genesis_values = mainnet_genesis_values();
 
         let block_header_7854823: Vec<u8> =
             hex::decode(include_str!("./data/7854823.cbor")).unwrap();

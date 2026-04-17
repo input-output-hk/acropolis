@@ -134,13 +134,13 @@ pub fn lookup_in_overlay_schedule(
 
 #[cfg(test)]
 mod tests {
-    use acropolis_common::genesis_values::GenesisValues;
+    use acropolis_test_utils::mainnet_genesis_values;
 
     use super::*;
 
     #[test]
     fn test_lookup_in_overlay_schedule_1() {
-        let genesis_values = GenesisValues::mainnet();
+        let genesis_values = mainnet_genesis_values();
         let genesis_delegs = genesis_values.genesis_delegs;
         let decentralisation_param = RationalNumber::ONE;
         let active_slots_coeff = RationalNumber::new(1, 20);
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn test_lookup_in_overlay_schedule_2() {
-        let genesis_values = GenesisValues::mainnet();
+        let genesis_values = mainnet_genesis_values();
         let genesis_delegs = genesis_values.genesis_delegs;
         let decentralisation_param = RationalNumber::new(1, 2);
         let active_slots_coeff = RationalNumber::new(1, 20);

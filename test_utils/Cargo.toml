@@ -1,0 +1,9 @@
+[package]
+name = "acropolis_test_utils"
+version = "0.1.0"
+edition = "2021"
+description = "Test helpers for Acropolis modules"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../common" }

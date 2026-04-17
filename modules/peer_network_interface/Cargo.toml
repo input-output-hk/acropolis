@@ -27,4 +27,5 @@ tracing = { workspace = true }
 path = "src/peer_network_interface.rs"
 
 [dev-dependencies]
+acropolis_test_utils = { path = "../../test_utils" }
 acropolis_module_consensus = { path = "../consensus" }

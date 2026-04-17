@@ -87,10 +87,11 @@ impl ToPlutusData for TimeRange {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acropolis_test_utils::mainnet_genesis_values;
 
     #[test]
     fn time_range_shelley_slot() {
-        let gv = GenesisValues::mainnet();
+        let gv = mainnet_genesis_values();
         // Mainnet: byron_timestamp=1506203091, shelley_epoch=208
         // Shelley start slot = 208 * 21600 = 4492800
         // Shelley start timestamp = 1506203091 + 4492800 * 20 = 1596059091
@@ -107,7 +108,7 @@ mod tests {
 
     #[test]
     fn time_range_none_bounds() {
-        let gv = GenesisValues::mainnet();
+        let gv = mainnet_genesis_values();
         let tr = TimeRange::new(None, None, &gv);
         assert!(tr.lower_bound.is_none());
         assert!(tr.upper_bound.is_none());
@@ -115,7 +116,7 @@ mod tests {
 
     #[test]
     fn time_range_mixed_bounds() {
-        let gv = GenesisValues::mainnet();
+        let gv = mainnet_genesis_values();
         let tr = TimeRange::new(Some(44_000_000), None, &gv);
         assert!(tr.lower_bound.is_some());
         assert!(tr.upper_bound.is_none());

@@ -722,9 +722,9 @@ mod tests {
     use crate::configuration::{InterfaceConfig, SyncPoint};
     use crate::connection::{Header, PeerChainSyncEvent, PeerEvent};
     use acropolis_common::configuration::BlockFlowMode;
-    use acropolis_common::genesis_values::GenesisValues;
     use acropolis_common::messages::Message;
     use acropolis_common::{BlockHash, Era};
+    use acropolis_test_utils::mainnet_genesis_values;
     use caryatid_sdk::Context;
     use caryatid_sdk::mock_bus::MockBus;
     use config::Config;
@@ -743,7 +743,7 @@ mod tests {
         BlockSink {
             context,
             topic: "test.block.available".to_string(),
-            genesis_values: GenesisValues::mainnet(),
+            genesis_values: mainnet_genesis_values(),
             upstream_cache: None,
             last_epoch: None,
             era: None,

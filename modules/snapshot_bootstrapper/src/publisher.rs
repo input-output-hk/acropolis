@@ -663,6 +663,7 @@ impl SnapshotCallbacks for SnapshotPublisher {
 mod tests {
     use super::*;
     use acropolis_common::protocol_params::Nonce;
+    use acropolis_test_utils::mainnet_genesis_values;
 
     fn make_test_nonces() -> Nonces {
         Nonces {
@@ -678,7 +679,7 @@ mod tests {
     #[test]
     fn test_bootstrap_context_new() {
         let nonces = make_test_nonces();
-        let genesis = GenesisValues::mainnet();
+        let genesis = mainnet_genesis_values();
 
         let ctx = EpochContext::new(
             nonces.clone(),
@@ -700,7 +701,7 @@ mod tests {
     fn test_epoch_context_stores_nonces() {
         // This would require mocking Context, so just test the data flow concept
         let nonces = make_test_nonces();
-        let genesis = GenesisValues::mainnet();
+        let genesis = mainnet_genesis_values();
 
         let ctx = EpochContext::new(
             nonces.clone(),

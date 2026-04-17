@@ -33,6 +33,7 @@ serde = { workspace = true }
 path = "src/utxo_state.rs"
 
 [dev-dependencies]
+acropolis_test_utils = { path = "../../test_utils" }
 hex.workspace = true
 pallas.workspace = true
 serde.workspace = true

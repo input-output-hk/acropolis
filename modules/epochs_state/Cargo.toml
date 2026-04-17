@@ -21,5 +21,8 @@ pallas = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
+[dev-dependencies]
+acropolis_test_utils = { path = "../../test_utils" }
+
 [lib]
 path = "src/epochs_state.rs"
