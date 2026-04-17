@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 // (vote epoch, vote slot, proposal)
 type VoteData = (u64, u64, Box<ProtocolParamUpdate>);
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct AlonzoBabbageVoting {
     /// map "enact epoch" (proposal enacts at this epoch end) to voting
     /// "voting": map voter (genesis key) => votedata

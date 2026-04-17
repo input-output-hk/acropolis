@@ -194,7 +194,7 @@ impl CastVotes {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ConwayVoting {
     conway: Option<ConwayParams>,
     bootstrap: Option<bool>,
