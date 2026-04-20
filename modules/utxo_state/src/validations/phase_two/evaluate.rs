@@ -485,6 +485,13 @@ mod tests {
     )]
     #[test_case(validation_fixture!(
         "conway",
+        "e4945931b9c51a03f39eeb5bdb5c41d61612ea5c45b0143efacab71f226b2fca"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 8 - with 1 Plutus V2 Mint script with duplicate redeemer pointers"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
         "332aac636f8476b1a91c0071a445103d8f55309c23bfddaf242732630efcf0ec",
         "always_fail"
     ) =>
