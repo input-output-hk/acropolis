@@ -391,13 +391,11 @@ fn evaluate_single_script(
                 .into()),
                 _ => Ok(()),
             },
-            Err(e) => {
-                Err((UplcMachineError::ScriptFailed {
-                    script_hash: sc.script_hash,
-                    message: e.to_string(),
-                })
-                .into())
-            }
+            Err(e) => Err((UplcMachineError::ScriptFailed {
+                script_hash: sc.script_hash,
+                message: e.to_string(),
+            })
+            .into()),
         },
         // Per CIP-117: V3 scripts must evaluate to Constant(Unit)
         PlutusVersion::V3 => match result.term {
