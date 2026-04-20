@@ -391,11 +391,13 @@ fn evaluate_single_script(
                 .into()),
                 _ => Ok(()),
             },
-            Err(e) => Err((UplcMachineError::ScriptFailed {
-                script_hash: sc.script_hash,
-                message: e.to_string(),
-            })
-            .into()),
+            Err(e) => {
+                Err((UplcMachineError::ScriptFailed {
+                    script_hash: sc.script_hash,
+                    message: e.to_string(),
+                })
+                .into())
+            }
         },
         // Per CIP-117: V3 scripts must evaluate to Constant(Unit)
         PlutusVersion::V3 => match result.term {
@@ -482,6 +484,13 @@ mod tests {
     ) =>
         matches Ok(());
         "conway - valid transaction 7 - with Propose Script"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "e4945931b9c51a03f39eeb5bdb5c41d61612ea5c45b0143efacab71f226b2fca"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 8 - with 1 Plutus V2 Mint script with duplicate redeemer pointers"
     )]
     #[test_case(validation_fixture!(
         "conway",
