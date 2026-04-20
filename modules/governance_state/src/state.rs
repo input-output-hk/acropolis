@@ -1,11 +1,9 @@
 //! Acropolis Governance State: State storage
 
-use crate::Readers;
 use crate::{
     alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting,
     VotingRegistrationState,
 };
-use acropolis_common::caryatid::ValidationContext;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     messages::{
@@ -270,67 +268,5 @@ impl State {
     /// Get a mutable reference to the conway voting state
     pub fn get_conway_voting_mut(&mut self) -> &mut ConwayVoting {
         &mut self.conway_voting
-    }
-
-    pub async fn process_drep_spo(
-        &mut self,
-        block_info: &BlockInfo,
-        vld: &mut ValidationContext,
-        readers: &mut Box<Readers>,
-    ) -> Result<()> {
-        let d_drep = vld.consume_opt(
-            "drep_reader",
-            readers.drep_reader.read_with_rollbacks().await,
-        )?;
-
-        let spo_msg =
-            vld.consume_opt("spo_reader", readers.spo_reader.read_with_rollbacks().await)?;
-
-        let drep_state = vld.consume_opt(
-            "drep_state_reader",
-            readers.drep_state_reader.read_with_rollbacks().await,
-        )?;
-
-        let spo_default_vote = vld.consume_opt(
-            "spo_default_vote_reader",
-            readers.spo_default_vote_reader.read_with_rollbacks().await,
-        )?;
-
-        if let Some(d_spo) = spo_msg {
-            if let Some(drep_state) = drep_state {
-                if let Some(d_drep) = d_drep {
-                    if let Some(spo_default_vote) = spo_default_vote {
-                        if block_info.epoch != d_spo.epoch + 1 {
-                            vld.handle_error(
-                                "spo",
-                                &anyhow!(
-                                    "SPO distibution {block_info:?} != SPO epoch + 1 ({})",
-                                    d_spo.epoch
-                                ),
-                            );
-                        }
-
-                        if drep_state.epoch != d_drep.epoch {
-                            vld.handle_error(
-                                "drep_state",
-                                &anyhow!(
-                                    "DRep state {} epoch != DRep epoch ({})",
-                                    drep_state.epoch,
-                                    d_drep.epoch
-                                ),
-                            );
-                        }
-
-                        vld.handle(
-                            "handle_drep_stake",
-                            self.handle_drep_stake(&d_drep, &drep_state, &d_spo, &spo_default_vote)
-                                .await,
-                        );
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 }

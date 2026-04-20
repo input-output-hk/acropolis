@@ -19,8 +19,9 @@ use acropolis_common::{
         },
     },
     state_history::{StateHistory, StateHistoryStore},
+    BlockInfo,
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
@@ -197,6 +198,69 @@ impl GovernanceState {
         }
     }
 
+    async fn process_drep_spo(
+        block_info: &BlockInfo,
+        vld: &mut ValidationContext,
+        state: &mut State,
+        readers: &mut Box<Readers>,
+    ) -> Result<()> {
+        let d_drep = vld.consume_opt(
+            "drep_reader",
+            readers.drep_reader.read_with_rollbacks().await,
+        )?;
+
+        let spo_msg =
+            vld.consume_opt("spo_reader", readers.spo_reader.read_with_rollbacks().await)?;
+
+        let drep_state = vld.consume_opt(
+            "drep_state_reader",
+            readers.drep_state_reader.read_with_rollbacks().await,
+        )?;
+
+        let spo_default_vote = vld.consume_opt(
+            "spo_default_vote_reader",
+            readers.spo_default_vote_reader.read_with_rollbacks().await,
+        )?;
+
+        if let Some(d_spo) = spo_msg {
+            if let Some(drep_state) = drep_state {
+                if let Some(d_drep) = d_drep {
+                    if let Some(spo_default_vote) = spo_default_vote {
+                        if block_info.epoch != d_spo.epoch + 1 {
+                            vld.handle_error(
+                                "spo",
+                                &anyhow!(
+                                    "SPO distibution {block_info:?} != SPO epoch + 1 ({})",
+                                    d_spo.epoch
+                                ),
+                            );
+                        }
+
+                        if drep_state.epoch != d_drep.epoch {
+                            vld.handle_error(
+                                "drep_state",
+                                &anyhow!(
+                                    "DRep state {} epoch != DRep epoch ({})",
+                                    drep_state.epoch,
+                                    d_drep.epoch
+                                ),
+                            );
+                        }
+
+                        vld.handle(
+                            "handle_drep_stake",
+                            state
+                                .handle_drep_stake(&d_drep, &drep_state, &d_spo, &spo_default_vote)
+                                .await,
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         context: Arc<Context<Message>>,
@@ -349,9 +413,13 @@ impl GovernanceState {
                             );
 
                             if blk_g.epoch > 0 {
-                                state
-                                    .process_drep_spo(blk_g.as_ref(), &mut vld, &mut readers)
-                                    .await?;
+                                Self::process_drep_spo(
+                                    blk_g.as_ref(),
+                                    &mut vld,
+                                    &mut state,
+                                    &mut readers,
+                                )
+                                .await?;
                             }
 
                             vld.handle("advance_epoch", state.advance_epoch(blk_g));
@@ -363,9 +431,13 @@ impl GovernanceState {
                         "param_reader",
                         readers.param_reader.read_with_rollbacks().await,
                     )?;
-                    state
-                        .process_drep_spo(primary.block_info().as_ref(), &mut vld, &mut readers)
-                        .await?;
+                    Self::process_drep_spo(
+                        primary.block_info().as_ref(),
+                        &mut vld,
+                        &mut state,
+                        &mut readers,
+                    )
+                    .await?;
                 }
 
                 Ok::<(), anyhow::Error>(())
