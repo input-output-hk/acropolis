@@ -123,12 +123,13 @@ impl TxInfo {
 
         // sort by redeemers by ScriptPurpose (removing duplicates)
         let redeemers = match tx_deltas.redeemers.as_ref() {
-            Some(redeemers) => redeemers
-                .iter()
-                .map(|redeemer| (redeemer.redeemer_pointer(), redeemer.clone()))
-                .collect::<BTreeMap<_, _>>()
-                .into_values()
-                .collect::<Vec<_>>(),
+            Some(redeemers) => {
+                let mut map = BTreeMap::new();
+                for r in redeemers {
+                    map.insert(r.redeemer_pointer(), r);
+                }
+                map.into_values().cloned().collect()
+            }
             None => vec![],
         };
 
