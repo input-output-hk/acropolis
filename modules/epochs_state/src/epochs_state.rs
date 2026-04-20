@@ -218,9 +218,7 @@ impl EpochsState {
 
             let epoch = primary.epoch();
             if primary.should_read_epoch_transition_messages() {
-                match ctx
-                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
-                {
+                match ctx.consume("params_reader", params_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((_, params)) => {
                         state.handle_protocol_parameters(&params);
                     }
@@ -279,7 +277,7 @@ impl EpochsState {
             }
 
             // Handle block txs second so new epoch's state don't get counted in the last one
-            match ctx.consume_sync("txs_reader", txs_reader.read_with_rollbacks().await)? {
+            match ctx.consume("txs_reader", txs_reader.read_with_rollbacks().await)? {
                 RollbackWrapper::Normal((blk_info, msg)) => {
                     let span = info_span!("epochs_state.handle_block_txs", block = blk_info.number);
                     span.in_scope(|| state.handle_block_txs(&blk_info, &msg));

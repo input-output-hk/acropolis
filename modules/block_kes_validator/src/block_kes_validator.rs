@@ -168,16 +168,14 @@ impl BlockKesValidator {
             }
 
             if primary.should_read_epoch_transition_messages() {
-                match ctx
-                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
-                {
+                match ctx.consume("params_reader", params_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((_, params)) => {
                         state.handle_protocol_parameters(&params);
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                match ctx.consume_sync(
+                match ctx.consume(
                     "spo_state_reader",
                     spo_state_reader.read_with_rollbacks().await,
                 )? {

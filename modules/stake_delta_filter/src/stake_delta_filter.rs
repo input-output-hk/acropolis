@@ -273,7 +273,7 @@ impl StakeDeltaFilter {
                 publisher.publish_message(message.clone()).await?;
             }
 
-            match ctx.consume_sync(
+            match ctx.consume(
                 "address deltas",
                 address_deltas_reader.read_with_rollbacks().await,
             )? {

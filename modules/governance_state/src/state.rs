@@ -278,20 +278,20 @@ impl State {
         vld: &mut ValidationContext,
         readers: &mut Box<Readers>,
     ) -> Result<()> {
-        let d_drep = vld.consume_sync_opt(
+        let d_drep = vld.consume_opt(
             "drep_reader",
             readers.drep_reader.read_with_rollbacks().await,
         )?;
 
         let spo_msg =
-            vld.consume_sync_opt("spo_reader", readers.spo_reader.read_with_rollbacks().await)?;
+            vld.consume_opt("spo_reader", readers.spo_reader.read_with_rollbacks().await)?;
 
-        let drep_state = vld.consume_sync_opt(
+        let drep_state = vld.consume_opt(
             "drep_state_reader",
             readers.drep_state_reader.read_with_rollbacks().await,
         )?;
 
-        let spo_default_vote = vld.consume_sync_opt(
+        let spo_default_vote = vld.consume_opt(
             "spo_default_vote_reader",
             readers.spo_default_vote_reader.read_with_rollbacks().await,
         )?;

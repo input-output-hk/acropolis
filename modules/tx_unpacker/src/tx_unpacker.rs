@@ -304,7 +304,7 @@ impl TxUnpacker {
 
             if primary.should_read_epoch_messages() {
                 if let Some(ref mut reader) = params_reader {
-                    match ctx.consume_sync("params_reader", reader.read_with_rollbacks().await)? {
+                    match ctx.consume("params_reader", reader.read_with_rollbacks().await)? {
                         RollbackWrapper::Normal((block_info, params)) => {
                             let span = info_span!(
                                 "tx_unpacker.handle_protocol_params",

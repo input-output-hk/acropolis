@@ -339,7 +339,7 @@ impl GovernanceState {
                     );
 
                     if blk_g.new_epoch {
-                        if let Some(params) = vld.consume_sync_opt(
+                        if let Some(params) = vld.consume_opt(
                             "param_reader",
                             readers.param_reader.read_with_rollbacks().await,
                         )? {
@@ -359,7 +359,7 @@ impl GovernanceState {
                     }
                 } else {
                     // If the primary message was a rollback still read the other readers to keep synchronization aligned
-                    vld.consume_sync(
+                    vld.consume(
                         "param_reader",
                         readers.param_reader.read_with_rollbacks().await,
                     )?;
