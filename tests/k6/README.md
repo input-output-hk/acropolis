@@ -80,7 +80,7 @@ make build
 
 # Run individual tests
 make test-smoke    # Quick validation (1 minute)
-make test-load     # Sustained load (16 minutes)
+make test-load     # Sustained load (5 minutes)
 make test-stress   # Find breaking point (13 minutes)
 make test-soak     # Long-running stability (2+ hours)
 

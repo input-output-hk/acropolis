@@ -4,7 +4,6 @@ import { metrics } from './metrics';
 
 export enum MetricType {
   ACCOUNT = 'account',
-  ASSET = 'asset',
   EPOCH = 'epoch',
   GOVERNANCE = 'governance',
   POOL = 'pool',
@@ -17,7 +16,7 @@ interface RequestOptions {
 }
 
 export class ApiClient {
-  constructor(private baseUrl: string) {}
+  constructor(private baseUrl: string) { }
 
   /**
    * Make a GET request with automatic metrics tracking and checks
@@ -50,13 +49,6 @@ export class ApiClient {
         metrics.accountRequests.add(1);
         if (!passed) {
           metrics.accountErrors.add(1);
-        }
-        break;
-      case MetricType.ASSET:
-        metrics.assetDuration.add(res.timings.duration);
-        metrics.assetRequests.add(1);
-        if (!passed) {
-          metrics.assetErrors.add(1);
         }
         break;
       case MetricType.EPOCH:
