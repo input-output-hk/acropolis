@@ -354,6 +354,18 @@ impl AccountsState {
                     RollbackWrapper::Rollback(_) => {}
                 }
 
+                // Read gov outcomes before epoch activity to apply forfeited proposal deposits to pots
+                let gov_outcomes = match ctx.consume(
+                    "readers.gov_outcomes",
+                    readers.gov_outcomes.read_with_rollbacks().await,
+                )? {
+                    RollbackWrapper::Normal((_, outcomes_msg)) => {
+                        state.handle_forfeited_deposits(&outcomes_msg);
+                        Some(outcomes_msg)
+                    }
+                    RollbackWrapper::Rollback(_) => None,
+                };
+
                 // Handle epoch activity
                 match ctx.consume(
                     "readers.epoch_activity",
@@ -396,28 +408,12 @@ impl AccountsState {
                 };
 
                 // Handle governance outcomes (enacted/expired proposals) at epoch boundary
-                match ctx.consume(
-                    "readers.gov_outcomes",
-                    readers.gov_outcomes.read_with_rollbacks().await,
-                )? {
-                    RollbackWrapper::Normal((block_info, outcomes_msg)) => {
-                        async {
-                            let refund_deltas = ctx.handle(
-                                "handle_governance_outcomes",
-                                state.handle_governance_outcomes(
-                                    &outcomes_msg,
-                                    &mut stake_address_undo,
-                                ),
-                            );
-                            stake_reward_deltas.extend(refund_deltas);
-                        }
-                        .instrument(info_span!(
-                            "account_state.handle_governance_outcomes",
-                            block = block_info.number
-                        ))
-                        .await;
-                    }
-                    RollbackWrapper::Rollback(_) => {}
+                if let Some(gov_outcomes) = gov_outcomes {
+                    let refund_deltas = ctx.handle(
+                        "handle_governance_outcomes",
+                        state.handle_governance_outcomes(&gov_outcomes, &mut stake_address_undo),
+                    );
+                    stake_reward_deltas.extend(refund_deltas);
                 }
 
                 // publish stake reward deltas if we're not in rollback
