@@ -218,6 +218,9 @@ impl State {
         // Apply DRep delegations (Used to reproduce PV9 deregistration bug)
         self.drep_delegators = bootstrap_msg.drep_delegations.into();
 
+        // Apply proposal deposits
+        self.proposal_deposits = bootstrap_msg.proposal_deposits;
+
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
              pots(reserves={}, treasury={}, deposits={})",

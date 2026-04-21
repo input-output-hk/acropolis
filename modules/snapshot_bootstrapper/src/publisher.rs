@@ -1,6 +1,7 @@
 use acropolis_common::configuration::SyncMode;
 use acropolis_common::messages::SPOBootstrapMessage;
 use acropolis_common::MagicNumber;
+use acropolis_common::ProposalProcedure;
 use acropolis_common::ProtocolParamUpdate;
 use acropolis_common::ReferenceScript;
 use acropolis_common::RewardParams;
@@ -115,6 +116,7 @@ pub struct SnapshotPublisher {
     dreps_len: usize,
     proposals: Vec<GovernanceProposal>,
     epoch_context: EpochContext,
+    procedures: Vec<ProposalProcedure>,
 }
 
 impl SnapshotPublisher {
@@ -139,6 +141,7 @@ impl SnapshotPublisher {
             dreps_len: 0,
             proposals: Vec::new(),
             epoch_context,
+            procedures: Vec::new(),
         }
     }
 
@@ -336,6 +339,12 @@ impl AccountsCallback for SnapshotPublisher {
             !data.snapshots.mark.spos.is_empty(),
         );
 
+        let mut proposal_deposits = HashMap::new();
+        for proposal in &self.procedures {
+            *proposal_deposits.entry(proposal.reward_account.clone()).or_insert(0) +=
+                proposal.deposit;
+        }
+
         // Convert the parsed data to the message type
         let message = AccountsBootstrapMessage {
             epoch: data.epoch,
@@ -348,6 +357,7 @@ impl AccountsCallback for SnapshotPublisher {
             bootstrap_snapshots: data.snapshots,
             pot_deltas: data.pot_deltas,
             drep_delegations: self.epoch_context.drep_delegations.clone(),
+            proposal_deposits,
         };
 
         let msg = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
@@ -569,6 +579,9 @@ impl GovernanceStateCallback for SnapshotPublisher {
         // Convert GovernanceState to ConwayVoting-compatible data
         let (proposals, votes) = state.to_conway_voting_data(epoch);
 
+        for (_, procedure) in &proposals {
+            self.procedures.push(procedure.clone());
+        }
         // Convert proposal roots
         let proposal_roots = GovernanceProposalRoots {
             pparam_update: state.proposal_roots.pparam_update,
