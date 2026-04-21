@@ -583,6 +583,7 @@ impl GovernanceStateCallback for SnapshotPublisher {
 
         // Build the bootstrap message
         let message = GovernanceBootstrapMessage {
+            block_number: self.epoch_context.last_block_height,
             epoch,
             proposals,
             votes,

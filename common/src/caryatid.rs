@@ -69,7 +69,7 @@ impl<T> PrimaryRead<T> {
         handler: &str,
         input: Result<RollbackWrapper<T>>,
     ) -> Result<Self> {
-        Ok(Self::from_read(ctx.consume_sync(handler, input)?))
+        Ok(Self::from_read(ctx.consume(handler, input)?))
     }
 
     pub fn block_info(&self) -> &Arc<BlockInfo> {
@@ -313,7 +313,7 @@ impl ValidationContext {
     /// Analyzes message retrieved from a subscriber used for synchronization:
     /// * checks errors (adds them to validation outcome);
     /// * sets current_block (in case the message is not empty).
-    pub fn consume_sync<T>(
+    pub fn consume<T>(
         &mut self,
         handler: &str,
         inp: Result<RollbackWrapper<T>>,
@@ -340,6 +340,17 @@ impl ValidationContext {
             }
         }
         inp
+    }
+
+    pub fn consume_opt<T>(
+        &mut self,
+        handler: &str,
+        inp: Result<RollbackWrapper<T>>,
+    ) -> Result<Option<Arc<T>>> {
+        match self.consume(handler, inp)? {
+            RollbackWrapper::Normal((_blk, msg)) => Ok(Some(msg.clone())),
+            RollbackWrapper::Rollback((_blk, _msg)) => Ok(None),
+        }
     }
 
     pub async fn publish(&mut self) {
@@ -456,7 +467,7 @@ mod tests {
         let rollback = rollback_message(block.as_ref());
 
         let consumed = ctx
-            .consume_sync(
+            .consume(
                 "rollback",
                 Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((block.clone(), rollback))),
             )
@@ -473,13 +484,13 @@ mod tests {
         let first = Arc::new(test_block(10));
         let second = Arc::new(test_block(11));
 
-        ctx.consume_sync(
+        ctx.consume(
             "normal",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((first.clone(), Arc::new(1)))),
         )
         .expect("normal sync should succeed");
 
-        ctx.consume_sync(
+        ctx.consume(
             "rollback",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
                 second.clone(),
@@ -500,13 +511,13 @@ mod tests {
         let mut ctx = create_validation_context();
         let block = Arc::new(test_block(42));
 
-        ctx.consume_sync(
+        ctx.consume(
             "normal",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((block.clone(), Arc::new(7)))),
         )
         .expect("normal sync should succeed");
 
-        ctx.consume_sync(
+        ctx.consume(
             "rollback",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
                 block.clone(),
@@ -530,7 +541,7 @@ mod tests {
         let mut ctx = create_validation_context();
         let block = Arc::new(test_block(24));
 
-        ctx.consume_sync(
+        ctx.consume(
             "rollback",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
                 block.clone(),
@@ -539,7 +550,7 @@ mod tests {
         )
         .expect("rollback sync should succeed");
 
-        ctx.consume_sync(
+        ctx.consume(
             "normal",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((block.clone(), Arc::new(3)))),
         )
@@ -560,7 +571,7 @@ mod tests {
         let mut ctx = create_validation_context();
         let block = Arc::new(test_block(9));
 
-        ctx.consume_sync(
+        ctx.consume(
             "normal",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((block.clone(), Arc::new(1)))),
         )
@@ -568,7 +579,7 @@ mod tests {
         assert!(ctx.get_current_block_opt().is_some());
 
         let err = ctx
-            .consume_sync::<u8>("reader", Err(anyhow!("subscription failed")))
+            .consume::<u8>("reader", Err(anyhow!("subscription failed")))
             .expect_err("consume_sync should return an error");
         assert!(
             err.to_string().contains("Error handling sync block"),
@@ -597,13 +608,13 @@ mod tests {
         let mut ctx = create_validation_context();
         let anchor = Arc::new(test_block(10));
 
-        ctx.consume_sync(
+        ctx.consume(
             "normal",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((anchor.clone(), Arc::new(0)))),
         )
         .expect("initial sync should succeed");
 
-        ctx.consume_sync(
+        ctx.consume(
             "mismatch-1",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
                 Arc::new(test_block(11)),
@@ -612,7 +623,7 @@ mod tests {
         )
         .expect("first mismatch should still return Ok wrapper");
 
-        ctx.consume_sync(
+        ctx.consume(
             "mismatch-2",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Normal((
                 Arc::new(test_block(12)),
@@ -633,7 +644,7 @@ mod tests {
         let mut ctx = create_validation_context();
         let block = Arc::new(test_block(77));
 
-        ctx.consume_sync(
+        ctx.consume(
             "rollback-1",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
                 block.clone(),
@@ -642,7 +653,7 @@ mod tests {
         )
         .expect("first rollback should succeed");
 
-        ctx.consume_sync(
+        ctx.consume(
             "rollback-2",
             Ok::<_, anyhow::Error>(RollbackWrapper::<u8>::Rollback((
                 block.clone(),

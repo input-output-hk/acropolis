@@ -3,12 +3,13 @@ use acropolis_common::{
     ProtocolParamUpdate,
 };
 use anyhow::{bail, Result};
-use std::collections::{HashMap, HashSet};
+use imbl::HashMap;
+use std::collections::HashSet;
 
 // (vote epoch, vote slot, proposal)
 type VoteData = (u64, u64, Box<ProtocolParamUpdate>);
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct AlonzoBabbageVoting {
     /// map "enact epoch" (proposal enacts at this epoch end) to voting
     /// "voting": map voter (genesis key) => votedata
@@ -112,7 +113,10 @@ impl AlonzoBabbageVoting {
     }
 
     pub fn get_stats(&self) -> String {
-        format!("alonzo proposal epochs: {:?}", self.proposals.keys())
+        format!(
+            "alonzo proposal epochs: {:?}",
+            self.proposals.keys().collect::<Vec<_>>()
+        )
     }
 }
 

@@ -18,10 +18,10 @@ use acropolis_common::{
 };
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
-use std::collections::HashMap;
-use tracing::info;
+use imbl::HashMap;
+use tracing::{debug, info};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct State {
     pub drep_stake_messages_count: usize,
 
@@ -215,7 +215,7 @@ impl State {
                 ratified.len()
             );
 
-            info!(
+            debug!(
                 "Conway voting: new epoch {}, outcomes: {ratified:?}",
                 new_block.epoch
             );
@@ -226,7 +226,7 @@ impl State {
         Ok(output)
     }
 
-    fn log_stats(&self) {
+    pub fn log_stats(&self) {
         info!(
             "{}, {}, drep stake msgs (size): {} ({})",
             self.alonzo_babbage_voting.get_stats(),
@@ -250,19 +250,14 @@ impl State {
     pub fn get_proposal_votes(
         &self,
         proposal_id: &GovActionId,
-    ) -> Result<HashMap<Voter, (TxHash, VotingProcedure)>> {
+    ) -> Result<std::collections::HashMap<Voter, (TxHash, VotingProcedure)>> {
         match self.conway_voting.votes.get(proposal_id) {
-            Some(all_votes) => Ok(all_votes.clone()),
+            Some(all_votes) => Ok(all_votes.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
             None => Err(anyhow::anyhow!(
                 "Governance action: {:?} not found",
                 proposal_id
             )),
         }
-    }
-
-    pub async fn tick(&self) -> Result<()> {
-        self.log_stats();
-        Ok(())
     }
 
     /// Get a reference to the conway voting state

@@ -596,6 +596,8 @@ pub struct UTxOPartialState {
 /// Includes proposals, votes, committee, and constitution
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceBootstrapMessage {
+    /// Block number when snapshot was taken
+    pub block_number: u64,
     /// Current epoch when snapshot was taken
     pub epoch: u64,
     /// Active proposals with their voting epochs
