@@ -275,6 +275,9 @@ pub struct GovernanceProceduresMessage {
 
     /// Alonzo-compatible (from Shelley) and Babbage updates
     pub alonzo_babbage_updates: Vec<AlonzoBabbageUpdateProposal>,
+
+    /// Treasury donations
+    pub treasury_donations: Lovelace,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

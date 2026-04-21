@@ -148,6 +148,7 @@ impl TxUnpacker {
                 let mut total_proposal_procedures = Vec::new();
                 let mut total_alonzo_babbage_update_proposals = Vec::new();
                 let mut total_output: u128 = 0;
+                let mut total_treasury_donations = 0;
                 let block_number = block.number as u32;
 
                 let span: tracing::Span =
@@ -221,6 +222,10 @@ impl TxUnpacker {
                                         if let Some(vps) = mapped_tx.voting_procedures.as_ref() {
                                             total_voting_procedures.push((tx_hash, vps.clone()));
                                         }
+
+                                        if let Some(donation) = mapped_tx.donation {
+                                            total_treasury_donations += donation;
+                                        }
                                     }
 
                                     if publish_utxo_deltas_topic.is_some() {
@@ -289,6 +294,7 @@ impl TxUnpacker {
                             voting_procedures: total_voting_procedures,
                             proposal_procedures: total_proposal_procedures,
                             alonzo_babbage_updates: total_alonzo_babbage_update_proposals,
+                            treasury_donations: total_treasury_donations,
                         }),
                     )));
 

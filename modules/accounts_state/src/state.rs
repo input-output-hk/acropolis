@@ -1842,6 +1842,8 @@ impl State {
                 .and_modify(|amount| *amount += proposal.deposit)
                 .or_insert(proposal.deposit);
         }
+
+        self.pots.treasury = self.pots.treasury.saturating_add(procedures.treasury_donations);
     }
 
     pub fn handle_governance_outcomes(
