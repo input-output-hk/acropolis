@@ -21,7 +21,7 @@ SNAP_URL ?= "https://pub-b844360df4774bb092a2bb2043b888e5.r2.dev/134092758.670ca
 
 SECTIONS_ALL := --params --governance --pools --accounts --utxo
 
-.PHONY: help all build test run run-preview run-bootstrap run-bootstrap-preview run-bootstrap-utxo-validation run-test-blocks run-test-vrf-wrong-leader run-midnight run-midnight-indexer fmt clippy
+.PHONY: help all build test run run-preview run-bootstrap run-bootstrap-preview run-bootstrap-utxo-validation run-block-header-validation run-test-blocks run-test-vrf-wrong-leader run-midnight run-midnight-indexer fmt clippy
 .PHONY: snapshot-summary snapshot-sections-all snapshot-bootstrap
 .PHONY: snap-test-streaming run-bootstrap-store-spdd-drdd build-release
 
@@ -37,6 +37,7 @@ help:
 	@echo "  run-bootstrap            Run the omnibus (mainnet) with bootstrap config"
 	@echo "  run-bootstrap-preview    Run the omnibus (preview) with bootstrap config"
 	@echo "  run-bootstrap-utxo-validation  Run the omnibus (mainnet) with bootstrap + utxo-validation config"
+	@echo "  run-block-header-validation  Run the omnibus (mainnet) with block-header-validation config"
 	@echo "  run-bootstrap-spdd-drdd  Run the omnibus with bootstrap config, storing spdd and drdd (snapshot)"
 	@echo "  run-test-blocks          Run the omnibus with test-blocks/omnibus.test.toml overrides"
 	@echo "  run-test-vrf-wrong-leader  Run the omnibus with test-vrf-wrong-leader/omnibus.test.toml overrides"
@@ -84,6 +85,9 @@ run-bootstrap-preview:
 
 run-bootstrap-utxo-validation:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap-utxo-validation.toml
+
+run-block-header-validation:
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.block-header-validation.toml
 
 run-bootstrap-store-spdd-drdd:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml --config omnibus.store-spdd-drdd.toml
