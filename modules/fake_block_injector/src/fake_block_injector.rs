@@ -41,6 +41,7 @@ impl FakeBlockInjector {
         raw_block: Vec<u8>,
         block_publish_topic: String,
         genesis: &GenesisValues,
+        new_epoch: bool,
     ) -> Result<()> {
         // Decode it
         let block = MultiEraBlock::decode(&raw_block)?;
@@ -48,7 +49,6 @@ impl FakeBlockInjector {
         let number = block.number();
 
         let (epoch, epoch_slot) = genesis.slot_to_epoch(slot);
-        let new_epoch = false; // TODO
         let timestamp = genesis.slot_to_timestamp(slot);
         let era = map_to_block_era(&block)?;
 
@@ -112,6 +112,11 @@ impl FakeBlockInjector {
             // Read and process them
             for path in files {
                 info!("  {}", path.display());
+                let new_epoch = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.ends_with(".new_epoch.cbor"))
+                    .unwrap_or(false);
                 let hex_text = fs::read_to_string(&path)?;
                 let raw_block = hex::decode(hex_text.trim())?;
                 Self::process_block(
@@ -119,6 +124,7 @@ impl FakeBlockInjector {
                     raw_block,
                     block_publish_topic.clone(),
                     genesis,
+                    new_epoch,
                 )
                 .await?;
             }
