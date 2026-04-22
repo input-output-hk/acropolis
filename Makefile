@@ -21,7 +21,7 @@ SNAP_URL ?= "https://pub-b844360df4774bb092a2bb2043b888e5.r2.dev/134092758.670ca
 
 SECTIONS_ALL := --params --governance --pools --accounts --utxo
 
-.PHONY: help all build test run run-preview run-bootstrap run-bootstrap-preview run-midnight run-midnight-indexer fmt clippy
+.PHONY: help all build test run run-preview run-bootstrap run-bootstrap-preview run-test-blocks run-test-vrf-wrong-genesis-leader run-midnight run-midnight-indexer fmt clippy
 .PHONY: snapshot-summary snapshot-sections-all snapshot-bootstrap
 .PHONY: snap-test-streaming run-bootstrap-store-spdd-drdd build-release
 
@@ -37,6 +37,8 @@ help:
 	@echo "  run-bootstrap            Run the omnibus (mainnet) with bootstrap config"
 	@echo "  run-bootstrap-preview    Run the omnibus (preview) with bootstrap config"
 	@echo "  run-bootstrap-spdd-drdd  Run the omnibus with bootstrap config, storing spdd and drdd (snapshot)"
+	@echo "  run-test-blocks          Run the omnibus with test-blocks/omnibus.test.toml overrides"
+	@echo "  run-test-vrf-wrong-genesis-leader  Run the omnibus with test-vrf-wrong-genesis-leader/omnibus.test.toml overrides"
 	@echo "  run-midnight-mainnet     Run the midnight indexer (mainnet)"
 	@echo "  run-midnight-preview     Run the midnight indexer (preview)"
 	@echo "  run-midnight-guardnet    Run the midnight indexer (guardnet)"
@@ -81,6 +83,12 @@ run-bootstrap-preview:
 
 run-bootstrap-store-spdd-drdd:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml --config omnibus.store-spdd-drdd.toml
+
+run-test-blocks:
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config test-blocks/omnibus.test.toml
+
+run-test-vrf-wrong-genesis-leader:
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config test-vrf-wrong-genesis-leader/omnibus.test.toml
 
 run-midnight-mainnet:
 	cd processes/midnight_indexer && $(CARGO) run --release --bin acropolis_process_midnight_indexer -- --config config.mainnet.toml

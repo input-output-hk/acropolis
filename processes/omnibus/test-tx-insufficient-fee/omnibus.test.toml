@@ -1,13 +1,13 @@
 [module.mithril-snapshot-fetcher]
 # Stop constraint likewise
 # Get enough into Shelley to get parameters
-stop = "epoch:209"
+stop = "epoch:211"
 
 # ============================================================================
 # Core Module Configurations
 # ============================================================================
 [module.fake-block-injector]
-block-files = "test-blocks/block.*.cbor"
+block-files = "test-tx-insufficient-fee/block.*.cbor"
 
 [module.consensus]
 # List of validation result topics to listen on
@@ -17,9 +17,6 @@ validators = [
 #           "cardano.validation.kes",
            "cardano.validation.tx",
            "cardano.validation.utxo",
-           "cardano.validation.governance",
-           "cardano.validation.spo",
-           "cardano.validation.accounts"
 ]
 # By default, the consesus module will skip validation for blocks 
 # from the Mithril snapshot but this can be set to true to force validation

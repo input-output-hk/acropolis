@@ -112,7 +112,8 @@ impl FakeBlockInjector {
             // Read and process them
             for path in files {
                 info!("  {}", path.display());
-                let raw_block = fs::read(&path)?; // Vec<u8>
+                let hex_text = fs::read_to_string(&path)?;
+                let raw_block = hex::decode(hex_text.trim())?;
                 Self::process_block(
                     context.clone(),
                     raw_block,

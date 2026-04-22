@@ -415,9 +415,8 @@ impl MithrilSnapshotFetcher {
                                 .publish(&block_publish_topic, Arc::new(message_enum))
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish block message: {e}"));
-
-                            last_block_info = Some(block_info);
                         }
+                        last_block_info = Some(block_info);
                         Ok::<(), anyhow::Error>(())
                     }
                     .instrument(span)
