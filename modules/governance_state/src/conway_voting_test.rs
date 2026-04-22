@@ -93,12 +93,14 @@ mod tests {
         }
     }
 
-    fn read_pools(pools_json: &[u8]) -> Result<HashMap<u64, HashMap<PoolId, DelegatedStake>>> {
+    fn read_pools(
+        pools_json: &[u8],
+    ) -> Result<imbl::HashMap<u64, imbl::HashMap<PoolId, DelegatedStake>>> {
         let pools = serde_json::from_slice::<Vec<(u64, Vec<PoolRecord>)>>(pools_json)?;
-        let res = HashMap::from_iter(pools.iter().map(|(epoch, distr)| {
+        let res = imbl::HashMap::from_iter(pools.iter().map(|(epoch, distr)| {
             (
                 *epoch,
-                HashMap::from_iter(distr.iter().map(|PoolRecord(id, active)| {
+                imbl::HashMap::from_iter(distr.iter().map(|PoolRecord(id, active)| {
                     (
                         *id,
                         DelegatedStake {
@@ -112,7 +114,9 @@ mod tests {
         Ok(res)
     }
 
-    fn read_dreps(dreps_json: &[u8]) -> Result<HashMap<u64, HashMap<DRepCredential, Lovelace>>> {
+    fn read_dreps(
+        dreps_json: &[u8],
+    ) -> Result<imbl::HashMap<u64, imbl::HashMap<DRepCredential, Lovelace>>> {
         let dreps = serde_json::from_slice::<Vec<(u64, Vec<DRepRecord>)>>(dreps_json)?;
 
         let converted = dreps
@@ -120,7 +124,7 @@ mod tests {
             .map(|(epoch, distr)| {
                 Ok((
                     *epoch,
-                    HashMap::from_iter(
+                    imbl::HashMap::from_iter(
                         distr
                             .iter()
                             .map(|DRepRecord(dt, key, lvl)| {
@@ -130,9 +134,9 @@ mod tests {
                     ),
                 ))
             })
-            .collect::<Result<Vec<(u64, HashMap<DRepCredential, Lovelace>)>>>()?;
+            .collect::<Result<Vec<(u64, imbl::HashMap<DRepCredential, Lovelace>)>>>()?;
 
-        let res = HashMap::from_iter(converted);
+        let res = imbl::HashMap::from_iter(converted);
 
         Ok(res)
     }

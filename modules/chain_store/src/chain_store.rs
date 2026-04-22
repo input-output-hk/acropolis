@@ -228,9 +228,7 @@ impl ChainStore {
                 // Epoch-0 params are consumed during init, so the loop only syncs
                 // the params reader on rollbacks and real epoch transitions.
                 if primary.should_read_epoch_transition_messages() {
-                    match ctx
-                        .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
-                    {
+                    match ctx.consume("params_reader", params_reader.read_with_rollbacks().await)? {
                         RollbackWrapper::Normal((_, params)) => {
                             state.handle_new_params(params.as_ref());
                         }

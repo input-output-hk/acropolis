@@ -164,7 +164,7 @@ impl UTXOState {
             let mut ctx =
                 ValidationContext::new(&context, &publish_tx_validation_topic, "utxo_state");
 
-            let deltas_msg = match ctx.consume_sync(
+            let deltas_msg = match ctx.consume(
                 "utxo_deltas_reader",
                 utxo_deltas_reader.read_with_rollbacks().await,
             )? {
@@ -184,16 +184,14 @@ impl UTXOState {
 
             // Read protocol parameters and pots if new epoch
             if is_new_epoch {
-                match ctx
-                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
-                {
+                match ctx.consume("params_reader", params_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((_, params)) => {
                         current_protocol_params = params.params.clone();
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
 
-                match ctx.consume_sync("pots_reader", pots_reader.read_with_rollbacks().await)? {
+                match ctx.consume("pots_reader", pots_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((_, pots)) => {
                         state.lock().await.handle_pots(pots.as_ref().clone());
                     }
@@ -205,9 +203,7 @@ impl UTXOState {
             let mut pool_registration_updates = vec![];
             if is_snapshot_mode || bootstrap_block_processed {
                 if let Some(reader) = pool_updates_reader.as_mut() {
-                    match ctx
-                        .consume_sync("pool_updates_reader", reader.read_with_rollbacks().await)?
-                    {
+                    match ctx.consume("pool_updates_reader", reader.read_with_rollbacks().await)? {
                         RollbackWrapper::Normal((_, updates_msg)) => {
                             pool_registration_updates = updates_msg.updates.clone();
                         }
@@ -220,9 +216,7 @@ impl UTXOState {
             let mut stake_registration_updates = vec![];
             if is_snapshot_mode || bootstrap_block_processed {
                 if let Some(reader) = stake_updates_reader.as_mut() {
-                    match ctx
-                        .consume_sync("stake_updates_reader", reader.read_with_rollbacks().await)?
-                    {
+                    match ctx.consume("stake_updates_reader", reader.read_with_rollbacks().await)? {
                         RollbackWrapper::Normal((_, updates_msg)) => {
                             stake_registration_updates = updates_msg.updates.clone();
                         }

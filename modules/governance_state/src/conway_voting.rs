@@ -194,20 +194,21 @@ impl CastVotes {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ConwayVoting {
     conway: Option<ConwayParams>,
     bootstrap: Option<bool>,
 
-    pub proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
+    pub proposals: imbl::HashMap<GovActionId, (u64, ProposalProcedure)>,
     pub proposal_order: Vec<GovActionId>,
-    pub pending_votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
-    pub votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
+    pub pending_votes: imbl::HashMap<GovActionId, imbl::HashMap<Voter, (TxHash, VotingProcedure)>>,
+    pub votes: imbl::HashMap<GovActionId, imbl::HashMap<Voter, (TxHash, VotingProcedure)>>,
     action_status: HashMap<GovActionId, ActionStatus>,
 
     verify_votes_files: Option<String>,
     verification_output_file: Option<String>,
-    reference_aggregates: HashMap<(u64, GovActionId), (AggregatedVotes, AggregatedVotesOutcome)>,
+    reference_aggregates:
+        imbl::HashMap<(u64, GovActionId), (AggregatedVotes, AggregatedVotesOutcome)>,
     action_proposal_count: usize,
     votes_count: usize,
 }
@@ -220,7 +221,7 @@ impl ConwayVoting {
     ) -> Result<Self> {
         let reference_aggregates = match verify_aggregates_file {
             Some(file) => AggregatedVotes::get_from_file(Path::new(&file))?,
-            None => HashMap::new(),
+            None => imbl::HashMap::new(),
         };
 
         Ok(Self {
@@ -514,8 +515,8 @@ impl ConwayVoting {
     fn get_actual_votes(
         &self,
         action_id: &GovActionId,
-        drep_stake: &HashMap<DRepCredential, Lovelace>,
-        spo_stake: &HashMap<PoolId, DelegatedStake>,
+        drep_stake: &imbl::HashMap<DRepCredential, Lovelace>,
+        spo_stake: &imbl::HashMap<PoolId, DelegatedStake>,
         default_vote_list: &[(PoolId, DelegatedStakeDefaultVote)],
     ) -> Result<CastVotes> {
         let mut cast_votes = CastVotes::default();
@@ -579,7 +580,7 @@ impl ConwayVoting {
                 };
 
                 let Some(stake) = spo_stake.get(pool) else {
-                    warn!("Pool {pool}: has no stake, although has default vote {vote:?}");
+                    debug!("Pool {pool}: has no stake, although has default vote {vote:?}");
                     continue;
                 };
 
@@ -592,7 +593,7 @@ impl ConwayVoting {
 
     /// Checks whether action is expired at the beginning of new_epoch
     pub fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> Result<bool> {
-        info!(
+        debug!(
             "Checking whether {} is expired at new epoch {}",
             action_id, new_epoch
         );
@@ -658,8 +659,8 @@ impl ConwayVoting {
         new_epoch: u64,
         voting_state: &VotingRegistrationState,
         action_id: &GovActionId,
-        drep_stake: &HashMap<DRepCredential, Lovelace>,
-        spo_stake: &HashMap<PoolId, DelegatedStake>,
+        drep_stake: &imbl::HashMap<DRepCredential, Lovelace>,
+        spo_stake: &imbl::HashMap<PoolId, DelegatedStake>,
         default_vote: &[(PoolId, DelegatedStakeDefaultVote)],
     ) -> Result<Option<VotingOutcome>> {
         let cast_votes = self.get_actual_votes(action_id, drep_stake, spo_stake, default_vote)?;
@@ -670,11 +671,11 @@ impl ConwayVoting {
         if let Some(ref_file) = self.apply_votes_pattern(action_id, new_epoch - 1) {
             let ref_path = Path::new(&ref_file);
             if ref_path.exists() {
-                info!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}'...");
+                debug!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}'...");
                 let reference_votes = CastVotes::new_from_file(ref_path)?;
                 cast_votes.compare(new_epoch, action_id, &reference_votes);
             } else {
-                info!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}' not found, skipping");
+                debug!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}' not found, skipping");
             }
         }
 
@@ -693,15 +694,15 @@ impl ConwayVoting {
             self.reference_aggregates.get(&(new_epoch - 1, action_id.clone()))
         {
             if ref_v != &aggregated {
-                warn!("Verifying {action_id} at {new_epoch}: computed {aggregated} != reference {ref_v}");
+                error!("Verifying {action_id} at {new_epoch}: computed {aggregated} != reference {ref_v}");
             } else {
-                info!("Verifying {action_id} at {new_epoch}: votes {aggregated}, ok");
+                debug!("Verifying {action_id} at {new_epoch}: votes {aggregated}, ok");
             }
 
             if ref_oc != &aggregated_outcome {
                 error!("Verifying voting outcome: {action_id} at {new_epoch}: computed {aggregated_outcome} != reference {ref_oc}");
             } else {
-                info!("Verifying voting outcome: {action_id} at {new_epoch}: {ref_oc}, ok");
+                debug!("Verifying voting outcome: {action_id} at {new_epoch}: {ref_oc}, ok");
             }
         }
 
@@ -819,8 +820,8 @@ impl ConwayVoting {
         &mut self,
         new_block: &BlockInfo,
         voting_state: &VotingRegistrationState,
-        drep_stake: &HashMap<DRepCredential, Lovelace>,
-        spo_stake: &HashMap<PoolId, DelegatedStake>,
+        drep_stake: &imbl::HashMap<DRepCredential, Lovelace>,
+        spo_stake: &imbl::HashMap<PoolId, DelegatedStake>,
         default_vote: &[(PoolId, DelegatedStakeDefaultVote)],
     ) -> Result<Vec<GovernanceOutcome>> {
         let mut outcome = Vec::<GovernanceOutcome>::new();
@@ -828,7 +829,7 @@ impl ConwayVoting {
 
         let proposals = self.proposal_order.clone();
         for action_id in proposals.iter() {
-            info!(
+            debug!(
                 "Epoch {} started: processing action {}; delaying {}",
                 new_block.epoch, action_id, delay_ratification
             );
@@ -903,12 +904,12 @@ impl ConwayVoting {
                     format!(" {p:?} ")
                 }
             };
-            info!("Epoch start {new_epoch}, {action_id}: {proposal} => {voting_procedure:?}",)
+            debug!("Epoch start {new_epoch}, {action_id}: {proposal} => {voting_procedure:?}",)
         }
 
         if !proposal_procedures.is_empty() {
             let pp = proposal_procedures.into_iter().map(|x| format!("{x},")).collect::<String>();
-            info!(
+            debug!(
                 "Proposal procedures at {new_epoch} without 'votes' records: [{}]",
                 pp
             );
@@ -949,7 +950,8 @@ impl ConwayVoting {
     }
 
     pub fn include_pending_votes(&mut self) -> Result<()> {
-        for (action_id, pending) in self.pending_votes.drain() {
+        let pending_votes = std::mem::take(&mut self.pending_votes);
+        for (action_id, pending) in pending_votes {
             let votes = self.votes.entry(action_id).or_default();
             for (voter, (tx_hash, voting_proc)) in pending.into_iter() {
                 votes.insert(voter, (tx_hash, voting_proc));

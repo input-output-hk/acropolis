@@ -265,12 +265,10 @@ impl AccountsState {
             // Init drains the epoch-0 bootstrap messages, so the main loop only
             // synchronizes these side readers on rollbacks and real transitions.
             if primary.should_read_epoch_transition_messages() {
-                match ctx
-                    .consume_sync("readers.params", readers.params.read_with_rollbacks().await)?
-                {
+                match ctx.consume("readers.params", readers.params.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, params_msg)) => {
                         info_span!("account_state.handle_parameters", block = block_info.number)
-                            .in_scope(|| state.handle_parameters(&params_msg));
+                            .in_scope(|| state.handle_parameters(block_info.epoch, &params_msg))?;
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
@@ -348,7 +346,7 @@ impl AccountsState {
                 };
 
                 // Handle SPOs
-                match ctx.consume_sync("readers.spos", readers.spos.read_with_rollbacks().await)? {
+                match ctx.consume("readers.spos", readers.spos.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, spo_msg)) => {
                         info_span!("account_state.handle_spo_state", block = block_info.number)
                             .in_scope(|| state.handle_spo_state(&spo_msg));
@@ -357,7 +355,7 @@ impl AccountsState {
                 }
 
                 // Handle epoch activity
-                match ctx.consume_sync(
+                match ctx.consume(
                     "readers.epoch_activity",
                     readers.epoch_activity.read_with_rollbacks().await,
                 )? {
@@ -398,7 +396,7 @@ impl AccountsState {
                 };
 
                 // Handle governance outcomes (enacted/expired proposals) at epoch boundary
-                match ctx.consume_sync(
+                match ctx.consume(
                     "readers.gov_outcomes",
                     readers.gov_outcomes.read_with_rollbacks().await,
                 )? {
@@ -480,7 +478,7 @@ impl AccountsState {
             }
 
             // Handle withdrawals
-            match ctx.consume_sync(
+            match ctx.consume(
                 "readers.withdrawals",
                 readers.withdrawals.read_with_rollbacks().await,
             )? {
@@ -501,7 +499,7 @@ impl AccountsState {
             }
 
             // Handle stake address deltas
-            match ctx.consume_sync(
+            match ctx.consume(
                 "stake_deltas_reader",
                 readers.stake_deltas.read_with_rollbacks().await,
             )? {
@@ -517,7 +515,7 @@ impl AccountsState {
                 RollbackWrapper::Rollback(_) => {}
             }
 
-            match ctx.consume_sync(
+            match ctx.consume(
                 "governance_procedures_reader",
                 readers.gov_procedures.read_with_rollbacks().await,
             )? {

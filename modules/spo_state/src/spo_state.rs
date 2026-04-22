@@ -264,7 +264,7 @@ impl SPOState {
             }
 
             // handle blocks (handle_mint) before handle_tx_certs in case of epoch boundary
-            match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
+            match ctx.consume("block_reader", block_reader.read_with_rollbacks().await)? {
                 RollbackWrapper::Normal((block_info, block_msg)) => {
                     let span =
                         info_span!("spo_state.handle_block_header", block = block_info.number);
@@ -344,9 +344,7 @@ impl SPOState {
             // synchronizes these side readers on rollbacks and real transitions.
             if primary.should_read_epoch_transition_messages() {
                 // Handle ProtocolParamsMessage
-                match ctx
-                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
-                {
+                match ctx.consume("params_reader", params_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, params_msg)) => {
                         let span =
                             info_span!("spo_state.handle_parameters", block = block_info.number);
@@ -361,7 +359,7 @@ impl SPOState {
 
                 if let Some(reader) = spdd_reader.as_mut() {
                     // Handle SPDD
-                    match ctx.consume_sync("spdd", reader.read_with_rollbacks().await)? {
+                    match ctx.consume("spdd", reader.read_with_rollbacks().await)? {
                         RollbackWrapper::Normal((block_info, spdd_message)) => {
                             // update epochs_history
                             epochs_history.handle_spdd(&block_info, &spdd_message);
@@ -372,9 +370,7 @@ impl SPOState {
 
                 // Handle SPO rewards
                 if let Some(reader) = spo_rewards_reader.as_mut() {
-                    match ctx
-                        .consume_sync("spo_rewards_reader", reader.read_with_rollbacks().await)?
-                    {
+                    match ctx.consume("spo_rewards_reader", reader.read_with_rollbacks().await)? {
                         RollbackWrapper::Normal((block_info, spo_rewards_message)) => {
                             let span = info_span!(
                                 "spo_state.handle_spo_rewards",
@@ -396,7 +392,7 @@ impl SPOState {
 
                 // Handle Stake Reward Deltas
                 if let Some(reader) = stake_reward_deltas_reader.as_mut() {
-                    match ctx.consume_sync(
+                    match ctx.consume(
                         "stake_reward_deltas_reader",
                         reader.read_with_rollbacks().await,
                     )? {
@@ -423,7 +419,7 @@ impl SPOState {
                 // Handle EpochActivityMessage
                 if let Some(reader) = epoch_activity_reader.as_mut() {
                     match ctx
-                        .consume_sync("epoch_activity_reader", reader.read_with_rollbacks().await)?
+                        .consume("epoch_activity_reader", reader.read_with_rollbacks().await)?
                     {
                         RollbackWrapper::Normal((block_info, epoch_activity_message)) => {
                             let span = info_span!(
@@ -451,7 +447,7 @@ impl SPOState {
 
             // Handle withdrawals
             if let Some(reader) = withdrawals_reader.as_mut() {
-                match ctx.consume_sync("withdrawals_reader", reader.read_with_rollbacks().await)? {
+                match ctx.consume("withdrawals_reader", reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, withdrawals_msg)) => {
                         let span =
                             info_span!("spo_state.handle_withdrawals", block = block_info.number);
@@ -470,7 +466,7 @@ impl SPOState {
 
             // Handle stake deltas
             if let Some(reader) = stake_deltas_reader.as_mut() {
-                match ctx.consume_sync("stake_deltas_reader", reader.read_with_rollbacks().await)? {
+                match ctx.consume("stake_deltas_reader", reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, deltas_msg)) => {
                         let span =
                             info_span!("spo_state.handle_stake_deltas", block = block_info.number);
@@ -489,7 +485,7 @@ impl SPOState {
 
             // Handle governance
             if let Some(reader) = gov_reader.as_mut() {
-                match ctx.consume_sync("gov_reader", reader.read_with_rollbacks().await)? {
+                match ctx.consume("gov_reader", reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, governance_msg)) => {
                         let span =
                             info_span!("spo_state.handle_governance", block = block_info.number);

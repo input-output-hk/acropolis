@@ -208,7 +208,7 @@ impl DRepState {
             // Keep the params reader synchronized on new epochs and explicit rollbacks.
             let epoch = primary.epoch();
             if primary.should_read_epoch_transition_messages() {
-                match ctx.consume_sync(
+                match ctx.consume(
                     "params_reader",
                     subs.params_reader.read_with_rollbacks().await,
                 )? {
@@ -259,7 +259,7 @@ impl DRepState {
                 .await;
             }
 
-            match ctx.consume_sync("gov_reader", subs.gov_reader.read_with_rollbacks().await)? {
+            match ctx.consume("gov_reader", subs.gov_reader.read_with_rollbacks().await)? {
                 RollbackWrapper::Normal((blk_info, gov)) => {
                     let span = info_span!("drep_state.handle_votes", block = blk_info.number);
                     async {
