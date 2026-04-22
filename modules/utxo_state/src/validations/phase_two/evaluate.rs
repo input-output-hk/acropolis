@@ -460,15 +460,13 @@ mod tests {
         matches Ok(());
         "conway - valid transaction 4 - with 3 Plutus V2 Script"
     )]
-    // TODO:
-    // make this test case pass
-    // #[test_case(validation_fixture!(
-    //     "conway",
-    //     "74558bb6b317b59612a68cc9d3a4ced4038f26ad9b179d83133480f1a246199d"
-    // ) =>
-    //     matches Ok(());
-    //     "conway - valid transaction 5 - with 2 Plutus V2 Scripts"
-    // )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "74558bb6b317b59612a68cc9d3a4ced4038f26ad9b179d83133480f1a246199d"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 5 - with 2 Plutus V2 Scripts"
+    )]
     #[test_case(validation_fixture!(
         "conway",
         "2c4f36c252265ffadf89c460de2394af258a45e8093bd1c4684bf86b6ab51704"
@@ -490,6 +488,15 @@ mod tests {
         matches Ok(());
         "conway - valid transaction 8 - with 1 Plutus V2 Mint script with duplicate redeemer pointers"
     )]
+    // TODO:
+    // Make this test pass
+    // #[test_case(validation_fixture!(
+    //     "conway",
+    //     "6f5ef8b9aaeb7bf6242b34c1191622448960901e704ff92968498c2f426cbef0"
+    // ) =>
+    //     matches Ok(());
+    //     "conway - valid transaction 9 - with 1 Plutus V3 Cert script"
+    // )]
     #[test_case(validation_fixture!(
         "conway",
         "332aac636f8476b1a91c0071a445103d8f55309c23bfddaf242732630efcf0ec",
