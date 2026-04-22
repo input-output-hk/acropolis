@@ -7,7 +7,7 @@ stop = "epoch:211"
 # Core Module Configurations
 # ============================================================================
 [module.fake-block-injector]
-block-files = "test-vrf-wrong-genesis-leader/block.*.cbor"
+block-files = "test-vrf-wrong-leader/block.*.cbor"
 
 [module.consensus]
 # List of validation result topics to listen on
