@@ -30,6 +30,10 @@ The peer network interface module in `consensus` mode publishes messages in `car
 `cardano.block.offered` and `cardano.block.rescinded` topics. It subscribes to `cardano.block.wanted` and
 `cardano.block.rejected` topics.
 
+When the sync-point mode is set to `dynamic`, the module will subscribe for `cardano.sync.command` and wait for
+`Command::ChainSync(ChainSyncCommand::FindIntersect(Point))`, which is how PNI is switching from Mithril to upstream
+fetching.
+
 ## Architecture
 
 This module uses an event-queue-based architecture. A `NetworkManager` is responsible for creating a set of
