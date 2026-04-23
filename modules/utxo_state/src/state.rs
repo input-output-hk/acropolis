@@ -449,7 +449,7 @@ impl State {
             // and remove from both maps
             let spent_utxos = self.volatile_spent.prune_before(boundary);
             if !spent_utxos.is_empty() {
-                info!("Removing {} immutably spent UTXOs", spent_utxos.len());
+                debug!("Removing {} immutably spent UTXOs", spent_utxos.len());
                 for key in spent_utxos {
                     // Remove from volatile, and only if not there, from immutable
                     if self.volatile_utxos.remove(&key).is_none() {
@@ -461,7 +461,7 @@ impl State {
             // Prune the created index too, and transfer the UTXOs to immutable
             let created_utxos = self.volatile_created.prune_before(boundary);
             if !created_utxos.is_empty() {
-                info!(
+                debug!(
                     "Moving {} volatile UTXOs into immutable",
                     created_utxos.len()
                 );
