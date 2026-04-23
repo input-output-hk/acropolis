@@ -1,0 +1,12 @@
+[module.consensus]
+# List of validation result topics to listen on
+validators = [
+# Add these once they are actually being sent
+           "cardano.validation.vrf",
+           "cardano.validation.kes",
+#           "cardano.validation.utxo",
+#           "cardano.validation.spo"
+]
+# By default, the consesus module will skip validation for blocks 
+# from the Mithril snapshot but this can be set to true to force validation
+force-validation = true
