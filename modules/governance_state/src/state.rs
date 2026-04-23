@@ -19,7 +19,7 @@ use acropolis_common::{
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
 use imbl::HashMap;
-use tracing::{debug, info};
+use tracing::debug;
 
 #[derive(Default, Clone)]
 pub struct State {
@@ -208,7 +208,7 @@ impl State {
             self.conway_voting.include_pending_votes()?;
             let acc = ratified.iter().filter(|oc| oc.voting.accepted).count();
 
-            info!(
+            debug!(
                 "Conway voting, epoch {} ({}): {voting_state}, total {} actions, {acc} accepted",
                 new_block.epoch,
                 new_block.era,
@@ -227,7 +227,7 @@ impl State {
     }
 
     pub fn log_stats(&self) {
-        info!(
+        debug!(
             "{}, {}, drep stake msgs (size): {} ({})",
             self.alonzo_babbage_voting.get_stats(),
             self.conway_voting.get_stats(),

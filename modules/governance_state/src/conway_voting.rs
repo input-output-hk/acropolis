@@ -488,7 +488,7 @@ impl ConwayVoting {
         };
         let committee_ok = Self::check_committee_validity(new_epoch, proposal, conway_params)?;
         let accepted = previous_ok && committee_ok && voted;
-        info!(
+        debug!(
             "Proposal {action_id}: enactment epoch {new_epoch}, votes {votes}, \
              thresholds {threshold}, prevous_ok {previous_ok}, bootstrap {bootstrap}, \
              voted {voted}, committee {committee_ok}, result {accepted}"

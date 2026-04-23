@@ -12,7 +12,7 @@ use acropolis_common::{
 use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc;
 use tokio::task::{spawn_blocking, JoinHandle};
-use tracing::{error, info};
+use tracing::{debug, error};
 
 #[derive(Debug, Default)]
 pub(crate) struct AccountsRuntime {
@@ -96,7 +96,7 @@ impl RewardRuntime {
 
         if epoch_slot >= self.stability_window_slot {
             if let Some(tx) = self.start_rewards_tx.take() {
-                info!(
+                debug!(
                     "Starting rewards calculation at block {}, epoch slot {}",
                     block_number, epoch_slot
                 );

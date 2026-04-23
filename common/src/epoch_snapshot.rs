@@ -80,7 +80,7 @@ impl EpochSnapshot {
         registration_changes: Vec<RegistrationChange>,
         two_previous_snapshot: std::sync::Arc<EpochSnapshot>,
     ) -> Self {
-        use tracing::{debug, info};
+        use tracing::debug;
 
         let mut snapshot = EpochSnapshot {
             epoch,
@@ -205,7 +205,7 @@ impl EpochSnapshot {
         let total_rewards: u64 = stake_addresses.values().map(|sas| sas.rewards).sum();
 
         // Log to be comparable with the DBSync ada_pots table
-        info!(
+        debug!(
             epoch,
             treasury = pots.treasury,
             reserves = pots.reserves,

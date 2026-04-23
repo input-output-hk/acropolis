@@ -483,7 +483,7 @@ impl State {
     async fn log_stats(&self) {
         let n_immutable = self.immutable_utxos.len().await.unwrap_or_default();
         let n_valid = self.count_valid_utxos().await;
-        info!(
+        debug!(
             slot = self.last_slot,
             number = self.last_number,
             immutable_utxos = n_immutable,

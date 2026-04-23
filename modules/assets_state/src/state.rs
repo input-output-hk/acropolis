@@ -10,7 +10,7 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 const CIP67_LABEL_222: [u8; 4] = [0x00, 0x0d, 0xe1, 0x40];
 const CIP67_LABEL_333: [u8; 4] = [0x00, 0x14, 0xdf, 0x10];
@@ -253,7 +253,7 @@ impl State {
         } else if let Some(transactions) = &self.transactions {
             self.log_assets(transactions.len());
         } else {
-            info!("asset_state storage disabled in config");
+            debug!("asset_state storage disabled in config");
         }
 
         Ok(())

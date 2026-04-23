@@ -22,7 +22,7 @@ use acropolis_common::{PoolRegistrationOutcome, PoolRegistrationUpdate};
 use anyhow::{anyhow, Result};
 use imbl::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::{debug, info};
+use tracing::debug;
 
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 
@@ -244,7 +244,7 @@ impl State {
     }
 
     fn log_stats(&self) {
-        info!(
+        debug!(
             num_spos = self.spos.keys().len(),
             num_pending_deregistrations =
                 self.pending_deregistrations.values().map(|d| d.len()).sum::<usize>(),

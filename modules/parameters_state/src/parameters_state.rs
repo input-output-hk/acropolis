@@ -21,7 +21,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{debug, error, info, info_span, Instrument};
 
 mod alonzo_genesis;
 mod genesis_params;
@@ -131,7 +131,7 @@ impl ParametersState {
 
                             // Commit state on params change
                             if current_params != new_params.params {
-                                info!(
+                                debug!(
                                     "New parameter set enacted [from epoch, params]: [{},{}]",
                                     block.epoch,
                                     serde_json::to_string(&new_params.params)?
