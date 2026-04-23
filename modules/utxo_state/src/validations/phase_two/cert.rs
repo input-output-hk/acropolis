@@ -5,16 +5,31 @@ use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::to_plutus_data::*;
 
-impl ToPlutusData for TxCertificate {
-    fn to_plutus_data<'a>(
-        &self,
-        arena: &'a Arena,
-        version: PlutusVersion,
-    ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-        match version {
-            PlutusVersion::V1 | PlutusVersion::V2 => encode_dcert(self, arena, version),
-            PlutusVersion::V3 => encode_tx_cert(self, arena, version),
-        }
+/// Conway bootstrap phase covers protocol major version 9.
+///
+/// Matches the Haskell ledger's `hardforkConwayBootstrapPhase` in
+/// `Cardano.Ledger.Conway.Era`. During this phase, the `Maybe Lovelace`
+/// deposit/refund fields on `TxCertRegStaking`/`TxCertUnRegStaking` are
+/// translated to `Nothing` regardless of the actual deposit on the cert.
+fn is_conway_bootstrap(protocol_major_version: u64) -> bool {
+    protocol_major_version == 9
+}
+
+/// Encode a certificate as PlutusData for the given Plutus version.
+///
+/// V1/V2 uses the legacy `DCert` encoding (deposit-independent).
+/// V3 uses the Conway `TxCert` encoding, which depends on protocol version
+/// for stake registration/deregistration certificates during the bootstrap
+/// phase.
+pub fn encode_cert<'a>(
+    cert: &TxCertificate,
+    arena: &'a Arena,
+    version: PlutusVersion,
+    protocol_major_version: u64,
+) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+    match version {
+        PlutusVersion::V1 | PlutusVersion::V2 => encode_dcert(cert, arena, version),
+        PlutusVersion::V3 => encode_tx_cert(cert, arena, version, protocol_major_version),
     }
 }
 
@@ -81,7 +96,15 @@ fn encode_tx_cert<'a>(
     cert: &TxCertificate,
     arena: &'a Arena,
     version: PlutusVersion,
+    protocol_major_version: u64,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+    // During Conway bootstrap (protocol v9), the Haskell ledger translates
+    // the `Maybe Lovelace` on RegStaking/UnRegStaking as `Nothing` even when
+    // the underlying cert carries a deposit/refund. See
+    // `cardano-ledger/eras/conway/impl/src/Cardano/Ledger/Conway/TxInfo.hs`
+    // (`transTxCert`).
+    let bootstrap = is_conway_bootstrap(protocol_major_version);
+
     match cert {
         TxCertificate::StakeRegistration(addr) => {
             let cred = addr.credential.to_plutus_data(arena, version)?;
@@ -91,9 +114,13 @@ fn encode_tx_cert<'a>(
         }
         TxCertificate::Registration(reg) => {
             let cred = reg.stake_address.credential.to_plutus_data(arena, version)?;
-            let deposit = reg.deposit.to_plutus_data(arena, version)?;
-            let just = constr(arena, 0, vec![deposit]);
-            Ok(constr(arena, 0, vec![cred, just]))
+            let maybe_deposit = if bootstrap {
+                constr(arena, 1, vec![])
+            } else {
+                let deposit = reg.deposit.to_plutus_data(arena, version)?;
+                constr(arena, 0, vec![deposit])
+            };
+            Ok(constr(arena, 0, vec![cred, maybe_deposit]))
         }
         TxCertificate::StakeDeregistration(addr) => {
             let cred = addr.credential.to_plutus_data(arena, version)?;
@@ -103,9 +130,13 @@ fn encode_tx_cert<'a>(
         }
         TxCertificate::Deregistration(dereg) => {
             let cred = dereg.stake_address.credential.to_plutus_data(arena, version)?;
-            let refund = dereg.refund.to_plutus_data(arena, version)?;
-            let just = constr(arena, 0, vec![refund]);
-            Ok(constr(arena, 1, vec![cred, just]))
+            let maybe_refund = if bootstrap {
+                constr(arena, 1, vec![])
+            } else {
+                let refund = dereg.refund.to_plutus_data(arena, version)?;
+                constr(arena, 0, vec![refund])
+            };
+            Ok(constr(arena, 1, vec![cred, maybe_refund]))
         }
         TxCertificate::StakeDelegation(deleg) => {
             let cred = deleg.stake_address.credential.to_plutus_data(arena, version)?;
