@@ -1,7 +1,7 @@
 use acropolis_common::{
     validation::ScriptContextError, Deregistration, Registration, TxCertificate,
 };
-use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
+use amaru_uplc::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::to_plutus_data::*;
 

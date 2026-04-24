@@ -3,7 +3,7 @@ use acropolis_common::{
     validation::ScriptContextError, CostModel, CostModels, Credential, DRepVotingThresholds,
     ExUnitPrices, ExUnits, PoolVotingThresholds, ProtocolParamUpdate,
 };
-use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
+use amaru_uplc::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 /// Trait for converting Acropolis domain types into arena-allocated PlutusData.
 ///

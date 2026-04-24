@@ -5,8 +5,8 @@ use acropolis_common::{
     TxCertificateWithPos, TxHash, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, Voter,
     VotingProcedures, Withdrawal,
 };
+use amaru_uplc::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::cert::encode_cert;
 use super::governance::*;

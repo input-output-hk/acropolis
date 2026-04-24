@@ -6,8 +6,8 @@
 use acropolis_common::{
     protocol_params::ProtocolParams, validation::UTxOWValidationError, ReferenceScript,
 };
+use amaru_uplc::{arena::Arena, binder::DeBruijn, flat, machine::PlutusVersion, program::Program};
 use rayon::prelude::*;
-use uplc_turbo::{arena::Arena, binder::DeBruijn, flat, machine::PlutusVersion, program::Program};
 
 /// NEW Babbage Validation Rules
 /// Since Babbage introduces **reference scripts** and **inline datums**, this requires new UTxOW validation rules.

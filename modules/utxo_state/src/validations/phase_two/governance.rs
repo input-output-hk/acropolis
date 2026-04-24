@@ -2,7 +2,7 @@ use acropolis_common::{
     validation::ScriptContextError, Credential, DRepChoice, GovActionId, GovernanceAction,
     ProposalProcedure, StakeAddress, Vote, Voter, VotingProcedures, Withdrawal,
 };
-use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
+use amaru_uplc::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use crate::validations::phase_two::utils::cmp_withdrawal;
 
