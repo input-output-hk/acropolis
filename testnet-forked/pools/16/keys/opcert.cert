@@ -1,0 +1,5 @@
+{
+    "type": "NodeOperationalCertificate",
+    "description": "",
+    "cborHex": "82845820db8bdb269decb9556905dba53aa9d3bc7ca9033814c23a0a03ca198d1e3ebb3200005840c580f221c01836e46c4cd6138cd2f376d58b29d76fef4cbad433cb3849a476cb40ead61af7a7704b7dfdb9d0d5302726a8da37e555cacab49d24941cd5b884045820ba50e0b30b9532a5d196202c8438a5e3f5bdaa6ecc7aa074cf5798fc3dfd4804"
+}

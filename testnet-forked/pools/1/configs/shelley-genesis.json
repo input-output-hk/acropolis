@@ -1,0 +1,981 @@
+{
+  "activeSlotsCoeff": 0.05,
+  "epochLength": 432000,
+  "genDelegs": {
+    "2c10df0e87bce4e1e347bf8c338aace17b76fb9e64a9c7102682d82b": {
+      "delegate": "93412bd9a4692632ef8c3065cc3f19f240629038ef123e40fa24dfe5",
+      "vrf": "d0f3b313958169df7c83f6ffc87cfff38eed2b5b916702e873945caf76dfb73a"
+    }
+  },
+  "initialFunds": {
+    "000f8685904e98bd7c2a8b3f6dafa1d1296a56acf96232da5c4b0d8d1229afdcca86af3abc9ae40b7430d58fff2528d5910a0dc05329faf667": 20000000000000,
+    "00107bf6ce5bc3cc8eee55df36500309676c527e9d8bb3064741558c85d6b45523b48ebc9bb4aa55d4987b2d9a1b6cd2bbb70d260fb28cc311": 20000000000000,
+    "001c71cbcd5408287bea0b5244678df73be86ee12def98ca6029a1dd181bd6fa7e2d55eff38db6fae1727ddaaf2fcd2633bfd5065ba5a14731": 20000000000000,
+    "001d9afccde2b8017f323d34637075746ae316586d9d8715830d3c2c7b15510f4151f00e2aefae6541913c33441e40087473919f783c199000": 20000000000000,
+    "001dc5a8ae2602141c803d245c938c1387028d66bfb9226d4ede5b8e8bac090fe112056bb684d33a975e20e10a788a7584209ee47470490b72": 20000000000000,
+    "002bbc0a759a7c086eb0910d32363d1c8732093ffb3f5955518bbd241ed105c3a46c522ae26fde17da6dc88cebffd2b56716c3c1034fd1c59a": 20000000000000,
+    "002eef8c5e30fd3b379490ea4111bd7b7b9cbb543c0c21caa377710e0697984e751feb46610f679e24c01fbbbee395d14afb20af795cd082ff": 20000000000000,
+    "0031246eaf17948d22912c5830ddff26fd2c26173918dd2075e1dca87ff7bc52fa6b59799d45ecb157282d5b5a8d1e64097432151bbdffd351": 20000000000000,
+    "003376e22c52c1418e82ea180d647791d964d6c9296b30a01147bf27680196e96aa84884a6bfb14ac2bf8b16b7237ba08bb36876263ccc0459": 20000000000000,
+    "00366afc5e90aeb211bb013ab67245ef996c4af86db5bba0efe81bffdd0c7a9e1816c3d1d028758c8d2840ae51629bc018924a32e73e5a7593": 20000000000000,
+    "0041bde0acb37d57889f6987369065e131213066435d3ea4455192ee5edfdaaae2ecac8f82175c3b5686a6711a6074d052bb6813950a9657e8": 20000000000000,
+    "0042870c01da3a1f5e1c4240a37039794c55e3eeabf047ff7bbc6336c9366c3dabb6e9ed00665dd54e3131b300fe75ff8bdf2c9c5d1248a662": 20000000000000,
+    "0042f2d79463b757bfc0d05d42ebb18fbd3b822dd06c03760de489f8d278e625d9fbe13b74afa999e682bf7accfb3df7e2b72ce1b9fec35e13": 20000000000000,
+    "0043aa1dfb8af56f4bdfcb5a9ca26bed9aa01b5ecede676e2ee368bd5dfb2b4e2ccb8381a9039bc52ce8de9baab7e4dbeb54fdff12efa91ada": 20000000000000,
+    "0047b48f868254e55b50c7b01426cd956fc4a87093f4e8f57b9b0d1d89092fdfb896789f17970abc0979713956964fd1dc1472c517813b89bd": 20000000000000,
+    "004a1c80ab3b37f09a96a7c3a542718b7e0847fb3ad4d063ca8c9ef785967795db5166a4e7e9fa2bf3a914720d0575ff6569f031ca6b4fc219": 20000000000000,
+    "0055c9a9d71f0915e89655927013982ed5a1c64ad7782b81235137781add1108b4b77f116ecd922ace0898abd4c2ca53261d7b5ed7603140fa": 20000000000000,
+    "006daf90c88d216dca4f9145c2913396ca847694462d59c6059429bfe84566b84f835e50657b8132712e19b95a23767edab35c410938c1791c": 20000000000000,
+    "0071e7ed77a1f76b29a3f3b63ec4440fa024c9170a0d40abec4416651f2f210b7ee86ab5e8f0c3d43028b32dde5718be9ff612aab342b62490": 20000000000000,
+    "0077d6821635686533bde612a1bfb493314b8a705fd15675faaebafd843486ff74a488fc3216c4ecb35eca23ecfe712cdfe7bd5838ca12ed9d": 20000000000000,
+    "00845193d33e99e6292e2a7e6240f704da0f3be2c46f4050967713841538bee61160c104af113642a9de2e42d5cbf7be2bbd8a8884feca77b1": 20000000000000,
+    "00a8e7e224beb14c55be3d62cf3bee54de7995a3e5632f88af286f894340ac51f28b75caef5675aea9f871be87c526136e1e8e7eb044159bc8": 20000000000000,
+    "00b88f2ae446fa5a79d40e94ca482bb14a385742c764af2919adb4e286dab74ac737cfba4b18b71439c0d09bb9b4a154336788c15c1c46e457": 20000000000000,
+    "00ccea9cf59336702b1f64512005daf16052313c83aea5c02b8f35062179bb79dc542398da73d5c450df2fbeb86a98b24c6d2a3fb21535bd78": 20000000000000,
+    "00d6fd503d310fa0aa7b84afa22aaabaa4401810a6a9749e43c6ccb856376c4cebb72d4389a789bc1a8425cb792a0c64a2d8c0e3c52986630f": 20000000000000,
+    "00d77fea624e11523dc6cdab0ab4eb39c13ba0ecfbd9f77b19f0dc5c4ba057085a3b8b8f902e25b9ac3f17fb9f16ee48ce67c9b13e6c6b6d6f": 20000000000000,
+    "00d98084baa751493911808ef71b72f5c6f9aeabb7b7a3e316b6f95ad497422efe0c1546030429540bd09efb4b29905341bc0234aaac471c94": 20000000000000,
+    "00e00dd219ffeeb4abc2939ac3717933b00eb71a2032610675d007df9a47947c4a61f46c53a1135cc1c572476cd794811ebffac7b51d3241cc": 20000000000000,
+    "00e6a0a4b4fe53bd90b3cbe5c8e8a8d7f0b8b49d3849f2da1a79d0461321c93765c14b52e2850397d7a4626013675feae1013f3c47c64e6fa5": 20000000000000,
+    "00f5e87104ded9cb1ac1d4b331f214bb7c9131ba6ff2e0fddc03e8265f6c6aca8f1657514d019274815573fdf37dbdcd3ab425acfd77e1361f": 20000000000000,
+    "600570f5ca4d7f99fdf2190ae0be90fc1948fc26b7557828c169b48a17": 20000000000000,
+    "6006d737a0f964d95ea7f35822e0d2ad4cb1df9671b33006db87bac7a8": 20000000000000,
+    "600d049da0a65ad6c7c466dc40b821ef2779d9c23b24ef2c292333b1ea": 20000000000000,
+    "6010f39b09aea5559fab276fbff086794006530b045edf85394b8ca4b4": 20000000000000,
+    "601a2032e426408df95794bb8d580bf24acc4ebfcf4cd359b78c7602bc": 20000000000000,
+    "602525a6a3f5f681aaa3637b93c05e3c97d2c1bd43a3f45160351a1ddf": 20000000000000,
+    "60269adc2edc2a11c6c754b237f5d1e66e59424264f02a15f0a4785f2a": 20000000000000,
+    "602b7e51004227e5ef6ea385dc1364f0c9a147d848e7249f7eba372527": 20000000000000,
+    "602d6ac0988d6613c1e0f912ab03a146bbc60a546be98bc303b7f074ca": 20000000000000,
+    "602dc261e9c209f55aaf24e9141d64e22d7d91145199ae94a62ad080be": 20000000000000,
+    "605246b508ba7450400a2152fb8676274eb967313381464b009ac8a8f0": 20000000000000,
+    "6058b4667c65c0caf346bce5ba6f8bc3f0bb416ab463e6a4aa6aeccce4": 20000000000000,
+    "60679c0596ff1ecef626e93bef4d034f88bc50a6150ef8f5616ca50922": 20000000000000,
+    "6069ab61303ae85ca3618e246fc6de4872cb8b53bacf3f5982ec6e1d1e": 20000000000000,
+    "60778faadfc8548dba3534845aa37c5652eebfd7635985a4ad76e9d9b2": 20000000000000,
+    "607e62ec8cb695e33cd5402e28d11214637a2396851a0934f2d90ac3f3": 20000000000000,
+    "608134ff93c5eafc39520306f0dcb9f5fe8bbfb7e8ef695350865038d7": 20000000000000,
+    "6082937e376e9ab5b254224076f103e9144c98c713f67a0791b2c4d104": 20000000000000,
+    "608666fc416e8dbe789ef83b0d393ddf12a761c93702c6d4090b03877f": 20000000000000,
+    "6089105882c6c86f273361eafac74999297a3c3885f0eeac6ccaac84a1": 20000000000000,
+    "608b81c3540067aa3e02eeb814652ac154d9837def8f70d6fe131840c3": 20000000000000,
+    "6094947e06949608ab15e3d8bd9faa37f4617327746fa57eabbacdb802": 20000000000000,
+    "6097325e330dce5c89d7971eb3e2fe7c89d6550ada47eae1ab03a1c386": 20000000000000,
+    "60a246dd99468f3bac37757dd8924134773528cd3eb6d782dc4bb61f75": 20000000000000,
+    "60a855078ac78bbafeaa07b91238fcfad5d63cc6f39b2752ea4b9d3a94": 20000000000000,
+    "60ac86ce6f1263f8d8b142073d36e1352ae17e7b127ec247a95062fe63": 20000000000000,
+    "60acb7c64bc18aaa3e3fda189505904784ec2293fef1557e547fb4e405": 20000000000000,
+    "60b5174334c36837fdbd57698bb26b92ad7beb16daecb76c8030b4e6cf": 20000000000000,
+    "60f281181b4f5cac00a95bb5eb9a774564ecf889c7bebe335a4a6f01a9": 20000000000000,
+    "60fa04d609a5a8064caaa776be2e795241d6318262475441a581570a3b": 20000000000000
+  },
+  "maxKESEvolutions": 62,
+  "maxLovelaceSupply": 45000000000000000,
+  "networkId": "Testnet",
+  "networkMagic": 42,
+  "protocolParams": {
+    "a0": 0.3,
+    "decentralisationParam": 0,
+    "eMax": 18,
+    "extraEntropy": {
+      "tag": "NeutralNonce"
+    },
+    "keyDeposit": 2000000,
+    "maxBlockBodySize": 90112,
+    "maxBlockHeaderSize": 1100,
+    "maxTxSize": 16384,
+    "minFeeA": 44,
+    "minFeeB": 155381,
+    "minPoolCost": 340000000,
+    "minUTxOValue": 1000000,
+    "nOpt": 150,
+    "poolDeposit": 500000000,
+    "protocolVersion": {
+      "major": 10,
+      "minor": 0
+    },
+    "rho": 0.003,
+    "tau": 0.2
+  },
+  "securityParam": 2160,
+  "slotLength": 1,
+  "slotsPerKESPeriod": 129600,
+  "staking": {
+    "pools": {
+      "011f423e84e59bce114735aff09ee2223a8851ce02661a47a8be03b4": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "011f423e84e59bce114735aff09ee2223a8851ce02661a47a8be03b4",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p19.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p19.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "006e95288a36e827ae8000899e4ee09b5869c32d4f2fcabb0f5f4a7a"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "3429e18bba7dcc1da08788b01bc2ce67c382119f9f19ff89a59adc3ed07af81a"
+      },
+      "0ab842cccce0b9f1940248bfb0af87b1fe3d15b21de32069aea9f70a": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "0ab842cccce0b9f1940248bfb0af87b1fe3d15b21de32069aea9f70a",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p29.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p29.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "2156a6ee9c970baa22bc6427ecbec08d4bb840d8e3b38f04f43e2d86"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "dd6efd421d42dd56fa5fda776ed112399ea4dae48f2437f7d08e6efd0d10ee40"
+      },
+      "1c02d69ffcdf3dc9ba518d39954334dab5ccb46ffdf961fa9c9b2430": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "1c02d69ffcdf3dc9ba518d39954334dab5ccb46ffdf961fa9c9b2430",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p28.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p28.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "ab2129e54dc6eda112c8814151dcf9fe72cb01434178ffdc96b585d6"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "3366ebef76f28eb84fb6fb33dac412e046d26671e50adc9d83f377f71291781a"
+      },
+      "22bc88768d98e896013f8fba276a84dc5baa4ed5c243587d579386de": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "22bc88768d98e896013f8fba276a84dc5baa4ed5c243587d579386de",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p8.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p8.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "34ba09bc81f4daff85cdc3332b09a873e84ae764744ba9d6af7e582b"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "5251349eeba3d4108a51ba719e9e2a92b9b22fa7d74e53130f8ef6d765858b0f"
+      },
+      "3c2f54b9f73941ab72390e8130de5dd2d8f2a641a2faf5242aa109b1": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "3c2f54b9f73941ab72390e8130de5dd2d8f2a641a2faf5242aa109b1",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p16.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p16.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "3cbfb3bfb2f932c7bfa1feca6754b51b02db695e375f14f2342ec684"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "2e9f7ac021b79fe7d6d8714675a0c90dae54624c9c762da1b9826b96b938c28f"
+      },
+      "51d598babaedfcb52a40350f89f5d6055e8641a6adf09e6cc1caec36": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "51d598babaedfcb52a40350f89f5d6055e8641a6adf09e6cc1caec36",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p22.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p22.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "6525401b581e95095b8822a3416a137d9611d85c9fac79b4de5c6901"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "88eb2f031bf6d209ff1a54c8e399b142c360955107dbfde3c194bd8391b32f8d"
+      },
+      "56f182afc68f86f55ddb5031e0d044914bee37a24fef8264e3468e62": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "56f182afc68f86f55ddb5031e0d044914bee37a24fef8264e3468e62",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p17.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p17.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "e371e77ffba2b812515847ee0698de437d2d3592867bb38e7a4656a4"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "9cc6063d49f92263dbbe869c6fa9c5e4aad4a07979508d0fe2d5f36617fb3a37"
+      },
+      "58aeb965f620a3fd927b0007b1f9e2c98d3a85bfeaed4361440beeac": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "58aeb965f620a3fd927b0007b1f9e2c98d3a85bfeaed4361440beeac",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p26.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p26.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "487c4c21e134b39f5fa33c014f3fd70c6ea6e0ab42ab4d82483381a4"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "4346d2ccc90ae64fc5ea60c2085555095b284b2e91ba48051f50fb2cce325b6d"
+      },
+      "61b698631584c30f5fb8e34bca4dd168e568d3744021aaad97447675": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "61b698631584c30f5fb8e34bca4dd168e568d3744021aaad97447675",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p15.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p15.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "0d509a43a7b80635e044752293be0d2e181c9cfd6daf99fb1403a75b"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "0f83df70278e53bd18a14399ce046c76fb19055b30a1812d45d166ac3875d77f"
+      },
+      "65088aa6572548762ebe038fa1b134c704c245705cc71af3fec3552f": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "65088aa6572548762ebe038fa1b134c704c245705cc71af3fec3552f",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p18.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p18.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "c778c1fc073b2a4391f95fd0a43b3fbe67ad99500a2e7f3dd99e4ac1"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "86457308627285e234ab50a6d5afbc7b7ea5926dec7d4d5cc5f91167d08d35c2"
+      },
+      "67046065badafbc6c16c96dcf3349c462d1c2629f7a2d9a903e23674": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "67046065badafbc6c16c96dcf3349c462d1c2629f7a2d9a903e23674",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p1.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p1.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "760c7f07de0afb9003f5c3c8913e658b18ebd42c104199e0ed9f6e66"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "7d3a69d01d3165acdd2e5143b9bd079bae4202cc4b83c90f50ab175aa446a151"
+      },
+      "6d5d9e013d94509e25f633dd5be3a5d564586401d09ee556c64e4ecd": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "6d5d9e013d94509e25f633dd5be3a5d564586401d09ee556c64e4ecd",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p20.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p20.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "e0048c4ea2b2a43710d0aeaa264b8e508c76e736f30335c827f7d36a"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "9a54212296d3ea220d5b194b04f2dab0aaa48c6454564a0b4e65620fab34c108"
+      },
+      "78f3b31d82c19e12235d7f24afcf7161b817a60bb6f1b1e8e92950a4": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "78f3b31d82c19e12235d7f24afcf7161b817a60bb6f1b1e8e92950a4",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p7.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p7.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "0a3ae8a4442dadf08890666c4371527f3f95d7528f7b32951cff6e9a"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "d9bdd195fb5a4a25e8129e1c15f0a4aded04b45e10d0dc26dbe66272df64e1c6"
+      },
+      "91767d32cc93d4348dd1b332770eceb58d28682ee343d2e2c76e8903": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "91767d32cc93d4348dd1b332770eceb58d28682ee343d2e2c76e8903",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p25.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p25.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "74c6455472705ab3317efc5a660a207f2bc2c302fdc96fb62de1131e"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "bf722e52c39dc8cc382b7405c2095dbcb914bb7fac821f1759b57d68e410238c"
+      },
+      "96956e6fedb4d144bdbe3a4409719a808add7a888cb3c92fa0e6ce65": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "96956e6fedb4d144bdbe3a4409719a808add7a888cb3c92fa0e6ce65",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p10.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p10.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "44cfa75aeac89d6dc04aeaba046974814dfc1eb9eba0ec328a8a8ea5"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "94266bbf8f6ac243948ab0077f3947b16af65599a32935a39a96c348be3e6fdd"
+      },
+      "9fc3b3167fcabc27ac25e227ac7aa124ca4bc681c84273a1dcd0bcea": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "9fc3b3167fcabc27ac25e227ac7aa124ca4bc681c84273a1dcd0bcea",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p23.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p23.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "22ca1b80a12a889f39b2e81635aff2a25c6c0d862072e48ebe8382a1"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "e617a11b2aad09d500e8673ff23c06dd8afceab8cdde78c4267c8867ff63dd0a"
+      },
+      "a90930dcfc5615f7647b92eb60ae1a16525be8042be157380030eb6a": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "a90930dcfc5615f7647b92eb60ae1a16525be8042be157380030eb6a",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p30.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p30.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "1d5296aff8ecd2e4abf337f05375ad3125f2c1e81e0ee84095218e8a"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "859045322030e607f17098ea106991732dda6736fae800a1c9f8ebf0fd7cb285"
+      },
+      "acb7e1588f4e7e8e4334307d863451446dc818ebfa5e3c340c20715e": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "acb7e1588f4e7e8e4334307d863451446dc818ebfa5e3c340c20715e",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p3.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p3.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "25d18641f8d2a16ae1bea53a059901161b5549ec6b3dc9f8598002af"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "2366d9aa1467e1c9da922670f040446844114ef18b824d17687425ce3c3cd6eb"
+      },
+      "af74e6d9d28c35f839b176624de8f90dc44529d2b0772f16118d6b9e": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "af74e6d9d28c35f839b176624de8f90dc44529d2b0772f16118d6b9e",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p4.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p4.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "c05905a274eac481e7115f4c777b5fc19378aee11719388fa6c3f4c7"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "322b87722ab2d67b736f2c90997ac92df836fb4614a480cf7a971c0393f9427f"
+      },
+      "b177e1c20e44fccec083a72797a59151c9be978e786d0ddc81d24f50": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "b177e1c20e44fccec083a72797a59151c9be978e786d0ddc81d24f50",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p21.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p21.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "4db8003ffa2a39e2f4a64d7530e8ccdf6b290a118a0b08b2c1cf542e"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "c783ddeb818c9c52a114e7b0a354f73d5a7f165e7d2f96df43dc4962036b2305"
+      },
+      "b4f1b8c3312eaa6de1e58b170d794714ce3efd8e29d2c0382f4fb908": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "b4f1b8c3312eaa6de1e58b170d794714ce3efd8e29d2c0382f4fb908",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p9.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p9.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "5ce7a5c82a75841ef93613338b8e038e072330c3c34514869fb1e232"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "44ac6e32db676a8a0153887eeec6bc9445480573673b4badde83260362a0560c"
+      },
+      "b5e2b4ecfb6da49358033b32c0042cb7ec11455545602d2be5381f67": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "b5e2b4ecfb6da49358033b32c0042cb7ec11455545602d2be5381f67",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p11.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p11.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "8e9498065e0da09a228027159ea490f03b38c0926360167de7e4df7f"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "18c0b71be7ad9cd56acf98cc60b214e71e1608de7899681de4235b8dadc78cc3"
+      },
+      "c31ceeed8f40d3837089c28241e52e33269b160e4b1e281599853553": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "c31ceeed8f40d3837089c28241e52e33269b160e4b1e281599853553",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p5.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p5.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "e588d518c0aadb241782d37fc41708d97aeddb99ad4256617e90e7c5"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "42ba1f2a5619440442693e808f7e6d9d977445de0886d8f04c0ea03e8bd69b0a"
+      },
+      "c65c58b01d0f39a85424d633077bf89726884056184b1d124015a864": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "c65c58b01d0f39a85424d633077bf89726884056184b1d124015a864",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p13.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p13.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "b20710c9f05473ee8845e8486e31c771ff2301831e600404cb002696"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "9a27abe9020d4254e5c8ebedf8c5da4256eb440d58aa5cb745eb55b2f72ea0cd"
+      },
+      "d5cc27a10f78a651fc32e266263b52cd98595db38f4ce662ac518c62": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "d5cc27a10f78a651fc32e266263b52cd98595db38f4ce662ac518c62",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p12.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p12.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "44b2dd12b4a8880d317b98c075a8cd97015a380dbc9f35503221d44f"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "dd72677bb0ade24306895223d42048910bab7a8f66e2a470ca85e8211de7254a"
+      },
+      "d937e17d65f746433bb0999a9b7c895deaa2125f216891d9ab0f4f2c": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "d937e17d65f746433bb0999a9b7c895deaa2125f216891d9ab0f4f2c",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p24.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p24.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "a76f5332c23aab8ee97de4478a0b2ce5ac30963ff2c1420db7c9d887"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "795aee96fce7c65c2a365e1eb870b715783fab727114ca32d8e6cfa5dca66daf"
+      },
+      "dbbfe8c93d4d6d6f67d7bd16ed2ca870765acedd105038ebcd718998": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "dbbfe8c93d4d6d6f67d7bd16ed2ca870765acedd105038ebcd718998",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p27.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p27.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "f22a9484cb3017d53491c5a2b229097c8d7f80d335f4bc2a217d231c"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "3c74b047e8a06046d6d6269cd208134d2c0fe4e4a15be63a74d91fa37ba61982"
+      },
+      "e194afc9ac6df314761cafc5e203bbf37813d81617b3024471ceb7f8": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "e194afc9ac6df314761cafc5e203bbf37813d81617b3024471ceb7f8",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p2.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p2.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "6da3012a8ad471b98eda33f6b4673bb294737a7e8c46a5d84ebd4f12"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "dc4a11c75819067806406cf72a135afa274f15dd5ee85a9000f6dcc7c025b9da"
+      },
+      "f6f85c911ecb82d806d865edbf3149ef9aa1d610ded02ac375304b7f": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "f6f85c911ecb82d806d865edbf3149ef9aa1d610ded02ac375304b7f",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p14.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p14.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "3f35aae205dee7a0c38af1529699dc5b28f15e040e587b0c0e791769"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "d3e3ec3f2f1e22e007dcbd16587a93701c959993176eaa76e2deb01120811020"
+      },
+      "f843a814090f7aaaa371ccd49a88ab0197bf79b2841e1e18c5657d7e": {
+        "cost": 340000000,
+        "margin": 0.0,
+        "metadata": null,
+        "owners": [],
+        "pledge": 0,
+        "publicKey": "f843a814090f7aaaa371ccd49a88ab0197bf79b2841e1e18c5657d7e",
+        "relays": [
+          {
+            "single host name": {
+              "dnsName": "p6.testnet.local.net",
+              "port": 3001
+            }
+          },
+          {
+            "multi host name": {
+              "dnsName": "p6.testnet.local.net"
+            }
+          }
+        ],
+        "rewardAccount": {
+          "credential": {
+            "keyHash": "04d2a7b8caa0ebaba17ca728c0f379d746f50dde9c72a12a62c07907"
+          },
+          "network": "Testnet"
+        },
+        "vrf": "148c9fd25f0baa3839482891f8261c2e56d7d98fa8a129a154be2d475e689d03"
+      }
+    },
+    "stake": {
+      "0196e96aa84884a6bfb14ac2bf8b16b7237ba08bb36876263ccc0459": "d937e17d65f746433bb0999a9b7c895deaa2125f216891d9ab0f4f2c",
+      "092fdfb896789f17970abc0979713956964fd1dc1472c517813b89bd": "6d5d9e013d94509e25f633dd5be3a5d564586401d09ee556c64e4ecd",
+      "0c7a9e1816c3d1d028758c8d2840ae51629bc018924a32e73e5a7593": "b5e2b4ecfb6da49358033b32c0042cb7ec11455545602d2be5381f67",
+      "15510f4151f00e2aefae6541913c33441e40087473919f783c199000": "c31ceeed8f40d3837089c28241e52e33269b160e4b1e281599853553",
+      "1bd6fa7e2d55eff38db6fae1727ddaaf2fcd2633bfd5065ba5a14731": "d5cc27a10f78a651fc32e266263b52cd98595db38f4ce662ac518c62",
+      "21c93765c14b52e2850397d7a4626013675feae1013f3c47c64e6fa5": "22bc88768d98e896013f8fba276a84dc5baa4ed5c243587d579386de",
+      "29afdcca86af3abc9ae40b7430d58fff2528d5910a0dc05329faf667": "af74e6d9d28c35f839b176624de8f90dc44529d2b0772f16118d6b9e",
+      "2f210b7ee86ab5e8f0c3d43028b32dde5718be9ff612aab342b62490": "91767d32cc93d4348dd1b332770eceb58d28682ee343d2e2c76e8903",
+      "3486ff74a488fc3216c4ecb35eca23ecfe712cdfe7bd5838ca12ed9d": "3c2f54b9f73941ab72390e8130de5dd2d8f2a641a2faf5242aa109b1",
+      "366c3dabb6e9ed00665dd54e3131b300fe75ff8bdf2c9c5d1248a662": "51d598babaedfcb52a40350f89f5d6055e8641a6adf09e6cc1caec36",
+      "376c4cebb72d4389a789bc1a8425cb792a0c64a2d8c0e3c52986630f": "58aeb965f620a3fd927b0007b1f9e2c98d3a85bfeaed4361440beeac",
+      "38bee61160c104af113642a9de2e42d5cbf7be2bbd8a8884feca77b1": "011f423e84e59bce114735aff09ee2223a8851ce02661a47a8be03b4",
+      "40ac51f28b75caef5675aea9f871be87c526136e1e8e7eb044159bc8": "0ab842cccce0b9f1940248bfb0af87b1fe3d15b21de32069aea9f70a",
+      "4566b84f835e50657b8132712e19b95a23767edab35c410938c1791c": "65088aa6572548762ebe038fa1b134c704c245705cc71af3fec3552f",
+      "47947c4a61f46c53a1135cc1c572476cd794811ebffac7b51d3241cc": "78f3b31d82c19e12235d7f24afcf7161b817a60bb6f1b1e8e92950a4",
+      "6c6aca8f1657514d019274815573fdf37dbdcd3ab425acfd77e1361f": "e194afc9ac6df314761cafc5e203bbf37813d81617b3024471ceb7f8",
+      "78e625d9fbe13b74afa999e682bf7accfb3df7e2b72ce1b9fec35e13": "f843a814090f7aaaa371ccd49a88ab0197bf79b2841e1e18c5657d7e",
+      "79bb79dc542398da73d5c450df2fbeb86a98b24c6d2a3fb21535bd78": "61b698631584c30f5fb8e34bca4dd168e568d3744021aaad97447675",
+      "967795db5166a4e7e9fa2bf3a914720d0575ff6569f031ca6b4fc219": "96956e6fedb4d144bdbe3a4409719a808add7a888cb3c92fa0e6ce65",
+      "97422efe0c1546030429540bd09efb4b29905341bc0234aaac471c94": "c65c58b01d0f39a85424d633077bf89726884056184b1d124015a864",
+      "97984e751feb46610f679e24c01fbbbee395d14afb20af795cd082ff": "dbbfe8c93d4d6d6f67d7bd16ed2ca870765acedd105038ebcd718998",
+      "a057085a3b8b8f902e25b9ac3f17fb9f16ee48ce67c9b13e6c6b6d6f": "67046065badafbc6c16c96dcf3349c462d1c2629f7a2d9a903e23674",
+      "ac090fe112056bb684d33a975e20e10a788a7584209ee47470490b72": "f6f85c911ecb82d806d865edbf3149ef9aa1d610ded02ac375304b7f",
+      "d105c3a46c522ae26fde17da6dc88cebffd2b56716c3c1034fd1c59a": "9fc3b3167fcabc27ac25e227ac7aa124ca4bc681c84273a1dcd0bcea",
+      "d6b45523b48ebc9bb4aa55d4987b2d9a1b6cd2bbb70d260fb28cc311": "b4f1b8c3312eaa6de1e58b170d794714ce3efd8e29d2c0382f4fb908",
+      "dab74ac737cfba4b18b71439c0d09bb9b4a154336788c15c1c46e457": "1c02d69ffcdf3dc9ba518d39954334dab5ccb46ffdf961fa9c9b2430",
+      "dd1108b4b77f116ecd922ace0898abd4c2ca53261d7b5ed7603140fa": "acb7e1588f4e7e8e4334307d863451446dc818ebfa5e3c340c20715e",
+      "dfdaaae2ecac8f82175c3b5686a6711a6074d052bb6813950a9657e8": "b177e1c20e44fccec083a72797a59151c9be978e786d0ddc81d24f50",
+      "f7bc52fa6b59799d45ecb157282d5b5a8d1e64097432151bbdffd351": "a90930dcfc5615f7647b92eb60ae1a16525be8042be157380030eb6a",
+      "fb2b4e2ccb8381a9039bc52ce8de9baab7e4dbeb54fdff12efa91ada": "56f182afc68f86f55ddb5031e0d044914bee37a24fef8264e3468e62"
+    }
+  },
+  "systemStart": "2026-03-19T09:21:38Z",
+  "updateQuorum": 1
+}

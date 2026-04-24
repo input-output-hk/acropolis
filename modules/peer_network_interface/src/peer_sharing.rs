@@ -45,12 +45,13 @@ pub fn validate_and_normalise(
     port: u16,
     ipv6_enabled: bool,
     allow_non_public_peer_addrs: bool,
+    localhost_gateway_ip: Option<IpAddr>,
 ) -> Option<String> {
     if port == 0 {
         return None;
     }
     let ip = IpAddr::from_str(addr_str).ok()?;
-    let ip = normalise_ip(ip);
+    let ip = normalise_ip(ip, localhost_gateway_ip);
     if !ipv6_enabled && ip.is_ipv6() {
         return None;
     }
@@ -63,14 +64,21 @@ pub fn validate_and_normalise(
     })
 }
 
-/// Normalise IPv4-mapped IPv6 (`::ffff:x.x.x.x`) to its IPv4 form.
-fn normalise_ip(ip: IpAddr) -> IpAddr {
-    if let IpAddr::V6(v6) = ip
+/// Normalise IPv4-mapped IPv6 (`::ffff:x.x.x.x`) to its IPv4 form, then rewrite
+/// `localhost_gateway_ip` to localhost if configured.
+fn normalise_ip(ip: IpAddr, localhost_gateway_ip: Option<IpAddr>) -> IpAddr {
+    let ip = if let IpAddr::V6(v6) = ip
         && let Some(v4) = v6.to_ipv4_mapped()
     {
-        return IpAddr::V4(v4);
+        IpAddr::V4(v4)
+    } else {
+        ip
+    };
+    if localhost_gateway_ip == Some(ip) {
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    } else {
+        ip
     }
-    ip
 }
 
 fn is_rejected(ip: &IpAddr, allow_non_public_peer_addrs: bool) -> bool {
@@ -124,6 +132,7 @@ fn decode_response(
     limit: usize,
     ipv6_enabled: bool,
     allow_non_public_peer_addrs: bool,
+    localhost_gateway_ip: Option<IpAddr>,
 ) -> Result<Vec<String>, PeerSharingError> {
     let mut dec = Decoder::new(bytes);
 
@@ -206,7 +215,7 @@ fn decode_response(
         };
 
         if let Some(normalised) =
-            validate_and_normalise(&addr_str, port, ipv6_enabled, allow_non_public_peer_addrs)
+            validate_and_normalise(&addr_str, port, ipv6_enabled, allow_non_public_peer_addrs, localhost_gateway_ip)
         {
             results.push(normalised);
         }
@@ -223,6 +232,7 @@ pub async fn request_peers(
     timeout: Duration,
     ipv6_enabled: bool,
     allow_non_public_peer_addrs: bool,
+    localhost_gateway_ip: Option<IpAddr>,
 ) -> Result<Vec<String>, PeerSharingError> {
     match tokio::time::timeout(
         timeout,
@@ -232,6 +242,7 @@ pub async fn request_peers(
             amount,
             ipv6_enabled,
             allow_non_public_peer_addrs,
+            localhost_gateway_ip,
         ),
     )
     .await
@@ -250,6 +261,7 @@ async fn request_peers_inner(
     amount: u8,
     ipv6_enabled: bool,
     allow_non_public_peer_addrs: bool,
+    localhost_gateway_ip: Option<IpAddr>,
 ) -> Result<Vec<String>, PeerSharingError> {
     // Step 1: TCP connect
     let bearer = Bearer::connect_tcp(address)
@@ -304,6 +316,7 @@ async fn request_peers_inner(
             amount as usize,
             ipv6_enabled,
             allow_non_public_peer_addrs,
+            localhost_gateway_ip,
         ) {
             Ok(addrs) => {
                 // Step 6: Send MsgDone (best-effort)

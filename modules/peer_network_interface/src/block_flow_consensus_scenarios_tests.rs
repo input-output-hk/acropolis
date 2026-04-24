@@ -148,6 +148,7 @@ async fn make_harness() -> TestHarness {
         allow_non_public_peer_addrs: true,
         discovery_interval_secs: 0,
         peer_sharing_cooldown_secs: 0,
+        localhost_gateway_ip: None,
     };
 
     let block_wanted_subscription =

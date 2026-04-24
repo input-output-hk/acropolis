@@ -1,0 +1,5 @@
+{
+    "type": "VrfVerificationKey_PraosVRF",
+    "description": "VRF Verification Key",
+    "cborHex": "5820afb43e6d38417a878de8d11b301ecd1062847ed4dba459c0c87e8fe78a34f571"
+}

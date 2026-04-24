@@ -1,0 +1,7 @@
+{
+    "address": "stake_test1uqsujdm9c9949c59qwta0frzvqfkwhl2uyqn70z8ce8xlfgrapqaz",
+    "base16": "e021c93765c14b52e2850397d7a4626013675feae1013f3c47c64e6fa5",
+    "encoding": "bech32",
+    "era": "shelley",
+    "type": "stake"
+}

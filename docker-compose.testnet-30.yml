@@ -1,0 +1,904 @@
+x-cardano-node-base: &cardano-node-base
+  image: ghcr.io/intersectmbo/cardano-node:10.6.2
+  environment:
+    CARDANO_BLOCK_PRODUCER: "true"
+  restart: unless-stopped
+
+services:
+  pool1:
+    <<: *cardano-node-base
+    container_name: cardano-pool-1
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3001"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/1:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool1:/db
+
+  pool2:
+    <<: *cardano-node-base
+    container_name: cardano-pool-2
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3002"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/2:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool2:/db
+
+  pool3:
+    <<: *cardano-node-base
+    container_name: cardano-pool-3
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3003"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3003:3003"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/3:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool3:/db
+
+  pool4:
+    <<: *cardano-node-base
+    container_name: cardano-pool-4
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3004"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3004:3004"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/4:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool4:/db
+
+  pool5:
+    <<: *cardano-node-base
+    container_name: cardano-pool-5
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3005"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3005:3005"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/5:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool5:/db
+
+  pool6:
+    <<: *cardano-node-base
+    container_name: cardano-pool-6
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3006"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3006:3006"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/6:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool6:/db
+
+  pool7:
+    <<: *cardano-node-base
+    container_name: cardano-pool-7
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3007"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3007:3007"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/7:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool7:/db
+
+  pool8:
+    <<: *cardano-node-base
+    container_name: cardano-pool-8
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3008"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3008:3008"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/8:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool8:/db
+
+  pool9:
+    <<: *cardano-node-base
+    container_name: cardano-pool-9
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3009"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3009:3009"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/9:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool9:/db
+
+  pool10:
+    <<: *cardano-node-base
+    container_name: cardano-pool-10
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3010"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3010:3010"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/10:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool10:/db
+
+  pool11:
+    <<: *cardano-node-base
+    container_name: cardano-pool-11
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3011"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3011:3011"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/11:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool11:/db
+
+  pool12:
+    <<: *cardano-node-base
+    container_name: cardano-pool-12
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3012"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3012:3012"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/12:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool12:/db
+
+  pool13:
+    <<: *cardano-node-base
+    container_name: cardano-pool-13
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3013"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3013:3013"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/13:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool13:/db
+
+  pool14:
+    <<: *cardano-node-base
+    container_name: cardano-pool-14
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3014"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3014:3014"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/14:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool14:/db
+
+  pool15:
+    <<: *cardano-node-base
+    container_name: cardano-pool-15
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3015"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3015:3015"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/15:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool15:/db
+
+  pool16:
+    <<: *cardano-node-base
+    container_name: cardano-pool-16
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3016"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3016:3016"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/16:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool16:/db
+
+  pool17:
+    <<: *cardano-node-base
+    container_name: cardano-pool-17
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3017"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3017:3017"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/17:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool17:/db
+
+  pool18:
+    <<: *cardano-node-base
+    container_name: cardano-pool-18
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3018"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3018:3018"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/18:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool18:/db
+
+  pool19:
+    <<: *cardano-node-base
+    container_name: cardano-pool-19
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3019"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3019:3019"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/19:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool19:/db
+
+  pool20:
+    <<: *cardano-node-base
+    container_name: cardano-pool-20
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3020"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3020:3020"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/20:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool20:/db
+
+  pool21:
+    <<: *cardano-node-base
+    container_name: cardano-pool-21
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3021"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3021:3021"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/21:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool21:/db
+
+  pool22:
+    <<: *cardano-node-base
+    container_name: cardano-pool-22
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3022"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3022:3022"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/22:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool22:/db
+
+  pool23:
+    <<: *cardano-node-base
+    container_name: cardano-pool-23
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3023"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3023:3023"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/23:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool23:/db
+
+  pool24:
+    <<: *cardano-node-base
+    container_name: cardano-pool-24
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3024"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3024:3024"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/24:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool24:/db
+
+  pool25:
+    <<: *cardano-node-base
+    container_name: cardano-pool-25
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3025"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3025:3025"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/25:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool25:/db
+
+  pool26:
+    <<: *cardano-node-base
+    container_name: cardano-pool-26
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3026"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3026:3026"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/26:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool26:/db
+
+  pool27:
+    <<: *cardano-node-base
+    container_name: cardano-pool-27
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3027"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3027:3027"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/27:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool27:/db
+
+  pool28:
+    <<: *cardano-node-base
+    container_name: cardano-pool-28
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3028"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3028:3028"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/28:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool28:/db
+
+  pool29:
+    <<: *cardano-node-base
+    container_name: cardano-pool-29
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3029"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3029:3029"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/29:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool29:/db
+
+  pool30:
+    <<: *cardano-node-base
+    container_name: cardano-pool-30
+    command:
+      - run
+      - --topology
+      - /node/configs/topology.json
+      - --database-path
+      - /db
+      - --socket-path
+      - /db/node.socket
+      - --host-addr
+      - 0.0.0.0
+      - --port
+      - "3030"
+      - --config
+      - /node/configs/config.json
+      - --shelley-kes-key
+      - /node/keys/kes.skey
+      - --shelley-vrf-key
+      - /node/keys/vrf.skey
+      - --shelley-operational-certificate
+      - /node/keys/opcert.cert
+    ports:
+      - "3030:3030"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/pools/30:/node
+      - ./${TESTNET_DIR:-testnet}/dbs/pool30:/db
+
+  prometheus:
+    image: quay.io/prometheus/prometheus:latest
+    container_name: testnet-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/monitoring/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: docker.io/grafana/grafana:latest
+    container_name: testnet-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./${TESTNET_DIR:-testnet}/monitoring/grafana:/etc/grafana:ro
+      - ./${TESTNET_DIR:-testnet}/monitoring/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      GF_PATHS_CONFIG: /etc/grafana/grafana.ini
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:

@@ -35,7 +35,7 @@ min-hot-peers = 3
 # Enable/disable peer-sharing discovery
 peer-sharing-enabled = true
 # Seconds between random hot-peer churn events
-churn-interval-secs = 600
+churn-interval-secs = 30
 # Timeout in seconds for a full peer-sharing exchange
 peer-sharing-timeout-secs = 10
 # Timeout in seconds for TCP connect to a peer
@@ -45,6 +45,10 @@ ipv6-enabled = false
 # Accept loopback/private/link-local peer addresses from peer-sharing (useful for local testnets)
 allow-non-public-peer-addrs = true
 # Seconds between peer discovery (peer-sharing request) cycles
-discovery-interval-secs = 60
+discovery-interval-secs = 20
 # Per-peer cooldown in seconds between peer-sharing queries
-peer-sharing-cooldown-secs = 300
+peer-sharing-cooldown-secs = 30
+
+# Docker Desktop advertises 192.168.65.254 as host-gateway in peer-sharing;
+# rewrite it to localhost so published ports remain reachable.
+localhost-gateway-ip = "192.168.65.254"

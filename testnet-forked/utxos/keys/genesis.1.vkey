@@ -1,0 +1,5 @@
+{
+    "type": "GenesisUTxOVerificationKey_ed25519",
+    "description": "Genesis Initial UTxO Verification Key",
+    "cborHex": "5820ffbe380b8a5efc18c0decea4f2f898568c38019b5f89b5a60e76f2ae01aa34ad"
+}

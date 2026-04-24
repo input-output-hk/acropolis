@@ -1,0 +1,28 @@
+{
+  "localRoots": [
+    {
+      "accessPoints": [
+        {
+          "address": "host.docker.internal",
+          "port": 3022
+        },
+        {
+          "address": "host.docker.internal",
+          "port": 3020
+        },
+        {
+          "address": "host.docker.internal",
+          "port": 3026
+        },
+        {
+          "address": "host.docker.internal",
+          "port": 3001
+        }
+      ],
+      "advertise": true,
+      "valency": 3
+    }
+  ],
+  "publicRoots": [],
+  "useLedgerAfterSlot": 0
+}

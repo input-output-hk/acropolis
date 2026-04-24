@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: '2026-03-11T16:05:40Z'
+  labels:
+    app: testnet
+  name: testnet
+spec:
+  containers:
+  - args:
+    - --config.file=/etc/prometheus/prometheus.yml
+    - --storage.tsdb.path=/prometheus
+    - --web.console.libraries=/usr/share/prometheus/console_libraries
+    - --web.console.templates=/usr/share/prometheus/consoles
+    image: quay.io/prometheus/prometheus:latest
+    name: promserver
+    ports:
+    - containerPort: 3000
+      hostPort: 3000
+    securityContext: {}
+    volumeMounts:
+    - mountPath: /etc/prometheus
+      name: prometheus-config
+    - mountPath: /prometheus
+      name: prometheus-data
+  - image: docker.io/grafana/grafana:latest
+    name: grafana
+    securityContext:
+      runAsNonRoot: true
+    volumeMounts:
+    - mountPath: /etc/grafana
+      name: grafana-config
+    - mountPath: /var/lib/grafana/dashboards
+      name: grafana-dashboards
+  volumes:
+  - hostPath:
+      path: /home/ubuntu/testnet-generation-tool/testnet/monitoring/prometheus
+      type: Directory
+    name: prometheus-config
+  - name: prometheus-data
+    persistentVolumeClaim:
+      claimName: testnet_promentheus_data
+  - hostPath:
+      path: /home/ubuntu/testnet-generation-tool/testnet/monitoring/grafana
+      type: Directory
+    name: grafana-config
+  - hostPath:
+      path: /home/ubuntu/testnet-generation-tool/testnet/monitoring/dashboards
+      type: Directory
+    name: grafana-dashboards

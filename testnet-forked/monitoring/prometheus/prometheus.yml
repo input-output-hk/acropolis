@@ -1,0 +1,44 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  - job_name: cardano-node
+    fallback_scrape_protocol: PrometheusText0.0.4
+    static_configs:
+      - targets:
+          - pool1:9101
+          - pool2:9102
+          - pool3:9103
+          - pool4:9104
+          - pool5:9105
+          - pool6:9106
+          - pool7:9107
+          - pool8:9108
+          - pool9:9109
+          - pool10:9110
+          - pool11:9111
+          - pool12:9112
+          - pool13:9113
+          - pool14:9114
+          - pool15:9115
+          - pool16:9116
+          - pool17:9117
+          - pool18:9118
+          - pool19:9119
+          - pool20:9120
+          - pool21:9121
+          - pool22:9122
+          - pool23:9123
+          - pool24:9124
+          - pool25:9125
+          - pool26:9126
+          - pool27:9127
+          - pool28:9128
+          - pool29:9129
+          - pool30:9130

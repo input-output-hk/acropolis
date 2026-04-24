@@ -1,0 +1,7 @@
+{
+    "address": "addr_test1vz3ydhveg68nhtphw47a3yjpx3mn22xd86md0qkufwmp7ag32mwv2",
+    "base16": "60a246dd99468f3bac37757dd8924134773528cd3eb6d782dc4bb61f75",
+    "encoding": "bech32",
+    "era": "shelley",
+    "type": "payment"
+}

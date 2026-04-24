@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 use acropolis_common::genesis_values::GenesisValues;
@@ -48,6 +49,10 @@ pub struct InterfaceConfig {
     pub discovery_interval_secs: u64,
     #[serde(default = "default_peer_sharing_cooldown_secs")]
     pub peer_sharing_cooldown_secs: u64,
+    /// If set, any peer-sharing address matching this IP is rewritten to localhost.
+    /// Useful for Docker Desktop, which advertises its host-gateway (e.g. 192.168.65.254)
+    /// in peer-sharing responses — an address not routable from the host.
+    pub localhost_gateway_ip: Option<IpAddr>,
 }
 
 fn default_consensus_topic() -> String {

@@ -26,6 +26,9 @@ node-addresses = [
     "localhost:3003",
 ]
 magic-number = 2
+# Docker Desktop advertises 192.168.65.254 as host-gateway in peer-sharing;
+# rewrite it to localhost so published ports remain reachable.
+localhost-gateway-ip = "192.168.65.254"
 
 [module.block-unpacker]
 

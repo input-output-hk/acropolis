@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashSet},
+    net::IpAddr,
     time::Duration,
 };
 
@@ -88,6 +89,7 @@ pub struct NetworkManager {
     connect_timeout: Duration,
     ipv6_enabled: bool,
     allow_non_public_peer_addrs: bool,
+    localhost_gateway_ip: Option<IpAddr>,
     discovery_interval: Duration,
 }
 
@@ -108,6 +110,7 @@ impl NetworkManager {
         connect_timeout_secs: u64,
         ipv6_enabled: bool,
         allow_non_public_peer_addrs: bool,
+        localhost_gateway_ip: Option<IpAddr>,
         discovery_interval_secs: u64,
         peer_sharing_cooldown_secs: u64,
     ) -> Self {
@@ -144,6 +147,7 @@ impl NetworkManager {
             connect_timeout: Duration::from_secs(connect_timeout_secs),
             ipv6_enabled,
             allow_non_public_peer_addrs,
+            localhost_gateway_ip,
             discovery_interval: Duration::from_secs(discovery_interval_secs),
         };
 
@@ -344,6 +348,7 @@ impl NetworkManager {
         let sender = self.events_sender.clone();
         let ipv6 = self.ipv6_enabled;
         let allow_non_public = self.allow_non_public_peer_addrs;
+        let localhost_gateway_ip = self.localhost_gateway_ip;
 
         info!(
             peer = %address,
@@ -354,7 +359,7 @@ impl NetworkManager {
         );
 
         tokio::spawn(async move {
-            match request_peers(&address, magic, amount, timeout, ipv6, allow_non_public).await {
+            match request_peers(&address, magic, amount, timeout, ipv6, allow_non_public, localhost_gateway_ip).await {
                 Ok(addrs) => {
                     info!(
                         peer = %address,
@@ -772,6 +777,7 @@ mod tests {
             allow_non_public_peer_addrs: true,
             discovery_interval_secs: 0,
             peer_sharing_cooldown_secs: 0,
+            localhost_gateway_ip: None,
         }
     }
 
@@ -803,6 +809,7 @@ mod tests {
             cfg.connect_timeout_secs,
             cfg.ipv6_enabled,
             cfg.allow_non_public_peer_addrs,
+            cfg.localhost_gateway_ip,
             cfg.discovery_interval_secs,
             cfg.peer_sharing_cooldown_secs,
         )
