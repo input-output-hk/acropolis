@@ -260,6 +260,7 @@ impl AccountsState {
                 publishers.spo_rewards.publish_message(rollback_message.clone()).await?;
                 publishers.stake_reward_deltas.publish_message(rollback_message.clone()).await?;
                 publishers.registration_updates.publish_message(rollback_message.clone()).await?;
+                publishers.pots.publish_message(rollback_message.clone()).await?;
             }
 
             // Init drains the epoch-0 bootstrap messages, so the main loop only
