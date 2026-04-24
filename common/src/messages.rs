@@ -275,6 +275,9 @@ pub struct GovernanceProceduresMessage {
 
     /// Alonzo-compatible (from Shelley) and Babbage updates
     pub alonzo_babbage_updates: Vec<AlonzoBabbageUpdateProposal>,
+
+    /// Treasury donations
+    pub treasury_donations: Lovelace,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -571,6 +574,9 @@ pub struct AccountsBootstrapMessage {
     /// to the DRep has their delegation cleared, even if they have switched delegations
     /// since.
     pub drep_delegations: Vec<(DRepCredential, Vec<StakeAddress>)>,
+
+    /// Total proposal deposits by stake address
+    pub proposal_deposits: HashMap<StakeAddress, Lovelace>,
 }
 
 /// Deltas to apply to pots at epoch boundary during snapshot bootstrap

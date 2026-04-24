@@ -231,6 +231,9 @@ impl State {
         // Apply DRep delegations (Used to reproduce PV9 deregistration bug)
         self.drep_delegators = bootstrap_msg.drep_delegations.into();
 
+        // Apply proposal deposits
+        self.proposal_deposits = bootstrap_msg.proposal_deposits;
+
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
              pots(reserves={}, treasury={}, deposits={})",
@@ -678,7 +681,6 @@ impl State {
 
         // Pay the refunds after snapshot, so they don't appear in active_stake
         reward_deltas.extend(self.pay_pool_refunds(undo));
-        reward_deltas.extend(self.pay_proposal_refunds(undo));
 
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
@@ -886,29 +888,16 @@ impl State {
                 self.proposal_deposits.remove(&reward_account);
             }
 
-            let was_registered =
-                self.mutate_stake_address(undo, &reward_account, |stake_addresses| {
-                    if stake_addresses.is_registered(&reward_account) {
-                        stake_addresses.add_to_reward(&reward_account, deposit);
-                        true
-                    } else {
-                        false
-                    }
-                });
-            if was_registered {
-                reward_deltas.push(StakeRewardDelta {
-                    stake_address: reward_account.clone(),
-                    delta: deposit,
-                    reward_type: RewardType::ProposalRefund,
-                    pool: PoolId::default(),
-                });
-            } else {
-                debug!(
-                    "Reward account {} deregistered - paying refund to treasury",
-                    reward_account
-                );
-                self.pots.treasury += deposit;
-            }
+            self.mutate_stake_address(undo, &reward_account, |stake_addresses| {
+                stake_addresses.add_to_reward(&reward_account, deposit);
+            });
+
+            reward_deltas.push(StakeRewardDelta {
+                stake_address: reward_account.clone(),
+                delta: deposit,
+                reward_type: RewardType::ProposalRefund,
+                pool: PoolId::default(),
+            });
         }
 
         reward_deltas
@@ -1848,6 +1837,44 @@ impl State {
                 .and_modify(|amount| *amount += proposal.deposit)
                 .or_insert(proposal.deposit);
         }
+
+        self.pots.treasury = self.pots.treasury.saturating_add(procedures.treasury_donations);
+    }
+
+    pub fn handle_forfeited_deposits(&mut self, outcomes_msg: &GovernanceOutcomesMessage) {
+        for outcome in &outcomes_msg.conway_outcomes {
+            let proposal = &outcome.voting.procedure;
+            let reward_account = &proposal.reward_account;
+            let deposit = proposal.deposit;
+
+            if let Some(entry) = self.get_stake_state(reward_account) {
+                if entry.registered {
+                    self.proposal_refunds.push((reward_account.clone(), deposit));
+                } else {
+                    // Pay deposit to treasury
+                    self.pots.treasury = self.pots.treasury.saturating_add(deposit);
+
+                    // Decrement account's proposal deposits
+                    let Some(balance) = self.proposal_deposits.get_mut(reward_account) else {
+                        warn!("No proposal deposit for {}", reward_account);
+                        continue;
+                    };
+
+                    if *balance < deposit {
+                        warn!(
+                            "Refund {} exceeds proposal deposit {} for {}",
+                            deposit, *balance, reward_account
+                        );
+                        continue;
+                    }
+
+                    *balance -= deposit;
+                    if *balance == 0 {
+                        self.proposal_deposits.remove(reward_account);
+                    }
+                }
+            }
+        }
     }
 
     pub fn handle_governance_outcomes(
@@ -1856,11 +1883,6 @@ impl State {
         undo: &mut BlockStakeAddressUndoRecorder,
     ) -> Result<Vec<StakeRewardDelta>> {
         for outcome in &outcomes_msg.conway_outcomes {
-            let proposal = &outcome.voting.procedure;
-            let deposit = proposal.deposit;
-
-            self.proposal_refunds.push((proposal.reward_account.clone(), deposit));
-
             // Handle treasury withdrawals for enacted TreasuryWithdrawal actions
             if let GovernanceOutcomeVariant::TreasuryWithdrawal(withdrawal_action) =
                 &outcome.action_to_perform

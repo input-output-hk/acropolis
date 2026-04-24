@@ -165,7 +165,7 @@ impl Serialize for BlockInfo {
         state.serialize_field("epoch", &self.epoch)?;
         state.serialize_field("epoch_slot", &self.epoch_slot)?;
         state.serialize_field(
-            "slot_issuer",
+            "slot_leader",
             &self.issuer.clone().map(|vkey| -> String {
                 match vkey {
                     BlockIssuer::HeavyDelegate(_) => "Byron genesis slot issuer".to_string(),
