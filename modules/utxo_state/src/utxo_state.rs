@@ -178,7 +178,7 @@ impl UTXOState {
                 }
             };
             let is_new_epoch =
-                deltas_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true);
+                deltas_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(false);
 
             let mut current_protocol_params = state.lock().await.get_or_init_protocol_parameters();
 

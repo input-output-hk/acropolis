@@ -82,12 +82,6 @@ struct ConsensusRuntime {
     blocks_proposed_topic: String,
     consensus_wants_topic: String,
     event_queue: EventQueue,
-    /// The downstream modules are expecting two mechanisms for handling rollbacks:
-    /// - CardanoMessage::StateTransition message
-    /// - After a rollback is published, the first later proposed block must be marked as `RolledBack`
-    ///
-    /// `pending_post_rollback_marker` is addressing the second mechanism
-    pending_post_rollback_marker: Option<u64>,
     tree: ConsensusTree,
     /// Cache of full block payloads for re-publication.
     ///
@@ -242,7 +236,6 @@ impl Consensus {
                 blocks_proposed_topic,
                 consensus_wants_topic,
                 event_queue,
-                pending_post_rollback_marker: None,
                 tree,
                 block_data: HashMap::new(),
                 validator_topics,
@@ -722,7 +715,6 @@ impl ConsensusRuntime {
             match event {
                 ObserverEvent::BlockProposed { hash } => {
                     if let Some((info, raw)) = self.block_data.get(&hash).cloned() {
-                        let info = self.block_info_for_proposal(&info);
                         debug!(
                             block = info.number,
                             hash = %hash,
@@ -740,9 +732,10 @@ impl ConsensusRuntime {
                     }
                 }
                 ObserverEvent::Rollback { to_block_number } => {
-                    let point = self.find_point_at_number(to_block_number);
-                    let block_info = self.find_block_info_at_number(to_block_number);
-                    self.pending_post_rollback_marker = Some(to_block_number);
+                    // The next block is Rollback
+                    let point = self.find_point_at_number(to_block_number + 1);
+                    let block_info = self.find_block_info_at_number(to_block_number + 1);
+
                     let msg = Arc::new(Message::Cardano((
                         block_info,
                         CardanoMessage::StateTransition(StateTransitionMessage::Rollback(point)),
@@ -776,16 +769,6 @@ impl ConsensusRuntime {
                 self.tree.set_root(hash, number - 1, 0);
             }
             debug!("Tree root set to parent {hash}");
-        }
-    }
-
-    fn block_info_for_proposal(&mut self, info: &BlockInfo) -> BlockInfo {
-        match self.pending_post_rollback_marker {
-            Some(rollback_to) if info.number > rollback_to => {
-                self.pending_post_rollback_marker = None;
-                info.with_status(BlockStatus::RolledBack)
-            }
-            _ => info.clone(),
         }
     }
 
@@ -878,7 +861,7 @@ impl ConsensusRuntime {
             if let Some(b) = self.tree.get_block(&h) {
                 if b.number == number {
                     if let Some((info, _)) = self.block_data.get(&h) {
-                        return info.with_status(BlockStatus::RolledBack);
+                        return info.clone();
                     }
                     return Self::default_rollback_block_info(b.number, b.slot, b.hash);
                 }
@@ -893,7 +876,7 @@ impl ConsensusRuntime {
     /// Construct a default BlockInfo with minimal fields populated.
     fn default_rollback_block_info(number: u64, slot: u64, hash: BlockHash) -> BlockInfo {
         BlockInfo {
-            status: BlockStatus::RolledBack,
+            status: BlockStatus::Volatile,
             intent: BlockIntent::Apply,
             slot,
             number,
@@ -1070,7 +1053,6 @@ mod tests {
             blocks_proposed_topic: DEFAULT_BLOCKS_PROPOSED_TOPIC.1.to_string(),
             consensus_wants_topic: DEFAULT_CONSENSUS_WANTS_TOPIC.1.to_string(),
             event_queue,
-            pending_post_rollback_marker: None,
             tree,
             block_data,
             validator_topics: Vec::new(),
@@ -1086,7 +1068,7 @@ mod tests {
     }
 
     #[test]
-    fn rollback_marks_first_subsequent_proposed_block() {
+    fn rollback_emits_rollback_message_followed_by_proposed_block() {
         let mut runtime = test_runtime();
 
         let messages = runtime.resolve_observer_events(vec![
@@ -1101,17 +1083,9 @@ mod tests {
         match message_at(&messages, 0) {
             Message::Cardano((
                 info,
-                CardanoMessage::StateTransition(StateTransitionMessage::Rollback(point)),
+                CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
             )) => {
-                assert_eq!(info.number, 2370);
-                assert_eq!(info.status, BlockStatus::RolledBack);
-                assert_eq!(
-                    *point,
-                    Point::Specific {
-                        hash: hash(1),
-                        slot: 420_859,
-                    }
-                );
+                assert_eq!(info.number, 2371);
             }
             other => panic!("unexpected rollback message: {other:?}"),
         }
@@ -1119,65 +1093,8 @@ mod tests {
         match message_at(&messages, 1) {
             Message::Cardano((info, CardanoMessage::BlockAvailable(_))) => {
                 assert_eq!(info.number, 2371);
-                assert_eq!(info.status, BlockStatus::RolledBack);
             }
             other => panic!("unexpected proposed message: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn only_first_proposed_block_after_rollback_is_marked() {
-        let mut runtime = test_runtime();
-
-        let messages = runtime.resolve_observer_events(vec![
-            ObserverEvent::Rollback {
-                to_block_number: 2370,
-            },
-            ObserverEvent::BlockProposed { hash: hash(2) },
-            ObserverEvent::BlockProposed { hash: hash(3) },
-        ]);
-
-        assert_eq!(messages.len(), 3);
-
-        match message_at(&messages, 1) {
-            Message::Cardano((info, CardanoMessage::BlockAvailable(_))) => {
-                assert_eq!(info.number, 2371);
-                assert_eq!(info.status, BlockStatus::RolledBack);
-            }
-            other => panic!("unexpected first proposed message: {other:?}"),
-        }
-
-        match message_at(&messages, 2) {
-            Message::Cardano((info, CardanoMessage::BlockAvailable(_))) => {
-                assert_eq!(info.number, 2372);
-                assert_eq!(info.status, BlockStatus::Volatile);
-            }
-            other => panic!("unexpected second proposed message: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn newer_rollback_replaces_pending_marker_before_next_proposal() {
-        let mut runtime = test_runtime();
-
-        let messages = runtime.resolve_observer_events(vec![
-            ObserverEvent::Rollback {
-                to_block_number: 2370,
-            },
-            ObserverEvent::Rollback {
-                to_block_number: 2360,
-            },
-            ObserverEvent::BlockProposed { hash: hash(4) },
-        ]);
-
-        assert_eq!(messages.len(), 3);
-
-        match message_at(&messages, 2) {
-            Message::Cardano((info, CardanoMessage::BlockAvailable(_))) => {
-                assert_eq!(info.number, 2361);
-                assert_eq!(info.status, BlockStatus::RolledBack);
-            }
-            other => panic!("unexpected proposed message after second rollback: {other:?}"),
         }
     }
 }
