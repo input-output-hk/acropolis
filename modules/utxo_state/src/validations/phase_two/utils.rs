@@ -1,5 +1,5 @@
 use acropolis_common::{Credential, Withdrawal};
-use uplc_turbo::machine::PlutusVersion;
+use amaru_uplc::machine::PlutusVersion;
 
 /// Plutus Data encoding uses transformed Credential;
 /// Which sorts PubKey first, then Script Hash;

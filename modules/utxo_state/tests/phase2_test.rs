@@ -8,7 +8,7 @@ use acropolis_module_utxo_state::validations::phase2::{
     evaluate_raw_flat_program, evaluate_raw_flat_programs_parallel, evaluate_script, ExUnits,
     Phase2Error, PlutusVersion,
 };
-use uplc_turbo::{
+use amaru_uplc::{
     arena::Arena,
     binder::DeBruijn,
     flat,

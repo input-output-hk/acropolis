@@ -40,17 +40,17 @@ use acropolis_common::{
     DatumHash, PlutusVersion as CommonPlutusVersion, PolicyId, ScriptHash, ScriptLang,
     StakeAddress, UTxOIdentifier, Voter,
 };
-use rayon::prelude::*;
-use rayon::ThreadPool;
-use thiserror::Error;
-use uplc_turbo::{
+use amaru_uplc::{
     arena::Arena, binder::DeBruijn, bumpalo::Bump, data::PlutusData, flat, machine::MachineError,
     program::Program, term::Term,
 };
+use rayon::prelude::*;
+use rayon::ThreadPool;
+use thiserror::Error;
 
 // Re-export PlutusVersion and ExUnits for use in tests and by consumers
 pub use acropolis_common::ExUnits;
-pub use uplc_turbo::machine::PlutusVersion;
+pub use amaru_uplc::machine::PlutusVersion;
 
 // =============================================================================
 // Evaluator Thread Pool
@@ -212,24 +212,24 @@ fn arena_pool() -> &'static ArenaPool {
 }
 
 // =============================================================================
-// ExUnits <-> uplc_turbo::machine::ExBudget conversions
+// ExUnits <-> amaru_uplc::machine::ExBudget conversions
 // =============================================================================
 
-/// Convert ExUnits to uplc_turbo's ExBudget for script evaluation.
+/// Convert ExUnits to amaru_uplc's ExBudget for script evaluation.
 ///
 /// ExUnits uses (steps: u64, mem: u64) while ExBudget uses (cpu: i64, mem: i64).
 /// The conversion maps steps -> cpu and mem -> mem.
-fn ex_units_to_budget(ex_units: ExUnits) -> uplc_turbo::machine::ExBudget {
-    uplc_turbo::machine::ExBudget {
+fn ex_units_to_budget(ex_units: ExUnits) -> amaru_uplc::machine::ExBudget {
+    amaru_uplc::machine::ExBudget {
         cpu: ex_units.steps as i64,
         mem: ex_units.mem as i64,
     }
 }
 
-/// Convert uplc_turbo's ExBudget back to ExUnits.
+/// Convert amaru_uplc's ExBudget back to ExUnits.
 ///
 /// Negative values are clamped to 0.
-fn budget_to_ex_units(budget: uplc_turbo::machine::ExBudget) -> ExUnits {
+fn budget_to_ex_units(budget: amaru_uplc::machine::ExBudget) -> ExUnits {
     ExUnits {
         steps: budget.cpu.max(0) as u64,
         mem: budget.mem.max(0) as u64,
