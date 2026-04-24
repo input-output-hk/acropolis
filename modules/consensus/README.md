@@ -1,14 +1,13 @@
 # Consensus module
 
-The consensus module takes proposed blocks from a (later, multiple) upstream
-source and decides which chain to favour, passing on blocks on the favoured chain
-to other validation and storage modules downstream
+The consensus module takes offered blocks from an upstream source (`peer-network-interface`, bootstrappers, etc) and
+decides which chain (fork) to favour, passing on blocks on the favoured chain to other validation and storage modules
+downstream.
 
 ## Configuration
 
-The following is the default configuration - these are the default
-topics so they can be left out if they are OK.  The validators *must*
-be configured - if empty, no validation is performed
+The following is the default configuration, these are the default topics so they can be left out if they are OK. The
+validators _must_ be configured, if empty, no validation is performed.
 
 ```toml
 [module.consensus]
@@ -32,31 +31,19 @@ validators = [
 
 ## Validation
 
-The consensus module passes on blocks it receives from upstream (currently only a
-single source) and sends them out as 'proposed' blocks for validation.  It then listens
-on all of the `validators` topics for BlockValidation messages, which give a Go / NoGo
-for the block.  The model is a NASA flight control desk, and like there, a single NoGo
-is enough to stop the block.
+The consensus module passes on blocks it receives from upstream (e.g. `peer-network-interface`)and sends them out as
+'proposed' blocks for validation, storage and further processing. It then listens on all of the `validators` topics for
+BlockValidation messages, which give a Go / NoGo for the block. Single NoGo is enough to mark the block as invalid.
 
-At the moment the module simply logs the validation failure.  Once it is actually operating
-consensus across multiple sources, it will use this and the length of chain to choose the best
-chain.
+In the `direct` mode, the consensus module simply passes on all blocks it receives and logs the validation failure.  
+When in `consensus` mode, the module is reacting on the validation results and decides which chain to favour and emits
+rollback messages if necessary. It is downstream subscribers' responsibility to deal with the effects of the rollbacks.
 
 ## Messages
 
-The consensus module subscribes for RawBlockMessages on
-`cardano.block.available`.  It uses the consensus rules to
-decide which of multiple chains to favour, and sends candidate
-blocks on `cardano.block.proposed` to request validation and storage.
+The consensus module subscribes for `cardano.block.available`, `cardano.block.offered` and `cardano.block.rescinded`. It
+sends out `cardano.block.wanted` and `cardano.block.rejected` messages to fetch or mark offered blocks as rejected. The
+module uses the consensus rules (Ourobouros Praos `maxvalid` rule) to decide which of multiple chains (forks) to favour,
+and sends candidate blocks on `cardano.block.proposed` to request validation and storage.
 
-Both input and output are RawBlockMessages:
-
-```rust
-pub struct RawBlockMessage {
-    /// Header raw data
-    pub header: Vec<u8>,
-
-    /// Body raw data
-    pub body: Vec<u8>,
-}
-```
+Both input and output are `RawBlockMessage`.
