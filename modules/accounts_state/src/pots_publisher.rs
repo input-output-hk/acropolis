@@ -22,4 +22,9 @@ impl PotsPublisher {
             ))))
             .await
     }
+
+    /// Publish a pre-constructed message on the pots topic.
+    pub async fn publish_message(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
+        self.0.publish(message).await
+    }
 }
