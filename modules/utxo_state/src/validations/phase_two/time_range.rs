@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use acropolis_common::{genesis_values::GenesisValues, validation::ScriptContextError, Slot};
-use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
+use amaru_uplc::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::to_plutus_data::*;
 

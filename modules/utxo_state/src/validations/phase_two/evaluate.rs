@@ -9,10 +9,8 @@ use acropolis_common::{
     validation::Phase2ValidationError, CostModels, ReferenceScript, ScriptHash, ScriptLang,
     TxUTxODeltas, UTXOValue, UTxOIdentifier,
 };
-use rayon::prelude::*;
-use rayon::ThreadPool;
-use uplc_turbo::data::PlutusData;
-use uplc_turbo::{
+use amaru_uplc::data::PlutusData;
+use amaru_uplc::{
     arena::Arena,
     binder::DeBruijn,
     bumpalo::Bump,
@@ -20,6 +18,8 @@ use uplc_turbo::{
     machine::{ExBudget, PlutusVersion},
     term::Term,
 };
+use rayon::prelude::*;
+use rayon::ThreadPool;
 
 use crate::validations::phase_two::script_context::encode_tx_info;
 use crate::validations::phase_two::TxInfo;
@@ -168,7 +168,7 @@ pub fn evaluate_raw_flat_program(
     let flat_bytes = flat_bytes.to_vec();
     evaluator_pool().install(|| {
         let arena = arena_pool().acquire();
-        let program: &uplc_turbo::program::Program<DeBruijn> = uplc_turbo::flat::decode(
+        let program: &amaru_uplc::program::Program<DeBruijn> = amaru_uplc::flat::decode(
             &arena,
             &flat_bytes,
             plutus_version,
@@ -359,7 +359,7 @@ fn evaluate_single_script(
     };
 
     // 4. Flat-decode the script
-    let mut program = uplc_turbo::flat::decode::<DeBruijn>(
+    let mut program = amaru_uplc::flat::decode::<DeBruijn>(
         arena,
         &script_bytes,
         plutus_version,
