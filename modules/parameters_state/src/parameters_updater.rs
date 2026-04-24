@@ -223,13 +223,7 @@ impl ParametersUpdater {
             }
         }
         for (new_member, v) in cu.new_committee_members.iter() {
-            if let Some(old) = c.members.insert(new_member.clone(), *v) {
-                error!(
-                    "New committee member {:?} replaces the old committee member {:?}",
-                    (new_member, v),
-                    old
-                );
-            }
+            c.members.insert(new_member.clone(), *v);
         }
         c.threshold = cu.terms.clone();
     }
