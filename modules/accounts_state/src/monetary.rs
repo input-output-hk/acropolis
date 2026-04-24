@@ -5,7 +5,7 @@ use acropolis_common::{
 };
 use anyhow::{anyhow, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive};
-use tracing::info;
+use tracing::debug;
 
 /// Result of monetary calculation
 #[derive(Debug, Default, Clone)]
@@ -56,7 +56,7 @@ pub fn calculate_monetary_change(
         .to_u64()
         .ok_or(anyhow!("Can't calculate integral stake rewards"))?;
 
-    info!(total_rewards=%total_reward_pot, cut=%treasury_cut, increase=treasury_increase_u64,
+    debug!(total_rewards=%total_reward_pot, cut=%treasury_cut, increase=treasury_increase_u64,
           stake_rewards, "Treasury:");
 
     Ok(MonetaryResult {
@@ -99,7 +99,7 @@ fn calculate_monetary_expansion(
             / BigDecimal::from(monetary_expansion_factor.denom()))
         .with_scale(0);
 
-    info!(eta=%eta, rho=%monetary_expansion_factor, %monetary_expansion, "Monetary:");
+    debug!(eta=%eta, rho=%monetary_expansion_factor, %monetary_expansion, "Monetary:");
 
     monetary_expansion
 }

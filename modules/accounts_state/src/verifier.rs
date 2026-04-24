@@ -18,7 +18,7 @@ use std::{
     fs::{read_dir, File},
     path::PathBuf,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 /// Verifier
 pub struct Verifier {
@@ -273,7 +273,7 @@ impl Verifier {
             }
 
             if pots == desired_pots {
-                info!(epoch = epoch, "Verification success for");
+                debug!(epoch = epoch, "Verification success for");
             }
         } else {
             warn!("Epoch {epoch} not represented in verify test data");
@@ -342,7 +342,7 @@ impl Verifier {
                 });
             }
 
-            info!(
+            debug!(
                 epoch,
                 "Read rewards verification data for {} SPOs",
                 expected_rewards.len()
@@ -427,7 +427,7 @@ impl Verifier {
             }
 
             if errors == 0 {
-                info!(epoch, "Rewards verification OK");
+                debug!(epoch, "Rewards verification OK");
             } else {
                 error!(errors, epoch, "Rewards verification:");
             }
@@ -520,7 +520,7 @@ impl Verifier {
 
         let (outcome, total, _, _, _) = Self::verify_spdd_impl(epoch, spdd, &reference);
         if outcome {
-            info!("Verification of SPDD, end of epoch {epoch}: OK, total active stake {total}");
+            debug!("Verification of SPDD, end of epoch {epoch}: OK, total active stake {total}");
         } else {
             error!("Verification of SPDD, end of epoch {epoch}: Failed");
         }
