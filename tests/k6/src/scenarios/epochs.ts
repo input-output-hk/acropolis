@@ -1,6 +1,5 @@
 import { ENDPOINTS } from '../config/endpoints';
 import { apiClient, MetricType } from '../utils/api-client';
-import { buildUrl } from '../utils/helpers';
 
 export function testEpochLatest(): void {
   apiClient.get(ENDPOINTS.EPOCHS_LATEST, {
@@ -16,19 +15,4 @@ export function testEpochParameters(): void {
     tagName: 'epoch_parameters',
     metricType: MetricType.EPOCH,
   });
-}
-
-export function testEpochSpecific(): void {
-  const latestRes = apiClient.getRaw(ENDPOINTS.EPOCHS_LATEST);
-
-  if (latestRes.status === 200 && latestRes.json('epoch')) {
-    const epochNo = latestRes.json('epoch') as number;
-    const url = buildUrl(ENDPOINTS.EPOCH, { epoch_no: (epochNo - 1).toString() });
-
-    apiClient.get(url, {
-      endpointName: 'GET /epochs/{epoch_no}',
-      tagName: 'epoch_specific',
-      metricType: MetricType.EPOCH,
-    });
-  }
 }
