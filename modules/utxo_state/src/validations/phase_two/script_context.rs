@@ -8,6 +8,7 @@ use acropolis_common::{
 use amaru_uplc::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use super::cert::encode_cert;
 use super::governance::*;
 use super::input::*;
 use super::time_range::*;
@@ -258,15 +259,17 @@ impl ScriptContext<'_> {
         tx_info_pd: Option<&'a PlutusData<'a>>,
         arena: &'a Arena,
         version: PlutusVersion,
+        protocol_major_version: u64,
     ) -> Result<Vec<&'a PlutusData<'a>>, ScriptContextError> {
         let tx_info_pd = match tx_info_pd {
             Some(pd) => pd,
-            None => encode_tx_info(self.tx_info, arena, version)?,
+            None => encode_tx_info(self.tx_info, arena, version, protocol_major_version)?,
         };
 
         match version {
             PlutusVersion::V1 | PlutusVersion::V2 => {
-                let purpose_pd = encode_script_purpose(&self.purpose, arena, version)?;
+                let purpose_pd =
+                    encode_script_purpose(&self.purpose, arena, version, protocol_major_version)?;
                 let context_pd = constr(arena, 0, vec![tx_info_pd, purpose_pd]);
 
                 let mut args = Vec::new();
@@ -279,8 +282,13 @@ impl ScriptContext<'_> {
             }
             PlutusVersion::V3 => {
                 let redeemer_pd = from_cbor(arena, &self.redeemer.data)?;
-                let script_info_pd =
-                    encode_script_info(&self.purpose, &self.datum, arena, version)?;
+                let script_info_pd = encode_script_info(
+                    &self.purpose,
+                    &self.datum,
+                    arena,
+                    version,
+                    protocol_major_version,
+                )?;
                 let context_pd = constr(arena, 0, vec![tx_info_pd, redeemer_pd, script_info_pd]);
                 Ok(vec![context_pd])
             }
@@ -296,6 +304,7 @@ pub fn encode_tx_info<'a>(
     tx_info: &TxInfo,
     arena: &'a Arena,
     version: PlutusVersion,
+    protocol_major_version: u64,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     let inputs = {
         let items: Vec<_> = tx_info
@@ -331,7 +340,7 @@ pub fn encode_tx_info<'a>(
         let items: Vec<_> = tx_info
             .certificates
             .iter()
-            .map(|c| c.cert.to_plutus_data(arena, version))
+            .map(|c| encode_cert(&c.cert, arena, version, protocol_major_version))
             .collect::<Result<_, _>>()?;
         list(arena, items)
     };
@@ -379,7 +388,8 @@ pub fn encode_tx_info<'a>(
                     .collect::<Result<_, _>>()?;
                 list(arena, items)
             };
-            let redeemers_pd = encode_redeemers_map(tx_info, arena, version)?;
+            let redeemers_pd =
+                encode_redeemers_map(tx_info, arena, version, protocol_major_version)?;
             Ok(constr(
                 arena,
                 0,
@@ -408,7 +418,8 @@ pub fn encode_tx_info<'a>(
                     .collect::<Result<_, _>>()?;
                 list(arena, items)
             };
-            let redeemers_pd = encode_redeemers_map(tx_info, arena, version)?;
+            let redeemers_pd =
+                encode_redeemers_map(tx_info, arena, version, protocol_major_version)?;
             let votes = match &tx_info.voting_procedures {
                 Some(vp) => vp.to_plutus_data(arena, version)?,
                 None => map(arena, vec![]),
@@ -469,6 +480,7 @@ fn encode_script_purpose<'a>(
     purpose: &ScriptPurpose,
     arena: &'a Arena,
     version: PlutusVersion,
+    protocol_major_version: u64,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     match purpose {
         ScriptPurpose::Mint(policy_id) => {
@@ -485,7 +497,7 @@ fn encode_script_purpose<'a>(
             Ok(constr(arena, 2, vec![staking]))
         }
         ScriptPurpose::Certify(cert_with_pos) => {
-            let c = cert_with_pos.cert.to_plutus_data(arena, version)?;
+            let c = encode_cert(&cert_with_pos.cert, arena, version, protocol_major_version)?;
             Ok(constr(arena, 3, vec![c]))
         }
         _ => Err(ScriptContextError::UnsupportedScriptPurpose),
@@ -501,6 +513,7 @@ fn encode_script_info<'a>(
     datum: &Option<Vec<u8>>,
     arena: &'a Arena,
     version: PlutusVersion,
+    protocol_major_version: u64,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     match purpose {
         ScriptPurpose::Mint(policy_id) => {
@@ -524,7 +537,7 @@ fn encode_script_info<'a>(
         }
         ScriptPurpose::Certify(cert_with_pos) => {
             let idx = cert_with_pos.cert_index.to_plutus_data(arena, version)?;
-            let c = cert_with_pos.cert.to_plutus_data(arena, version)?;
+            let c = encode_cert(&cert_with_pos.cert, arena, version, protocol_major_version)?;
             Ok(constr(arena, 3, vec![idx, c]))
         }
         ScriptPurpose::Vote(voter) => {
@@ -547,6 +560,7 @@ fn encode_redeemers_map<'a>(
     tx_info: &TxInfo,
     arena: &'a Arena,
     version: PlutusVersion,
+    protocol_major_version: u64,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     let sorted_inputs: Vec<UTxOIdentifier> = tx_info.inputs.iter().map(|ri| ri.utxo_id).collect();
 
@@ -568,7 +582,7 @@ fn encode_redeemers_map<'a>(
                     Some(tx_info.proposal_procedures.as_slice())
                 },
             )?;
-            let key = encode_redeemer_key(&purpose, arena, version)?;
+            let key = encode_redeemer_key(&purpose, arena, version, protocol_major_version)?;
             let value = from_cbor(arena, &redeemer.data)?;
             Ok((key, value))
         })
@@ -584,6 +598,7 @@ fn encode_redeemer_key<'a>(
     purpose: &ScriptPurpose,
     arena: &'a Arena,
     version: PlutusVersion,
+    protocol_major_version: u64,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     match purpose {
         // This is because Plutus Data Constructor Order
@@ -611,13 +626,13 @@ fn encode_redeemer_key<'a>(
         },
         ScriptPurpose::Certify(cert_with_pos) => match version {
             PlutusVersion::V1 | PlutusVersion::V2 => {
-                let c = cert_with_pos.cert.to_plutus_data(arena, version)?;
+                let c = encode_cert(&cert_with_pos.cert, arena, version, protocol_major_version)?;
                 Ok(constr(arena, 3, vec![c]))
             }
             PlutusVersion::V3 => {
                 // V3: includes the certificate index
                 let idx = cert_with_pos.cert_index.to_plutus_data(arena, version)?;
-                let c = cert_with_pos.cert.to_plutus_data(arena, version)?;
+                let c = encode_cert(&cert_with_pos.cert, arena, version, protocol_major_version)?;
                 Ok(constr(arena, 3, vec![idx, c]))
             }
         },
@@ -791,7 +806,7 @@ mod tests {
         let sc = &contexts[0];
 
         let arena = Arena::new();
-        let args = sc.to_script_args(None, &arena, PlutusVersion::V1).unwrap();
+        let args = sc.to_script_args(None, &arena, PlutusVersion::V1, 5).unwrap();
 
         // V1 spending: [datum, redeemer, context]
         assert_eq!(args.len(), 3, "V1 spending should produce 3 args");

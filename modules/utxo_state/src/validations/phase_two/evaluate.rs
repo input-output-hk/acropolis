@@ -260,7 +260,9 @@ pub fn evaluate_scripts(
     let arena_for_tx_info = Arena::from_bump(Bump::with_capacity(ARENA_INITIAL_CAPACITY));
     plutus_versions.iter().for_each(|common_version| {
         let version = from_common_version(*common_version);
-        if let Ok(tx_info_pd) = encode_tx_info(tx_info, &arena_for_tx_info, version) {
+        if let Ok(tx_info_pd) =
+            encode_tx_info(tx_info, &arena_for_tx_info, version, protocol_major_version)
+        {
             cached_tx_info_pd.insert(*common_version, tx_info_pd);
         }
     });
@@ -311,7 +313,7 @@ fn evaluate_single_script(
 
     // 1. Build script arguments
     let args = sc
-        .to_script_args(tx_info_pd, arena, plutus_version)
+        .to_script_args(tx_info_pd, arena, plutus_version, protocol_major_version)
         .map_err(Phase2ValidationError::ScriptContextError)?;
 
     // 2. Look up script bytes
@@ -488,15 +490,13 @@ mod tests {
         matches Ok(());
         "conway - valid transaction 8 - with 1 Plutus V2 Mint script with duplicate redeemer pointers"
     )]
-    // TODO:
-    // Make this test pass
-    // #[test_case(validation_fixture!(
-    //     "conway",
-    //     "6f5ef8b9aaeb7bf6242b34c1191622448960901e704ff92968498c2f426cbef0"
-    // ) =>
-    //     matches Ok(());
-    //     "conway - valid transaction 9 - with 1 Plutus V3 Cert script"
-    // )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "6f5ef8b9aaeb7bf6242b34c1191622448960901e704ff92968498c2f426cbef0"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 9 - with 1 Plutus V3 Cert script"
+    )]
     #[test_case(validation_fixture!(
         "conway",
         "332aac636f8476b1a91c0071a445103d8f55309c23bfddaf242732630efcf0ec",
