@@ -39,6 +39,7 @@ help:
 	@echo "  run-bootstrap-utxo-validation  Run the omnibus (mainnet) with bootstrap + utxo-validation config"
 	@echo "  run-block-header-validation  Run the omnibus (mainnet) with block-header-validation config"
 	@echo "  run-bootstrap-spdd-drdd  Run the omnibus with bootstrap config, storing spdd and drdd (snapshot)"
+	@echo "  run-ledger-validation    Run the omnibus with mainnet + all ledger and txs validation"
 	@echo "  run-test-blocks          Run the omnibus with test-blocks/omnibus.test.toml overrides"
 	@echo "  run-test-vrf-wrong-leader  Run the omnibus with test-vrf-wrong-leader/omnibus.test.toml overrides"
 	@echo "  run-midnight-mainnet     Run the midnight indexer (mainnet)"
@@ -91,6 +92,9 @@ run-block-header-validation:
 
 run-bootstrap-store-spdd-drdd:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml --config omnibus.store-spdd-drdd.toml
+
+run-ledger-validation:
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config configs/ledger-validation.toml
 
 run-test-blocks:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config test-blocks/omnibus.test.toml
