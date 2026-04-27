@@ -568,7 +568,12 @@ impl NetworkManager {
             );
             return;
         };
-        warn!(address = %peer.conn.address, "disconnected from peer");
+
+        if self.configured_addrs.contains(&peer.conn.address) {
+            warn!(address = %peer.conn.address, "disconnected from pre-configured peer");
+        } else {
+            info!(address = %peer.conn.address, "peer disconnected");
+        }
 
         // Capture state before peer is partially consumed.
         let is_cold_origin = self.cold_origin.remove(&id);
@@ -592,7 +597,7 @@ impl NetworkManager {
         if is_cold_origin && !established && !is_configured {
             // Cold-promoted peer that never established a connection (TCP refused / timeout).
             // Blacklist so peer-sharing cannot re-add it this session.
-            warn!(
+            info!(
                 address = %address,
                 "cold-promoted peer never connected — blacklisting for session"
             );
