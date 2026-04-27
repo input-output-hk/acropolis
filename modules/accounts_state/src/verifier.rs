@@ -273,7 +273,7 @@ impl Verifier {
             }
 
             if pots == desired_pots {
-                info!(epoch = epoch, "Verification success for");
+                debug!(epoch = epoch, "Verification success for");
             }
         } else {
             warn!("Epoch {epoch} not represented in verify test data");
@@ -342,7 +342,7 @@ impl Verifier {
                 });
             }
 
-            info!(
+            debug!(
                 epoch,
                 "Read rewards verification data for {} SPOs",
                 expected_rewards.len()
@@ -427,7 +427,7 @@ impl Verifier {
             }
 
             if errors == 0 {
-                info!(epoch, "Rewards verification OK");
+                debug!(epoch, "Rewards verification OK");
             } else {
                 error!(errors, epoch, "Rewards verification:");
             }

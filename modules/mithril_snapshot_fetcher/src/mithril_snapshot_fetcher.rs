@@ -343,7 +343,7 @@ impl MithrilSnapshotFetcher {
                         last_epoch = Some(epoch);
 
                         if new_epoch {
-                            info!(epoch, number, slot, "New epoch");
+                            debug!(epoch, number, slot, "New epoch");
                         }
 
                         let timestamp = genesis.slot_to_timestamp(slot);

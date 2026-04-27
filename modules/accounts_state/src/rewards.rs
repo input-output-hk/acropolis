@@ -94,7 +94,7 @@ pub fn calculate_rewards(
     let total_active_stake =
         BigDecimal::from(staking.spos.values().map(|s| s.total_stake).sum::<Lovelace>());
 
-    info!(epoch, go=staking.epoch, mark=performance.epoch,
+    debug!(epoch, go=staking.epoch, mark=performance.epoch,
           %total_supply, %total_active_stake, %stake_rewards, total_blocks,
           "Calculating rewards:");
 
@@ -149,7 +149,7 @@ pub fn calculate_rewards(
             pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account);
 
             if pay_to_pool_reward_account {
-                info!(
+                debug!(
                     "SPO {}'s reward account {} registered before stability window - will pay leader reward",
                     operator_id, staking_spo.reward_account
                 );
@@ -160,7 +160,7 @@ pub fn calculate_rewards(
         // In Cardano, addrsRew is captured at the stability window, so accounts that deregister
         // after the snapshot but before the stability window should NOT receive leader rewards.
         if pay_to_pool_reward_account && deregistrations.contains(&staking_spo.reward_account) {
-            info!(
+            debug!(
                 "SPO {}'s reward account {} deregistered before stability window - not paying",
                 operator_id, staking_spo.reward_account
             );
@@ -184,7 +184,7 @@ pub fn calculate_rewards(
                             > 0
                         {
                             pay_to_pool_reward_account = false;
-                            warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
+                            debug!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
                                   operator_id,
                                   other_id,
                                   staking_spo.reward_account);
@@ -193,7 +193,7 @@ pub fn calculate_rewards(
                     }
                 }
             } else {
-                info!("Reward account for SPO {} isn't registered", operator_id);
+                debug!("Reward account for SPO {} isn't registered", operator_id);
             }
         }
 
@@ -250,7 +250,7 @@ pub fn calculate_rewards(
         }
     }
 
-    info!(
+    debug!(
         num_delegators_paid,
         total_paid_to_delegators,
         num_pools_paid,

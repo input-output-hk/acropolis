@@ -15,7 +15,7 @@ use acropolis_common::{
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use std::{collections::HashMap, sync::Arc};
-use tracing::info;
+use tracing::debug;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HistoricalDRepState {
@@ -225,7 +225,7 @@ impl State {
     }
 
     async fn log_stats(&self) {
-        info!(count = self.dreps.len());
+        debug!(count = self.dreps.len());
     }
 
     pub async fn tick(&self) -> Result<()> {
