@@ -312,7 +312,7 @@ There are two options to run testnets: fresh testnet or already prepared, forked
 
 * Fresh testnet:
 
-1. Use Acropolis node from `MS-5-8-tests-v0` tag.
+1. Use Acropolis node from `MS-5-8-tests-v1` tag.
 1. Before starting the cluster, run `reset-genesis.sh` to set genesis timestamps to 2 minutes from your current now.
    This is necessary to have synchronized nodes. This script will also clean the 'database'.
 1. Start the cluster with `start-cluster.sh`.
@@ -334,7 +334,7 @@ logs.
 
 This testnet will not produce new blocks but already contains two forks.
 
-1. Use Acropolis node from `MS-5-8-tests-v0` tag.
+1. Use Acropolis node from `MS-5-8-tests-v1` tag.
 1. Start the cluster with `start-cluster-forked.sh`.
 1. Setup the TCP proxy with `set-fork-1.sh`.
 1. Execute `make run-testnet`. This will build and run Acropolis node connected to the first network partition (fork).

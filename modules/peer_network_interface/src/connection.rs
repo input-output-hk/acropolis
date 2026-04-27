@@ -14,7 +14,7 @@ use tokio::{
     select,
     sync::{mpsc, oneshot},
 };
-use tracing::error;
+use tracing::debug;
 
 use crate::network::PeerMessageSender;
 
@@ -113,7 +113,7 @@ impl PeerConnectionWorker {
         blockfetch: mpsc::UnboundedReceiver<BlockfetchCommand>,
     ) {
         if let Err(err) = self.do_run(chainsync, blockfetch).await {
-            error!(peer = self.address, "{err:#}");
+            debug!(peer = self.address, "{err:#}");
         }
         let _ = self.sender.write(PeerEvent::Disconnected).await;
     }
