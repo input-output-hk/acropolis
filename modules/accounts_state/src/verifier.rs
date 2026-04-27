@@ -18,7 +18,7 @@ use std::{
     fs::{read_dir, File},
     path::PathBuf,
 };
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 /// Verifier
 pub struct Verifier {
@@ -520,7 +520,7 @@ impl Verifier {
 
         let (outcome, total, _, _, _) = Self::verify_spdd_impl(epoch, spdd, &reference);
         if outcome {
-            debug!("Verification of SPDD, end of epoch {epoch}: OK, total active stake {total}");
+            info!("Verification of SPDD, end of epoch {epoch}: OK, total active stake {total}");
         } else {
             error!("Verification of SPDD, end of epoch {epoch}: Failed");
         }
