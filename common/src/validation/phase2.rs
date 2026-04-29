@@ -2,7 +2,9 @@
 //!
 //! These errors occur during script evaluation after Phase 1 validation passes.
 
-use crate::{DatumHash, PlutusVersion, RedeemerPointer, ScriptHash, UTxOIdentifier};
+use crate::{
+    DatumHash, ExUnits, PlutusVersion, RedeemerPointer, RedeemerTag, ScriptHash, UTxOIdentifier,
+};
 use thiserror::Error;
 
 /// Phase 2 (Plutus script execution) validation errors.
@@ -93,4 +95,62 @@ pub enum UplcMachineError {
     /// Missing redeemer for script
     #[error("Missing redeemer for script {script_hash}")]
     MissingRedeemer { script_hash: ScriptHash },
+}
+
+/// Per-script outcome of phase-2 Plutus validation.
+///
+/// One `ScriptEvaluationOutcome` is produced for each Plutus script context that the
+/// evaluator processed for a transaction. Native scripts are not represented (they do
+/// not undergo phase-2 evaluation). The execution units are taken from the redeemer
+/// in the transaction (i.e. the budget the transaction declared for the script).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScriptEvaluationOutcome {
+    /// Hash of the script that was evaluated.
+    pub script_hash: ScriptHash,
+
+    /// Why this script ran (spend / mint / cert / reward / vote / propose).
+    pub purpose: RedeemerTag,
+
+    /// Plutus language version under which the script was evaluated.
+    pub plutus_version: PlutusVersion,
+
+    /// Execution units (memory, cpu/steps) declared by the redeemer for this script.
+    pub ex_units: ExUnits,
+
+    /// `true` iff the script evaluated successfully under phase-2 rules.
+    pub is_success: bool,
+
+    /// `None` on success. On failure, a short rendered error message (≤ 512 chars).
+    pub error_message: Option<String>,
+}
+
+impl ScriptEvaluationOutcome {
+    /// Maximum length of `error_message`. Longer messages are truncated at construction.
+    pub const MAX_ERROR_MESSAGE_LEN: usize = 512;
+
+    /// Construct an outcome, truncating an over-long error message to
+    /// [`Self::MAX_ERROR_MESSAGE_LEN`] bytes.
+    pub fn new(
+        script_hash: ScriptHash,
+        purpose: RedeemerTag,
+        plutus_version: PlutusVersion,
+        ex_units: ExUnits,
+        is_success: bool,
+        error_message: Option<String>,
+    ) -> Self {
+        let error_message = error_message.map(|mut m| {
+            if m.len() > Self::MAX_ERROR_MESSAGE_LEN {
+                m.truncate(Self::MAX_ERROR_MESSAGE_LEN);
+            }
+            m
+        });
+        Self {
+            script_hash,
+            purpose,
+            plutus_version,
+            ex_units,
+            is_success,
+            error_message,
+        }
+    }
 }

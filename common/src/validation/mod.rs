@@ -24,7 +24,9 @@ mod phase2;
 
 pub use {
     phase1::{Phase1ValidationError, UTxOValidationError, UTxOWValidationError},
-    phase2::{Phase2ValidationError, ScriptContextError, UplcMachineError},
+    phase2::{
+        Phase2ValidationError, ScriptContextError, ScriptEvaluationOutcome, UplcMachineError,
+    },
 };
 
 /// Validation status

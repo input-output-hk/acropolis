@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch *)",
+      "Bash(grep -E 'refs/heads/[0-9]+-script-eval-visualizer$|refs/heads/[0-9]+-script-evaluation-visualizer$')",
+      "Bash(.specify/scripts/bash/create-new-feature.sh --json --number 3 --short-name \"script-eval-visualizer\" \"Build a caryatid module under modules folder that listens to utxo_state's phase 2 validation events on cardano.utxo.phase2 channel, with a real-time React frontend showing the latest 1000 script evaluations via SSE. The publishing of scripts evaluation results in utxo_state can be turned on/off.\")",
+      "Bash(.specify/scripts/bash/setup-plan.sh --json)",
+      "Bash(.specify/scripts/bash/update-agent-context.sh claude *)",
+      "Bash(.specify/scripts/bash/check-prerequisites.sh --json)",
+      "Bash(.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks)",
+      "Read(//home/hypo/.cargo/registry/src/**)",
+      "Bash(cargo tree *)",
+      "Bash(cargo build *)",
+      "Bash(cargo test *)",
+      "Bash(cargo clippy *)"
+    ],
+    "additionalDirectories": [
+      "/home/hypo/works/input-output-hk/acropolis/specs/003-script-eval-visualizer"
+    ]
+  }
+}

@@ -4,10 +4,11 @@ use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
-use acropolis_common::validation::UplcMachineError;
+use acropolis_common::validation::{
+    Phase2ValidationError, ScriptEvaluationOutcome, UplcMachineError,
+};
 use acropolis_common::{
-    validation::Phase2ValidationError, CostModels, ReferenceScript, ScriptHash, ScriptLang,
-    TxUTxODeltas, UTXOValue, UTxOIdentifier,
+    CostModels, ReferenceScript, ScriptHash, ScriptLang, TxUTxODeltas, UTXOValue, UTxOIdentifier,
 };
 use amaru_uplc::data::PlutusData;
 use amaru_uplc::{
@@ -234,7 +235,13 @@ pub fn build_scripts_table(
 /// to handle deep recursion and reduce allocation overhead. Each script gets its
 /// own arena from the pool.
 ///
-/// If `is_valid` is false, scripts are expected to fail (per Alonzo spec).
+/// Returns a per-script outcome vector (one entry per Plutus script context;
+/// native scripts are not represented because `build_script_contexts` filters
+/// them out upstream) alongside the aggregate `Result`. The aggregate is the
+/// first script error encountered, or `Ok(())` if all scripts succeeded; if
+/// `is_valid == false` the aggregate is inverted per Alonzo spec.
+///
+/// The outcome vector's order matches `script_contexts`.
 pub fn evaluate_scripts(
     tx_info: &TxInfo,
     script_contexts: &[ScriptContext<'_>],
@@ -242,9 +249,12 @@ pub fn evaluate_scripts(
     cost_models: &CostModels,
     protocol_major_version: u64,
     is_valid: bool,
-) -> Result<(), Phase2ValidationError> {
+) -> (
+    Vec<ScriptEvaluationOutcome>,
+    Result<(), Phase2ValidationError>,
+) {
     if script_contexts.is_empty() {
-        return Ok(());
+        return (Vec::new(), Ok(()));
     }
 
     let plutus_versions = script_contexts
@@ -267,33 +277,65 @@ pub fn evaluate_scripts(
         }
     });
 
-    // Run all script evaluations in parallel on the evaluator thread pool
-    let script_result: Result<(), Phase2ValidationError> = evaluator_pool().install(|| {
-        script_contexts.par_iter().try_for_each(|sc| {
-            let arena = arena_pool().acquire();
-            evaluate_single_script(
-                &arena,
-                sc,
-                &cached_tx_info_pd,
-                scripts_table,
-                cost_models,
-                protocol_major_version,
-            )
-        })
+    // Run all script evaluations in parallel on the evaluator thread pool.
+    // Each script produces a `(Option<ScriptEvaluationOutcome>, Result<...>)` —
+    // `None` only when the script_lang was Native (defensive; in practice
+    // `build_script_contexts` already filters Natives out).
+    let pairs: Vec<(
+        Option<ScriptEvaluationOutcome>,
+        Result<(), Phase2ValidationError>,
+    )> = evaluator_pool().install(|| {
+        script_contexts
+            .par_iter()
+            .map(|sc| {
+                let arena = arena_pool().acquire();
+                evaluate_single_script(
+                    &arena,
+                    sc,
+                    &cached_tx_info_pd,
+                    scripts_table,
+                    cost_models,
+                    protocol_major_version,
+                )
+            })
+            .collect()
     });
 
+    let mut outcomes = Vec::with_capacity(pairs.len());
+    let mut first_err: Option<Phase2ValidationError> = None;
+    for (outcome, result) in pairs {
+        if let Some(o) = outcome {
+            outcomes.push(o);
+        }
+        if first_err.is_none() {
+            if let Err(e) = result {
+                first_err = Some(e);
+            }
+        }
+    }
+    let script_result = match first_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    };
+
     // Handle is_valid flag: if false, expect scripts to fail
-    if is_valid {
+    let aggregate = if is_valid {
         script_result
     } else {
         match script_result {
             Ok(()) => Err(Phase2ValidationError::ValidityStateError),
             Err(_) => Ok(()),
         }
-    }
+    };
+    (outcomes, aggregate)
 }
 
 /// Evaluate a single script execution on the current thread.
+///
+/// Returns `(Option<ScriptEvaluationOutcome>, Result<(), Phase2ValidationError>)`.
+/// The `Option` is `None` only on the defensive Native early-return arm
+/// (in normal flow, native scripts are filtered out by `build_script_contexts`);
+/// otherwise an outcome is always produced — successful or failed.
 fn evaluate_single_script(
     arena: &Arena,
     sc: &ScriptContext<'_>,
@@ -301,73 +343,105 @@ fn evaluate_single_script(
     scripts_table: &HashMap<ScriptHash, Arc<ReferenceScript>>,
     cost_models: &CostModels,
     protocol_major_version: u64,
-) -> Result<(), Phase2ValidationError> {
+) -> (
+    Option<ScriptEvaluationOutcome>,
+    Result<(), Phase2ValidationError>,
+) {
     let common_plutus_version = match &sc.script_lang {
         ScriptLang::Plutus(version) => *version,
-        ScriptLang::Native => return Ok(()),
+        ScriptLang::Native => return (None, Ok(())),
     };
     let plutus_version = from_common_version(common_plutus_version);
+    let ex_units = sc.redeemer.ex_units;
+    let purpose_tag = sc.redeemer.tag.clone();
+
+    let make_outcome = |success: bool, err: Option<&Phase2ValidationError>| {
+        ScriptEvaluationOutcome::new(
+            sc.script_hash,
+            purpose_tag.clone(),
+            common_plutus_version,
+            ex_units,
+            success,
+            err.map(|e| e.to_string()),
+        )
+    };
 
     // Get cached encoded tx info plutus data if exists
     let tx_info_pd = cached_tx_info_pd.get(&common_plutus_version).copied();
 
     // 1. Build script arguments
-    let args = sc
+    let args = match sc
         .to_script_args(tx_info_pd, arena, plutus_version, protocol_major_version)
-        .map_err(Phase2ValidationError::ScriptContextError)?;
+        .map_err(Phase2ValidationError::ScriptContextError)
+    {
+        Ok(args) => args,
+        Err(e) => return (Some(make_outcome(false, Some(&e))), Err(e)),
+    };
 
     // 2. Look up script bytes
-    let ref_script = scripts_table
+    let ref_script = match scripts_table
         .get(&sc.script_hash)
-        .ok_or(Phase2ValidationError::MissingScriptForHash(sc.script_hash))?;
+        .ok_or(Phase2ValidationError::MissingScriptForHash(sc.script_hash))
+    {
+        Ok(rs) => rs,
+        Err(e) => return (Some(make_outcome(false, Some(&e))), Err(e)),
+    };
 
     let cbor_bytes = match ref_script.as_ref() {
         ReferenceScript::PlutusV1(bytes)
         | ReferenceScript::PlutusV2(bytes)
         | ReferenceScript::PlutusV3(bytes) => bytes,
-        ReferenceScript::Native(_) => return Ok(()),
+        // Defensive: a Plutus-tagged script_lang resolving to a Native bytes blob.
+        ReferenceScript::Native(_) => return (None, Ok(())),
     };
 
     // Script bytes are CBOR-wrapped (a CBOR byte string containing FLAT data).
-    let script_bytes: serde_cbor::Value = serde_cbor::from_slice(cbor_bytes).map_err(|e| {
+    let script_bytes: serde_cbor::Value = match serde_cbor::from_slice(cbor_bytes).map_err(|e| {
         Phase2ValidationError::UplcMachineError(UplcMachineError::DecodeFailed {
             script_hash: sc.script_hash,
             reason: format!("failed to CBOR-unwrap script bytes: {e}"),
         })
-    })?;
+    }) {
+        Ok(v) => v,
+        Err(e) => return (Some(make_outcome(false, Some(&e))), Err(e)),
+    };
     let script_bytes = match script_bytes {
         serde_cbor::Value::Bytes(b) => b,
         _ => {
-            return Err(Phase2ValidationError::UplcMachineError(
-                UplcMachineError::DecodeFailed {
-                    script_hash: sc.script_hash,
-                    reason: "script CBOR is not a byte string".into(),
-                },
-            ));
+            let e = Phase2ValidationError::UplcMachineError(UplcMachineError::DecodeFailed {
+                script_hash: sc.script_hash,
+                reason: "script CBOR is not a byte string".into(),
+            });
+            return (Some(make_outcome(false, Some(&e))), Err(e));
         }
     };
 
     // 3. Get cost model for this version
-    let cost_model = match plutus_version {
-        PlutusVersion::V1 => cost_models.plutus_v1.as_ref().ok_or(
-            Phase2ValidationError::MissingCostModel(common_plutus_version),
-        )?,
-        PlutusVersion::V2 => cost_models.plutus_v2.as_ref().ok_or(
-            Phase2ValidationError::MissingCostModel(common_plutus_version),
-        )?,
-        PlutusVersion::V3 => cost_models.plutus_v3.as_ref().ok_or(
-            Phase2ValidationError::MissingCostModel(common_plutus_version),
-        )?,
+    let cost_model_opt = match plutus_version {
+        PlutusVersion::V1 => cost_models.plutus_v1.as_ref(),
+        PlutusVersion::V2 => cost_models.plutus_v2.as_ref(),
+        PlutusVersion::V3 => cost_models.plutus_v3.as_ref(),
+    };
+    let cost_model = match cost_model_opt {
+        Some(cm) => cm,
+        None => {
+            let e = Phase2ValidationError::MissingCostModel(common_plutus_version);
+            return (Some(make_outcome(false, Some(&e))), Err(e));
+        }
     };
 
     // 4. Flat-decode the script
-    let mut program = amaru_uplc::flat::decode::<DeBruijn>(
+    let mut program = match amaru_uplc::flat::decode::<DeBruijn>(
         arena,
         &script_bytes,
         plutus_version,
         protocol_major_version as u32,
     )
-    .map_err(|e| Phase2ValidationError::FlatDecodingError(e.to_string()))?;
+    .map_err(|e| Phase2ValidationError::FlatDecodingError(e.to_string()))
+    {
+        Ok(p) => p,
+        Err(e) => return (Some(make_outcome(false, Some(&e))), Err(e)),
+    };
 
     // 5. Apply arguments to the program
     for arg in &args {
@@ -383,7 +457,7 @@ fn evaluate_single_script(
     let result = program.eval_with_params(arena, plutus_version, cost_model.as_vec(), budget);
 
     // 7. Check result per version
-    match plutus_version {
+    let aggregate: Result<(), Phase2ValidationError> = match plutus_version {
         PlutusVersion::V1 | PlutusVersion::V2 => match result.term {
             Ok(term) => match term {
                 Term::Error => Err((UplcMachineError::ScriptFailed {
@@ -413,7 +487,10 @@ fn evaluate_single_script(
             })
             .into()),
         },
-    }
+    };
+
+    let outcome = make_outcome(aggregate.is_ok(), aggregate.as_ref().err());
+    (Some(outcome), aggregate)
 }
 
 #[cfg(test)]
@@ -540,14 +617,60 @@ mod tests {
 
         let cost_models = ctx.protocol_params.cost_models();
 
-        evaluate_scripts(
+        let plutus_script_count = script_contexts
+            .iter()
+            .filter(|sc| matches!(sc.script_lang, ScriptLang::Plutus(_)))
+            .count();
+
+        let (outcomes, aggregate) = evaluate_scripts(
             &tx_info,
             &script_contexts,
             &scripts_table,
             &cost_models,
             ctx.protocol_params.protocol_version().unwrap().major,
             tx_deltas.is_valid,
-        )
+        );
+
+        // T010: outcomes vector must have one entry per Plutus script context.
+        assert_eq!(
+            outcomes.len(),
+            plutus_script_count,
+            "outcome count must match plutus script context count"
+        );
+
+        // T010: every outcome must reference a script_hash that appears in script_contexts,
+        // budget must equal the redeemer's declared ex_units, and (for successful outcomes)
+        // ex_units mem/cpu must be the budget that the redeemer declared.
+        for outcome in &outcomes {
+            let sc = script_contexts
+                .iter()
+                .find(|sc| sc.script_hash == outcome.script_hash)
+                .expect("outcome's script_hash must appear in script_contexts");
+            assert_eq!(
+                outcome.ex_units, sc.redeemer.ex_units,
+                "ex_units must equal the redeemer's declared budget"
+            );
+            assert_eq!(
+                outcome.purpose, sc.redeemer.tag,
+                "purpose must match redeemer tag"
+            );
+            assert_eq!(
+                outcome.error_message.is_none(),
+                outcome.is_success,
+                "error_message is None iff is_success is true"
+            );
+        }
+
+        // T010: when the aggregate result is Ok and the tx was marked valid,
+        // every outcome must report success.
+        if aggregate.is_ok() && tx_deltas.is_valid {
+            assert!(
+                outcomes.iter().all(|o| o.is_success),
+                "every outcome must report success when aggregate is Ok"
+            );
+        }
+
+        aggregate
     }
 
     #[test]
@@ -578,13 +701,18 @@ mod tests {
         let empty_table = HashMap::new();
         let cost_models = ctx.protocol_params.cost_models();
 
-        let result = evaluate_scripts(
+        let (outcomes, result) = evaluate_scripts(
             &tx_info,
             &script_contexts,
             &empty_table,
             &cost_models,
             ctx.protocol_params.protocol_version().unwrap().major,
             tx_deltas.is_valid,
+        );
+
+        assert!(
+            outcomes.iter().all(|o| !o.is_success),
+            "every outcome must report failure when no scripts are resolvable"
         );
 
         assert!(

@@ -31,7 +31,7 @@ use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
-use crate::validation::ValidationStatus;
+use crate::validation::{ScriptEvaluationOutcome, ValidationStatus};
 use crate::{types::*, DRepRecord};
 use std::borrow::Cow;
 
@@ -412,6 +412,31 @@ pub enum CardanoMessage {
 
     // Pots
     Pots(Pots), // Current Pots
+
+    // Phase-2 Plutus script evaluation results
+    Phase2EvaluationResults(Phase2EvaluationResultsMessage), // Per-tx phase-2 outcomes
+}
+
+/// Per-transaction phase-2 Plutus script validation results.
+///
+/// Published on `cardano.utxo.phase2` (configurable) by `utxo_state` when the
+/// `publish-phase2-results` flag is enabled. One message per transaction that
+/// ran at least one Plutus script; native-only transactions are skipped.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Phase2EvaluationResultsMessage {
+    /// Hash of the transaction whose scripts were evaluated.
+    pub tx_hash: TxHash,
+
+    /// Position of the transaction within its block (0-indexed).
+    pub tx_index_in_block: u32,
+
+    /// Whether the tx was marked valid in its block. `false` ⇒ the Alonzo
+    /// "expected to fail" path (scripts are expected to fail).
+    pub is_valid: bool,
+
+    /// One element per Plutus script that ran. Non-empty by publisher
+    /// invariant; native scripts are not represented.
+    pub outcomes: Vec<ScriptEvaluationOutcome>,
 }
 
 /// A new block has been announced by some peer

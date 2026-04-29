@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{RollbackAwarePublisher, RollbackWrapper, ValidationContext},
-    configuration::{get_string_flag, StartupMode},
+    configuration::{get_bool_flag, get_string_flag, StartupMode},
     declare_cardano_reader,
     messages::{
         CardanoMessage, GenesisCompleteMessage, Message, PoolRegistrationUpdatesMessage,
@@ -101,6 +101,28 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_UTXO_VALIDATION_TOPIC: (&str, &str) =
     ("utxo-validation-publish-topic", "cardano.validation.utxo");
 const DEFAULT_ADDRESS_DELTA_PUBLISH_MODE: (&str, &str) = ("address-delta-publish-mode", "compact");
+/// Whether to publish per-tx phase-2 evaluation results on the bus. Default `false`
+/// — operators opt in by setting this to `true` in the `[module.utxo-state]`
+/// section of the process config. When `false`, no work is done beyond the
+/// existing validation path.
+const DEFAULT_PUBLISH_PHASE2_RESULTS: (&str, bool) = ("publish-phase2-results", false);
+/// Topic on which to publish phase-2 evaluation results when the flag is on.
+const DEFAULT_PUBLISH_PHASE2_TOPIC: (&str, &str) = ("publish-phase2-topic", "cardano.utxo.phase2");
+
+/// Resolve the optional phase-2 publish topic from a module config.
+///
+/// `None` means the feature is off — the caller MUST short-circuit before
+/// constructing or publishing any [`crate::messages::Phase2EvaluationResultsMessage`].
+/// `Some(topic)` is the configured topic to publish on.
+///
+/// Extracted as a free function so the toggle behaviour is unit-testable.
+pub fn resolve_publish_phase2_topic(config: &Config) -> Option<String> {
+    if get_bool_flag(config, DEFAULT_PUBLISH_PHASE2_RESULTS) {
+        Some(get_string_flag(config, DEFAULT_PUBLISH_PHASE2_TOPIC))
+    } else {
+        None
+    }
+}
 
 pub(crate) async fn publish_observer_message(
     publisher: &Option<Mutex<RollbackAwarePublisher<Message>>>,
@@ -138,6 +160,7 @@ impl UTXOState {
         mut stake_updates_reader: Option<StakeUpdatesReader>,
         mut pots_reader: PotsReader,
         publish_tx_validation_topic: String,
+        publish_phase2_topic: Option<String>,
         is_snapshot_mode: bool,
     ) -> Result<()> {
         let genesis_values = match bootstrapped_reader.read_with_rollbacks().await? {
@@ -233,20 +256,33 @@ impl UTXOState {
                     async {
                         let mut state = state.lock().await;
 
-                        ctx.handle(
-                            "validate",
-                            state
-                                .validate(
-                                    block,
-                                    deltas_msg,
-                                    &pool_registration_updates,
-                                    &stake_registration_updates,
-                                    &current_protocol_params,
-                                    &genesis_values,
-                                )
-                                .await
-                                .map_err(|e| e.into()),
-                        );
+                        let (phase2_messages, result) = state
+                            .validate(
+                                block,
+                                deltas_msg,
+                                &pool_registration_updates,
+                                &stake_registration_updates,
+                                &current_protocol_params,
+                                &genesis_values,
+                            )
+                            .await;
+
+                        // Publish per-tx phase-2 outcomes if and only if the
+                        // feature is enabled. The early-out on `None` avoids
+                        // any per-tx allocation/clone when off (SC-005).
+                        if let Some(topic) = publish_phase2_topic.as_deref() {
+                            for msg in phase2_messages {
+                                let payload = Arc::new(Message::Cardano((
+                                    block.as_ref().clone(),
+                                    CardanoMessage::Phase2EvaluationResults(msg),
+                                )));
+                                if let Err(e) = context.message_bus.publish(topic, payload).await {
+                                    error!("phase-2 publish on '{topic}' failed: {e}");
+                                }
+                            }
+                        }
+
+                        ctx.handle("validate", result.map_err(|e| e.into()));
 
                         ctx.publish().await;
                     }
@@ -319,6 +355,12 @@ impl UTXOState {
         let utxo_validation_publish_topic = get_string_flag(&config, DEFAULT_UTXO_VALIDATION_TOPIC);
         info!("Creating UTxO validation publisher on '{utxo_validation_publish_topic}'");
 
+        // Optional phase-2 results publisher. `None` = feature off (default).
+        let publish_phase2_topic = resolve_publish_phase2_topic(&config);
+        if let Some(ref topic) = publish_phase2_topic {
+            info!("Creating phase-2 evaluation publisher on '{topic}'");
+        }
+
         let address_delta_publish_mode =
             get_string_flag(&config, DEFAULT_ADDRESS_DELTA_PUBLISH_MODE)
                 .parse::<AddressDeltaPublishMode>()?;
@@ -366,6 +408,7 @@ impl UTXOState {
                 stake_updates_reader,
                 pots_reader,
                 utxo_validation_publish_topic,
+                publish_phase2_topic,
                 is_snapshot_mode,
             )
             .await
@@ -540,5 +583,65 @@ impl UTXOState {
         });
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod publish_phase2_toggle_tests {
+    use super::{resolve_publish_phase2_topic, DEFAULT_PUBLISH_PHASE2_RESULTS};
+    use config::{Config, FileFormat};
+
+    fn config_from(toml: &str) -> Config {
+        Config::builder()
+            .add_source(config::File::from_str(toml, FileFormat::Toml))
+            .build()
+            .expect("config")
+    }
+
+    #[test]
+    fn default_is_off() {
+        // The default tuple itself documents the default. (T031.)
+        assert!(
+            !DEFAULT_PUBLISH_PHASE2_RESULTS.1,
+            "publish-phase2-results default must be false"
+        );
+    }
+
+    #[test]
+    fn missing_flag_resolves_to_none() {
+        // T029: when the operator does not set publish-phase2-results, the
+        // helper returns None — the publish loop in run() takes the
+        // single-cmp early-out and constructs no messages.
+        let cfg = config_from("");
+        assert!(resolve_publish_phase2_topic(&cfg).is_none());
+    }
+
+    #[test]
+    fn flag_false_resolves_to_none() {
+        // T029: explicit false has the same effect as missing.
+        let cfg = config_from("publish-phase2-results = false");
+        assert!(resolve_publish_phase2_topic(&cfg).is_none());
+    }
+
+    #[test]
+    fn flag_true_resolves_to_default_topic() {
+        // T030 corollary: flipping the flag does not change validation; it
+        // only changes whether a publish topic is returned. The default topic
+        // matches the contract.
+        let cfg = config_from("publish-phase2-results = true");
+        let topic = resolve_publish_phase2_topic(&cfg);
+        assert_eq!(topic.as_deref(), Some("cardano.utxo.phase2"));
+    }
+
+    #[test]
+    fn flag_true_with_custom_topic_is_honoured() {
+        let cfg = config_from(
+            r#"
+                publish-phase2-results = true
+                publish-phase2-topic = "custom.phase2"
+            "#,
+        );
+        let topic = resolve_publish_phase2_topic(&cfg);
+        assert_eq!(topic.as_deref(), Some("custom.phase2"));
     }
 }

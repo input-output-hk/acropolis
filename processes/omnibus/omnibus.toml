@@ -85,6 +85,10 @@ block-totals-topic = "cardano.block.txs"
 # Subscriptions needed for validation
 pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
 stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"
+# Phase-2 evaluation result publishing for the script-eval-visualizer module.
+# Disabled by default; flip to `true` to opt in.
+#publish-phase2-results = true
+#publish-phase2-topic = "cardano.utxo.phase2"
 
 [module.spo-state]
 # Enables /pools/{pool_id}/history endpoint, enables to query active_stakes
@@ -226,6 +230,15 @@ port = 4340
 enabled = true
 address = "0.0.0.0"
 port = 4341
+
+[module.script-eval-visualizer]
+# Real-time table of phase-2 Plutus script evaluations.
+# Open http://127.0.0.1:8030/ in a browser when running.
+# Requires `publish-phase2-results = true` under [module.utxo-state].
+phase2-subscribe-topic = "cardano.utxo.phase2"
+bind-address = "127.0.0.1"
+bind-port = 8030
+network = "mainnet"
 
 # Enable for message spying
 #[module.spy]

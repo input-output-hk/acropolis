@@ -4,7 +4,7 @@ use crate::reference_scripts_state::ReferenceScriptsState;
 use crate::validations;
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::genesis_values::GenesisValues;
-use acropolis_common::messages::Message;
+use acropolis_common::messages::{Message, Phase2EvaluationResultsMessage};
 use acropolis_common::protocol_params::ProtocolParams;
 use acropolis_common::state_history::{StateHistory, StateHistoryStore};
 use acropolis_common::validation::ValidationError;
@@ -891,6 +891,13 @@ impl State {
         utxos
     }
 
+    /// Validate every transaction in a block.
+    ///
+    /// Returns a `Vec<Phase2EvaluationResultsMessage>` (one per transaction that
+    /// ran at least one Plutus script) alongside the existing aggregate
+    /// `Result`. The messages are produced regardless of any publish flag — the
+    /// caller decides whether to forward them onto the bus. Construction of
+    /// these messages is cheap relative to UPLC evaluation, which dominates.
     pub async fn validate(
         &mut self,
         block: &BlockInfo,
@@ -899,8 +906,12 @@ impl State {
         stake_registration_updates: &[StakeRegistrationUpdate],
         protocol_params: &ProtocolParams,
         genesis_values: &GenesisValues,
-    ) -> Result<(), Box<ValidationError>> {
+    ) -> (
+        Vec<Phase2EvaluationResultsMessage>,
+        Result<(), Box<ValidationError>>,
+    ) {
         let mut bad_transactions = Vec::new();
+        let mut phase2_messages: Vec<Phase2EvaluationResultsMessage> = Vec::new();
         let deltas = &deltas_msg.deltas;
 
         // collect utxos and reference scripts needed for validation
@@ -912,7 +923,7 @@ impl State {
 
         for tx_deltas in deltas.iter() {
             if block.status != BlockStatus::Bootstrap {
-                if let Err(e) = validations::validate_tx(
+                let (outcomes, result) = validations::validate_tx(
                     tx_deltas,
                     pool_registration_updates,
                     stake_registration_updates,
@@ -922,7 +933,18 @@ impl State {
                     &cost_models,
                     &|script_hash| self.lookup_reference_script(script_hash),
                     block.era,
-                ) {
+                );
+                if !outcomes.is_empty() {
+                    if let Some(tx_hash) = Self::spending_tx_hash(tx_deltas) {
+                        phase2_messages.push(Phase2EvaluationResultsMessage {
+                            tx_hash,
+                            tx_index_in_block: u32::from(tx_deltas.tx_identifier.tx_index()),
+                            is_valid: tx_deltas.is_valid,
+                            outcomes,
+                        });
+                    }
+                }
+                if let Err(e) = result {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
                 }
             }
@@ -933,13 +955,14 @@ impl State {
             }
         }
 
-        if bad_transactions.is_empty() {
+        let aggregate = if bad_transactions.is_empty() {
             Ok(())
         } else {
             Err(Box::new(ValidationError::BadTransactions {
                 bad_transactions,
             }))
-        }
+        };
+        (phase2_messages, aggregate)
     }
 }
 

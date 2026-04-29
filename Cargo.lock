@@ -466,6 +466,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_script_eval_visualizer"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "axum 0.8.9",
+ "caryatid_sdk",
+ "config",
+ "hex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_snapshot_bootstrapper"
 version = "0.1.0"
 dependencies = [
@@ -710,6 +727,7 @@ dependencies = [
  "acropolis_module_parameters_state",
  "acropolis_module_peer_network_interface",
  "acropolis_module_rest_blockfrost",
+ "acropolis_module_script_eval_visualizer",
  "acropolis_module_snapshot_bootstrapper",
  "acropolis_module_spdd_state",
  "acropolis_module_spo_state",
@@ -7291,6 +7309,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

@@ -31,3 +31,22 @@ It doesn't currently publish any messages.
 Also subscribe to `StakeRegistrationUpdates` Messages and `PoolRegistrationUpdates` Messages
 in order to validate UTxO Rule `ValueNotConservedUTxO` because we need to 
 calculate transaction's `deposit` and `refund` for Stake Address & Pool's Registration
+
+## Phase-2 evaluation publishing (optional)
+
+For operator-facing visibility into Plutus phase-2 script evaluations, this
+module can optionally publish a per-transaction `Phase2EvaluationResultsMessage`
+on a dedicated topic. The feature is **disabled by default** — operators opt in
+by adding the following to `[module.utxo-state]`:
+
+```toml
+publish-phase2-results = true
+publish-phase2-topic   = "cardano.utxo.phase2"   # default; can be omitted
+```
+
+When the flag is `false` (or absent), no message is constructed and no
+publication is attempted — the validation hot path is unchanged.
+
+The companion module
+[`acropolis_module_script_eval_visualizer`](../script_eval_visualizer) consumes
+this topic and serves a live HTML+SSE table of recent evaluations.

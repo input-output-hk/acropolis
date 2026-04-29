@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use acropolis_common::{
-    genesis_values::GenesisValues, validation::Phase2ValidationError, CostModels, RedeemerPointer,
-    ReferenceScript, ScriptHash, ScriptLang, TxUTxODeltas, UTXOValue, UTxOIdentifier,
+    genesis_values::GenesisValues,
+    validation::{Phase2ValidationError, ScriptEvaluationOutcome},
+    CostModels, RedeemerPointer, ReferenceScript, ScriptHash, ScriptLang, TxUTxODeltas, UTXOValue,
+    UTxOIdentifier,
 };
 
 mod address;
@@ -27,6 +29,9 @@ pub use script_context::{build_script_contexts, TxInfo};
 /// Builds the transaction info, resolves all script contexts, and evaluates
 /// each Plutus script in parallel. Reuses `scripts_needed` and `scripts_provided`
 /// already computed during phase 1 validation.
+///
+/// Returns a per-script outcome vector (one entry per Plutus script context;
+/// empty if there were no Plutus scripts) alongside the aggregate `Result`.
 #[allow(clippy::too_many_arguments)]
 pub fn validate_tx_phase_two(
     tx_deltas: &TxUTxODeltas,
@@ -37,12 +42,21 @@ pub fn validate_tx_phase_two(
     scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
     scripts_provided: &HashMap<ScriptHash, ScriptLang>,
     lookup_reference_script: &dyn Fn(&ScriptHash) -> Option<Arc<ReferenceScript>>,
-) -> Result<(), Phase2ValidationError> {
+) -> (
+    Vec<ScriptEvaluationOutcome>,
+    Result<(), Phase2ValidationError>,
+) {
     let scripts_table = build_scripts_table(tx_deltas, utxos, lookup_reference_script);
 
-    let tx_info = TxInfo::new(tx_deltas, utxos, genesis_values)?;
+    let tx_info = match TxInfo::new(tx_deltas, utxos, genesis_values) {
+        Ok(ti) => ti,
+        Err(e) => return (Vec::new(), Err(e.into())),
+    };
 
-    let script_contexts = build_script_contexts(&tx_info, scripts_needed, scripts_provided)?;
+    let script_contexts = match build_script_contexts(&tx_info, scripts_needed, scripts_provided) {
+        Ok(scs) => scs,
+        Err(e) => return (Vec::new(), Err(e.into())),
+    };
 
     evaluate_scripts(
         &tx_info,

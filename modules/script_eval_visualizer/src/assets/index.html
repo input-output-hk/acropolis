@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Acropolis — Script Evaluation Visualizer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --row-fail-bg: #ffe6e6;
+      --row-fail-bg-dark: #401818;
+      --row-success-bg: transparent;
+      --header-bg: #f3f3f3;
+      --header-bg-dark: #1f1f1f;
+      --panel-bg: #fafafa;
+      --panel-bg-dark: #181818;
+      --border: #ddd;
+      --border-dark: #333;
+      --muted: #777;
+      --link: #0366d6;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --row-fail-bg: var(--row-fail-bg-dark);
+        --header-bg: var(--header-bg-dark);
+        --panel-bg: var(--panel-bg-dark);
+        --border: var(--border-dark);
+        --link: #58a6ff;
+      }
+    }
+    html, body { margin: 0; padding: 0; font: 13px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
+    header { padding: 0.6em 1em; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1em; }
+    header h1 { font-size: 1em; margin: 0; font-weight: 600; }
+    header .meta { color: var(--muted); }
+    header .status { margin-left: auto; }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--header-bg); font-size: 0.85em; }
+    main { padding: 0; }
+
+    /* Statistics panel */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.5em 1em;
+      padding: 0.75em 1em;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel-bg);
+    }
+    .stats-group h2 {
+      font-size: 0.75em;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      margin: 0 0 0.3em;
+    }
+    .stats-row { display: flex; flex-wrap: wrap; gap: 0.4em 0.8em; align-items: baseline; }
+    .stats-row .item { display: inline-flex; align-items: baseline; gap: 0.3em; }
+    .stats-row .label { color: var(--muted); font-size: 0.9em; }
+    .stats-row .value { font-variant-numeric: tabular-nums; font-weight: 600; }
+    .stats-row .value.ok  { color: #1a7f37; }
+    .stats-row .value.bad { color: #b42318; }
+    @media (prefers-color-scheme: dark) {
+      .stats-row .value.ok  { color: #5fcb73; }
+      .stats-row .value.bad { color: #ff8a8a; }
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 4px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: var(--header-bg); position: sticky; top: 0; font-weight: 600; }
+    td.num { font-variant-numeric: tabular-nums; }
+    td.hash, th.hash { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+    tr.fail { background: var(--row-fail-bg); }
+    .empty { padding: 2em; text-align: center; color: var(--muted); }
+    .badge { font-size: 0.85em; padding: 1px 6px; border-radius: 4px; }
+    .badge.ok { background: #d4edda; color: #155724; }
+    .badge.bad { background: #f8d7da; color: #721c24; }
+    @media (prefers-color-scheme: dark) {
+      .badge.ok { background: #134120; color: #b8e9c4; }
+      .badge.bad { background: #4a1a20; color: #f1c5cb; }
+    }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .truncate { display: inline-block; max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Acropolis — Script Evaluation Visualizer</h1>
+    <span class="meta" id="netLabel"></span>
+    <span class="status"><span class="pill" id="conn">connecting…</span></span>
+    <span class="meta" id="counter">0 evaluations</span>
+  </header>
+
+  <section class="stats" aria-label="Aggregate statistics">
+    <div class="stats-group">
+      <h2>Totals</h2>
+      <div class="stats-row">
+        <span class="item"><span class="label">total</span><span class="value" id="stat-total">0</span></span>
+        <span class="item"><span class="label">success</span><span class="value ok"  id="stat-success">0</span></span>
+        <span class="item"><span class="label">failed</span> <span class="value bad" id="stat-failed">0</span></span>
+      </div>
+    </div>
+    <div class="stats-group">
+      <h2>By Plutus version</h2>
+      <div class="stats-row" id="stat-versions"></div>
+    </div>
+    <div class="stats-group">
+      <h2>By script purpose</h2>
+      <div class="stats-row" id="stat-purposes"></div>
+    </div>
+  </section>
+
+  <main>
+    <table>
+      <thead>
+        <tr>
+          <th>Epoch</th>
+          <th>Block</th>
+          <th>Slot</th>
+          <th>Tx</th>
+          <th class="hash">Script</th>
+          <th>Purpose</th>
+          <th>Plutus</th>
+          <th>Mem</th>
+          <th>CPU</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty">Waiting for evaluations…</div>
+  </main>
+
+  <script>
+    "use strict";
+
+    var MAX_ROWS = 1000;
+    var PLUTUS_VERSIONS = ["v1", "v2", "v3"];
+    var PURPOSES = ["spend", "mint", "cert", "reward", "vote", "propose"];
+
+    var rowsEl     = document.getElementById("rows");
+    var emptyEl    = document.getElementById("empty");
+    var connEl     = document.getElementById("conn");
+    var netEl      = document.getElementById("netLabel");
+    var counterEl  = document.getElementById("counter");
+    var statTotalEl    = document.getElementById("stat-total");
+    var statSuccessEl  = document.getElementById("stat-success");
+    var statFailedEl   = document.getElementById("stat-failed");
+    var statVersionsEl = document.getElementById("stat-versions");
+    var statPurposesEl = document.getElementById("stat-purposes");
+
+    var state = {
+      cexplorerBaseUrl: "",
+      network: "",
+      received: 0,
+      total: 0,
+      success: 0,
+      failed: 0,
+      byVersion: { v1: 0, v2: 0, v3: 0 },
+      byPurpose: { spend: 0, mint: 0, cert: 0, reward: 0, vote: 0, propose: 0 },
+    };
+
+    // Pre-create the per-version and per-purpose stat cells so updates are O(1).
+    var versionEls = {};
+    PLUTUS_VERSIONS.forEach(function (v) {
+      var item = document.createElement("span");
+      item.className = "item";
+      var label = document.createElement("span");
+      label.className = "label";
+      label.textContent = v;
+      var value = document.createElement("span");
+      value.className = "value";
+      value.textContent = "0";
+      item.appendChild(label);
+      item.appendChild(value);
+      statVersionsEl.appendChild(item);
+      versionEls[v] = value;
+    });
+
+    var purposeEls = {};
+    PURPOSES.forEach(function (p) {
+      var item = document.createElement("span");
+      item.className = "item";
+      var label = document.createElement("span");
+      label.className = "label";
+      label.textContent = p;
+      var value = document.createElement("span");
+      value.className = "value";
+      value.textContent = "0";
+      item.appendChild(label);
+      item.appendChild(value);
+      statPurposesEl.appendChild(item);
+      purposeEls[p] = value;
+    });
+
+    function shortHash(hex) {
+      if (!hex) return "";
+      return hex.slice(0, 8) + "…" + hex.slice(-6);
+    }
+
+    function fmtNum(n) {
+      if (n === null || n === undefined) return "";
+      return n.toLocaleString("en-US");
+    }
+
+    function setText(el, text) {
+      // Avoid spurious DOM writes on hot path.
+      if (el.firstChild && el.firstChild.nodeType === 3) {
+        if (el.firstChild.nodeValue !== text) el.firstChild.nodeValue = text;
+      } else {
+        el.textContent = text;
+      }
+    }
+
+    function buildRow(ev) {
+      var tr = document.createElement("tr");
+      if (!ev.success) tr.className = "fail";
+
+      function add(text, opts) {
+        var td = document.createElement("td");
+        if (opts && opts.cls) td.className = opts.cls;
+        if (opts && opts.html) td.innerHTML = opts.html;
+        else td.textContent = text;
+        tr.appendChild(td);
+        return td;
+      }
+
+      add(ev.epoch);
+      // Block number is plain text; the tx hash carries the cexplorer.io link.
+      add(fmtNum(ev.blockNumber), { cls: "num" });
+      add(fmtNum(ev.slot), { cls: "num" });
+
+      var txUrl = state.cexplorerBaseUrl
+        ? state.cexplorerBaseUrl + "/tx/" + encodeURIComponent(ev.txHash)
+        : "";
+      add("", {
+        cls: "hash",
+        html: '<span class="truncate" title="' + ev.txHash + '">' +
+          (txUrl
+            ? '<a href="' + txUrl + '" target="_blank" rel="noopener noreferrer">' + shortHash(ev.txHash) + '</a>'
+            : shortHash(ev.txHash)) +
+          '</span>',
+      });
+      add("", {
+        cls: "hash",
+        html: '<span class="truncate" title="' + ev.scriptHash + '">' + shortHash(ev.scriptHash) + '</span>',
+      });
+      add(ev.purpose);
+      add(ev.plutusVersion);
+      add(fmtNum(ev.mem), { cls: "num" });
+      add(fmtNum(ev.cpu), { cls: "num" });
+      var statusHtml = ev.success
+        ? '<span class="badge ok">ok</span>'
+        : '<span class="badge bad" title="' + (ev.error || "") + '">fail</span>';
+      add("", { html: statusHtml });
+
+      return tr;
+    }
+
+    function renderStats() {
+      setText(statTotalEl, fmtNum(state.total));
+      setText(statSuccessEl, fmtNum(state.success));
+      setText(statFailedEl, fmtNum(state.failed));
+      PLUTUS_VERSIONS.forEach(function (v) {
+        setText(versionEls[v], fmtNum(state.byVersion[v] || 0));
+      });
+      PURPOSES.forEach(function (p) {
+        setText(purposeEls[p], fmtNum(state.byPurpose[p] || 0));
+      });
+      setText(counterEl, fmtNum(state.received) + " evaluations");
+    }
+
+    function applyEvent(ev) {
+      // Aggregate stats are kept across the whole session; not capped at 1000.
+      state.total   += 1;
+      state.received = state.total;
+      if (ev.success) state.success += 1;
+      else            state.failed  += 1;
+      if (ev.plutusVersion in state.byVersion) state.byVersion[ev.plutusVersion] += 1;
+      if (ev.purpose in state.byPurpose)       state.byPurpose[ev.purpose]       += 1;
+
+      // Incremental DOM updates: prepend the new row, drop the oldest if over cap.
+      var tr = buildRow(ev);
+      if (rowsEl.firstChild) rowsEl.insertBefore(tr, rowsEl.firstChild);
+      else rowsEl.appendChild(tr);
+
+      while (rowsEl.childNodes.length > MAX_ROWS) {
+        rowsEl.removeChild(rowsEl.lastChild);
+      }
+      if (emptyEl.style.display !== "none") emptyEl.style.display = "none";
+
+      renderStats();
+    }
+
+    function connect() {
+      setText(connEl, "connecting…");
+      var es = new EventSource("/events");
+
+      es.addEventListener("init", function (m) {
+        try {
+          var data = JSON.parse(m.data);
+          state.cexplorerBaseUrl = data.cexplorerBaseUrl || "";
+          state.network = data.network || "";
+          if (state.network) setText(netEl, "network: " + state.network);
+        } catch (e) {
+          console.warn("init parse failed", e);
+        }
+        setText(connEl, "live");
+      });
+
+      es.addEventListener("script_eval", function (m) {
+        try {
+          applyEvent(JSON.parse(m.data));
+        } catch (e) {
+          console.warn("event parse failed", e);
+        }
+      });
+
+      es.addEventListener("lagged", function (m) {
+        console.warn("SSE lagged: " + m.data);
+      });
+
+      es.onopen  = function () { setText(connEl, "live"); };
+      es.onerror = function () { setText(connEl, "reconnecting…"); };
+    }
+
+    renderStats();
+    connect();
+  </script>
+</body>
+</html>

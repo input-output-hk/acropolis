@@ -30,6 +30,7 @@ use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_peer_network_interface::PeerNetworkInterface;
 use acropolis_module_rest_blockfrost::BlockfrostREST;
+use acropolis_module_script_eval_visualizer::ScriptEvalVisualizer;
 use acropolis_module_snapshot_bootstrapper::SnapshotBootstrapper;
 use acropolis_module_spdd_state::SPDDState;
 use acropolis_module_spo_state::SPOState;
@@ -131,6 +132,7 @@ pub async fn main() -> Result<()> {
     BlockKesValidator::register(&mut process);
     FakeBlockInjector::register(&mut process);
     MCPServer::register(&mut process);
+    ScriptEvalVisualizer::register(&mut process);
     MidnightState::register(&mut process);
     Stats::register(&mut process);
 

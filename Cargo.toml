@@ -34,6 +34,7 @@ members = [
     "modules/fake_block_injector",          # Fake block injector
     "modules/rest_blockfrost",              # Blockfrost-compatible REST API
     "modules/mcp_server",                   # Model Context Protocol server
+    "modules/script_eval_visualizer",       # Real-time phase-2 script evaluation visualizer
     "modules/custom_indexer",               # Custom indexer module
     "modules/midnight_state",               # Indexes and serves data needed by the `midnight-node`
 

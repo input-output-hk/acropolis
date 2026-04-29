@@ -1,0 +1,27 @@
+# Acropolis Script Evaluation Visualizer Module
+
+[package]
+name = "acropolis_module_script_eval_visualizer"
+version = "0.1.0"
+edition = "2021"
+authors = ["Acropolis Contributors"]
+description = "Real-time visualizer for phase-2 Plutus script evaluation results"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+axum = { workspace = true }
+config = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+
+[lib]
+path = "src/script_eval_visualizer.rs"
