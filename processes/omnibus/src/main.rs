@@ -68,10 +68,10 @@ struct Args {
 pub async fn main() -> Result<()> {
     let args = <self::Args as clap::Parser>::parse();
 
-    // Standard logging using RUST_LOG for log levels default to INFO for events only
-    let fmt_layer = fmt::layer()
-        .with_filter(EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new("info")))
-        .with_filter(filter::filter_fn(|meta| meta.is_event()));
+    let mut filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    filter = filter.add_directive("fjall=error".parse().unwrap());
+    let fmt_layer =
+        fmt::layer().with_filter(filter).with_filter(filter::filter_fn(|meta| meta.is_event()));
 
     // Only turn on tracing if some OTEL environment variables exist
     if std::env::vars().any(|(name, _)| name.starts_with("OTEL_")) {

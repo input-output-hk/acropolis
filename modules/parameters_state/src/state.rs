@@ -9,7 +9,7 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use std::ops::RangeInclusive;
-use tracing::info;
+use tracing::{debug, info};
 
 #[derive(Default, Clone)]
 pub struct State {
@@ -62,7 +62,7 @@ impl State {
         alonzo_gov: &[AlonzoBabbageVotingOutcome],
         conway_gov: &[GovernanceOutcomeVariant],
     ) -> Result<()> {
-        info!("Current Era: {:?}", self.current_era);
+        debug!("Current Era: {:?}", self.current_era);
         if self.current_era != Some(*new_era) {
             self.apply_genesis(new_era)?;
         }
@@ -74,7 +74,7 @@ impl State {
         new_era: &Era,
         msg: &GovernanceOutcomesMessage,
     ) -> Result<ProtocolParamsMessage> {
-        info!("Era: {:?}, applying enact state", new_era);
+        debug!("Era: {:?}, applying enact state", new_era);
         let conway_outcomes: Vec<_> =
             msg.conway_outcomes.iter().map(|o| o.action_to_perform.clone()).collect();
         self.apply_governance_outcomes(new_era, &msg.alonzo_babbage_outcomes, &conway_outcomes)?;

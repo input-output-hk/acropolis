@@ -7,7 +7,7 @@ use acropolis_common::{
     GovernanceOutcomeVariant, ProtocolParamUpdate,
 };
 use anyhow::{anyhow, bail, Result};
-use tracing::error;
+use tracing::{debug, error};
 
 #[derive(Default, Clone)]
 pub struct ParametersUpdater {
@@ -224,10 +224,9 @@ impl ParametersUpdater {
         }
         for (new_member, v) in cu.new_committee_members.iter() {
             if let Some(old) = c.members.insert(new_member.clone(), *v) {
-                error!(
-                    "New committee member {:?} replaces the old committee member {:?}",
-                    (new_member, v),
-                    old
+                debug!(
+                    "Updated committee member {:?}: {:?} -> {:?}",
+                    new_member, old, v
                 );
             }
         }

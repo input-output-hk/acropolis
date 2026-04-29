@@ -427,7 +427,7 @@ impl State {
 
     /// Background stats logger
     pub fn log_stats(&self) {
-        info!(num_stake_addresses = self.stake_addresses.lock().unwrap().len());
+        debug!(num_stake_addresses = self.stake_addresses.lock().unwrap().len());
     }
 
     /// Query utxo_state for the total lovelace of AVVM UTxOs cancelled at the Allegra boundary.
@@ -513,7 +513,7 @@ impl State {
     ) -> Result<()> {
         let pointer_values = self.get_pointer_address_values(context.clone()).await?;
         if pointer_values.is_empty() {
-            info!("No pointer address UTxOs found at Conway boundary");
+            debug!("No pointer address UTxOs found at Conway boundary");
             return Ok(());
         }
 
@@ -532,7 +532,7 @@ impl State {
         let total_pointer_lovelace: u64 = pointer_values.values().sum();
         let unresolved_lovelace = total_pointer_lovelace - resolved_lovelace;
 
-        info!(
+        debug!(
             total_pointers = pointer_values.len(),
             resolved_accounts = stake_values.len(),
             total_pointer_lovelace,
@@ -614,7 +614,7 @@ impl State {
 
             let old_reserves = self.pots.reserves;
             self.pots.reserves += avvm_cancelled;
-            info!(
+            debug!(
                 old_reserves,
                 new_reserves = self.pots.reserves,
                 avvm_cancelled,
@@ -641,17 +641,17 @@ impl State {
         // We need to do this because tracking fees - which increase reserves - during Byron
         // is painful, requiring lookup of UTXO value for every input
         if is_new_era && era == Era::Shelley {
-            info!("Entering Shelley era - fixing up reserves");
+            debug!("Entering Shelley era - fixing up reserves");
 
             let total_utxos = self.get_total_utxos_at_shelley_start(context).await?;
-            info!("Total UTXO value: {total_utxos}");
+            debug!("Total UTXO value: {total_utxos}");
 
             let reserves = shelley_params.max_lovelace_supply - total_utxos;
-            info!("Reserves remaining: {reserves}");
+            debug!("Reserves remaining: {reserves}");
             self.pots.reserves = reserves;
         }
 
-        info!(
+        debug!(
             epoch,
             reserves = self.pots.reserves,
             treasury = self.pots.treasury,
@@ -694,7 +694,7 @@ impl State {
         )?;
         self.pots = monetary_change.pots.clone();
 
-        info!(
+        debug!(
             epoch,
             reserves = self.pots.reserves,
             treasury = self.pots.treasury,
@@ -803,7 +803,7 @@ impl State {
         };
         self.mutate_stake_addresses(undo, retiring_delegators.clone(), |stake_addresses| {
             for id in retiring.iter() {
-                info!(epoch, "SPO {id} has retired");
+                debug!(epoch, "SPO {id} has retired");
             }
 
             for stake_address in &retiring_delegators {
@@ -918,7 +918,7 @@ impl State {
 
         let refunds = take(&mut self.pool_refunds);
         if !refunds.is_empty() {
-            info!(
+            debug!(
                 "{} retiring SPOs, total refunds {}",
                 refunds.len(),
                 (refunds.len() as u64) * deposit
@@ -945,7 +945,7 @@ impl State {
                     pool,
                 });
             } else {
-                warn!(
+                debug!(
                     "SPO reward account {} deregistered - paying refund to treasury",
                     stake_address
                 );
@@ -1000,7 +1000,7 @@ impl State {
                     total_value += value;
                 }
 
-                info!(
+                debug!(
                     "MIR accumulated: {total_value} stake addresses from {source_name} (epoch {}, {})",
                     deltas.len(),
                     if is_alonzo_plus { "sum" } else { "override" }
@@ -1031,7 +1031,7 @@ impl State {
                     error!("MIR to {other_name}: {e}");
                 }
 
-                info!("MIR of {value} from {source_name} to {other_name}");
+                debug!("MIR of {value} from {source_name} to {other_name}");
             }
         }
     }
@@ -1086,7 +1086,7 @@ impl State {
                 }
             }
 
-            info!(
+            debug!(
                 "Applied {} pending MIRs from reserves: {} applied, {} not applied (deregistered/unknown)",
                 count, total_applied, total_not_registered
             );
@@ -1134,7 +1134,7 @@ impl State {
                 }
             }
 
-            info!(
+            debug!(
                 "Applied {} pending MIRs from treasury: {} applied, {} not applied (deregistered/unknown)",
                 count, total_applied, total_not_registered
             );
@@ -1383,7 +1383,7 @@ impl State {
         self.pots.deposits += total_deposits;
 
         if new_count > 0 {
-            info!("{new_count} new SPOs, total new deposits {total_deposits}");
+            debug!("{new_count} new SPOs, total new deposits {total_deposits}");
         }
 
         // Check for any SPOs that have retired this epoch and need deposit refunds
@@ -1807,7 +1807,7 @@ impl State {
             update_value_with_delta(pot, delta)
                 .map_err(|e| anyhow::anyhow!("Applying {name} pot delta {delta}: {e}"))?;
 
-            info!("Pot delta for {name} {delta} => {pot}");
+            debug!("Pot delta for {name} {delta} => {pot}");
             Ok(())
         };
 

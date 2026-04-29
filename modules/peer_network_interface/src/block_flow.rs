@@ -10,7 +10,7 @@ use anyhow::Result;
 use caryatid_sdk::{Context, Subscription};
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::BlockSink;
 use crate::chain_state::{ChainEvent, ChainState, SpecificPoint};
@@ -256,7 +256,7 @@ impl BlockFlowHandler {
                             block_sink.announce_roll_forward(header, body, tip).await?;
                             *published_blocks += 1;
                             if published_blocks.is_multiple_of(100) {
-                                info!("Published block {}", header.number);
+                                debug!("Published block {}", header.number);
                             }
                         }
                         ChainEvent::RollBackward { header } => {
