@@ -44,12 +44,19 @@ fn validate_script_wellformedness(
     reference_script: &ReferenceScript,
     protocol_major_version: u64,
 ) -> Result<(), Box<UTxOWValidationError>> {
-    let (plutus_version, script_bytes) = match reference_script {
+    let (plutus_version, cbor_bytes) = match reference_script {
         ReferenceScript::PlutusV1(bytes) => (PlutusVersion::V1, bytes),
         ReferenceScript::PlutusV2(bytes) => (PlutusVersion::V2, bytes),
         ReferenceScript::PlutusV3(bytes) => (PlutusVersion::V3, bytes),
         _ => return Ok(()),
     };
+    let script_bytes = serde_cbor::from_slice(cbor_bytes).map_err(|e| {
+        Box::new(UTxOWValidationError::MalformedReferenceScripts {
+            script_hash: *script_hash,
+            protocol_major_version,
+            reason: format!("Invalid CBOR Wrapped Bytes: {}", e),
+        })
+    })?;
 
     let arena = Arena::new();
     let _: &Program<DeBruijn> = flat::decode(
@@ -70,6 +77,8 @@ fn validate_script_wellformedness(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::test_utils::TestContext;
     use crate::test_utils::{to_era, to_pallas_era};
@@ -112,5 +121,15 @@ mod tests {
             .collect::<HashMap<ScriptHash, &ReferenceScript>>();
 
         validate(created_reference_scripts, &ctx.protocol_params).map_err(|e| *e)
+    }
+
+    #[test]
+    fn test_script_malformedness() {
+        let script_hash =
+            ScriptHash::from_str("f0aab964eb5df4800b9100f12945ed8e0832c04fe366f8919a7c3a46")
+                .unwrap();
+        let reference_script = ReferenceScript::PlutusV2(hex::decode("455910490101").unwrap());
+        let result = validate_script_wellformedness(&script_hash, &reference_script, 10);
+        assert!(result.is_ok());
     }
 }
