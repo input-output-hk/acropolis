@@ -1,13 +1,10 @@
 name: Run omnibus full test
 
 on:
-  schedule:
-    - cron: '15 3 * * *'
-
   workflow_dispatch:
     branches:
       - main
-      - "*/omnibus-ci"
+
     inputs:
       target_epoch:
         description: 'Begin tests when the omnibus process reaches this epoch'
