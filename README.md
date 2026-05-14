@@ -16,9 +16,6 @@ a C compiler, and on Linux: `pkg-config` and `libssl-dev`.
 See the [Getting Started guide](docs/getting-started.md) for full details.
 
 ```sh
-# Build the node
-make build
-
 # Run on mainnet (genesis sync via Mithril)
 make run
 
@@ -75,7 +72,7 @@ graph TB
 ## Modules
 
 ### Bootstrapping
-- [Genesis Bootstrapper](modules/genesis_bootstrapper) — reads the Genesis file for a chain and generates initial UTXOs
+- [Genesis Bootstrapper](modules/genesis_bootstrapper) — reads the Genesis files for a network and initializes initial UTxOs and protocol parameters
 - [Mithril Snapshot Fetcher](modules/mithril_snapshot_fetcher) — fetches a chain snapshot from Mithril and replays all blocks
 - [Snapshot Bootstrapper](modules/snapshot_bootstrapper) — downloads and streams ledger state snapshots (UTXOs, pools, accounts, DReps, proposals)
 
@@ -94,18 +91,20 @@ graph TB
 - [SPO State](modules/spo_state) — tracks stake pool registrations and retirements
 - [DRep State](modules/drep_state) — tracks DRep registrations
 - [Accounts State](modules/accounts_state) — stake and reward accounts tracker
-- [Assets State](modules/assets_state) — tracks native asset supply, metadata, transactions, and addresses
 - [Epochs State](modules/epochs_state) — tracks fees, blocks minted, and epoch history
 - [Parameters State](modules/parameters_state) — tracks protocol parameters and updates
 - [Governance State](modules/governance_state) — tracks governance actions and voting
-- [Address State](modules/address_state) — address-level transaction and balance tracking
-- [Historical Accounts State](modules/historical_accounts_state) — historical account state (rewards, delegations, registrations)
-- [Historical Epochs State](modules/historical_epochs_state) — historical epoch data
 
 ### Distribution Snapshots
 - [SPDD State](modules/spdd_state) — stake pool delegation distribution snapshots
 - [DRDD State](modules/drdd_state) — DRep delegation distribution snapshots
 - [Stake Delta Filter](modules/stake_delta_filter) — filters stake address changes and resolves stake pointers
+
+### API Persistent State
+- [Assets State](modules/assets_state) — tracks native asset supply, metadata, transactions, and addresses
+- [Address State](modules/address_state) — address-level transaction and balance tracking
+- [Historical Accounts State](modules/historical_accounts_state) — historical account state (rewards, delegations, registrations)
+- [Historical Epochs State](modules/historical_epochs_state) — historical epoch data
 
 ### Storage & Interfaces
 - [Chain Store](modules/chain_store) — persistent block storage (Fjall LSM)
@@ -124,7 +123,6 @@ Processes are executable binaries that bundle modules together:
 - [Golden Tests](processes/golden_tests) — end-to-end golden test execution
 - [TX Submitter CLI](processes/tx_submitter_cli) — command-line wrapper for transaction submission
 - [Midnight Indexer](processes/midnight_indexer) — Midnight-specific block indexing
-- [MCP Standalone](processes/mcp_standalone) — standalone MCP server process
 
 ## Documentation
 

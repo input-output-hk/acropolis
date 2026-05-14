@@ -5,10 +5,11 @@ This document describes all configuration settings available in Acropolis TOML c
 Acropolis uses layered TOML configuration. Multiple `--config` files can be specified and are merged in order, with later files overriding earlier ones. For example:
 
 ```sh
+cd processes/omnibus
 cargo run --release --bin acropolis_process_omnibus -- --config omnibus.toml --config omnibus.bootstrap.toml
 ```
 
-Configuration files live in the process directory (e.g. `processes/omnibus/`).
+Configuration files live in the process directory (e.g. `processes/omnibus/`), so either change to that directory first (as above) or pass full/relative paths to each file.
 
 ---
 
@@ -22,7 +23,6 @@ network-name = "mainnet"
 startup-mode = "genesis"
 sync-mode = "mithril"
 block-flow-mode = "direct"
-topic = "cardano.sequence.start"
 ```
 
 | Setting | Type | Default | Options | Description |
@@ -31,7 +31,6 @@ topic = "cardano.sequence.start"
 | `startup-mode` | string | `"genesis"` | `"genesis"`, `"snapshot"` | Start from genesis block or a ledger state snapshot |
 | `sync-mode` | string | `"mithril"` | `"mithril"`, `"upstream"` | Fetch blocks via Mithril snapshots or directly from upstream peers |
 | `block-flow-mode` | string | `"direct"` | `"direct"`, `"consensus"` | Block delivery mode — direct pass-through or via consensus module |
-| `topic` | string | `"cardano.sequence.start"` | — | Message bus topic for startup sequencing |
 
 ---
 
@@ -39,7 +38,7 @@ topic = "cardano.sequence.start"
 
 ### `[module.genesis-bootstrapper]`
 
-Reads the genesis file for a chain and generates initial UTXOs. No required user-facing settings — network selection is inherited from `[global.startup]`.
+Reads the genesis files for a network and initializes initial UTxOs and protocol parameters. No required user-facing settings — network selection is inherited from `[global.startup]`.
 
 ### `[module.mithril-snapshot-fetcher]`
 
@@ -49,7 +48,7 @@ Fetches chain snapshots from the Mithril aggregator and replays blocks.
 [module.mithril-snapshot-fetcher]
 aggregator-url = "https://aggregator.release-mainnet.api.mithril.network/aggregator"
 genesis-key = "5b3139312c..."
-download-max-age = "never"
+download-max-age = 8
 pause = "none"
 stop = "none"
 ```
@@ -58,15 +57,15 @@ stop = "none"
 |---------|------|---------|-------------|
 | `aggregator-url` | string | Mainnet aggregator URL | Mithril aggregator endpoint |
 | `genesis-key` | string | Mainnet genesis key | Mithril genesis verification key |
-| `download-max-age` | string | `"never"` | Maximum age of cached download before re-fetching. E.g. `"8"` for 8 hours, or `"never"` to always use cache |
+| `download-max-age` | integer | — | Maximum age of cached download before re-fetching, in hours (e.g. `8`). If unset or invalid, cached downloads are reused when present. |
 | `directory` | string | `"../../modules/mithril_snapshot_fetcher/downloads/<network>"` | Download directory for snapshots |
-| `pause` | string | `"none"` | Pause syncing at a point. E.g. `"epoch:100"`, `"block:1200"`, `"every-epoch:10"`, `"every-block:500"` |
+| `pause` | string | `"none"` | Pause syncing at a point. E.g. `"epoch:100"`, `"block:1200"`, `"every-nth-epoch:10"`, `"every-nth-block:500"` |
 | `stop` | string | `"none"` | Stop syncing at a point (same format as `pause`) |
 | `profile` | string | `"none"` | Trigger profiling at a point (same format as `pause`) |
 
 ### `[module.snapshot-bootstrapper]`
 
-Downloads and parses ledger state snapshots for fast bootstrap.
+Downloads and parses a new epoch state snapshot for fast bootstrap.
 
 ```toml
 [module.snapshot-bootstrapper]
@@ -101,7 +100,7 @@ node-addresses = [
 |---------|------|---------|-------------|
 | `node-addresses` | array of strings | — | **Required.** List of upstream peer addresses (`host:port`) |
 | `sync-point` | string | — | Sync start point. `"origin"` for genesis+upstream, `"dynamic"` for snapshot or Mithril modes, `"tip"` for chain tip, `"cache"` for cached position |
-| `magic-number` | integer | — | Network magic number. Set for non-mainnet networks (e.g. `2` for preview) |
+| `magic-number` | integer | — | Network magic number (e.g. `764824073` for mainnet, `2` for preview) |
 | `cache-dir` | path | — | Directory for caching chain sync state |
 | `target-peer-count` | integer | `15` | Target number of peers to maintain |
 | `min-hot-peers` | integer | `3` | Minimum number of active (hot) peers |
@@ -120,8 +119,6 @@ Ouroboros Praos consensus — block ordering, validation coordination, and fork 
 
 ```toml
 [module.consensus]
-consensus-offers-topic = "cardano.consensus.offers"
-consensus-wants-topic = "cardano.consensus.wants"
 validators = []
 force-validation = false
 validation-timeout = 60
@@ -132,8 +129,6 @@ validation-timeout = 60
 | `force-validation` | bool | `true` | Validate all blocks including those from Mithril snapshots. Set to `false` to skip validation for snapshot blocks |
 | `validation-timeout` | integer | `60` | Seconds to wait for validation results before timing out |
 | `validators` | array of strings | `[]` | List of validation result topics to listen on (e.g. `"cardano.validation.vrf"`, `"cardano.validation.kes"`) |
-| `consensus-offers-topic` | string | `"cardano.consensus.offers"` | Topic for consensus block offers |
-| `consensus-wants-topic` | string | `"cardano.consensus.wants"` | Topic for consensus block wants |
 
 ---
 
@@ -145,22 +140,7 @@ Unpacks received blocks into individual transactions. No required user-facing se
 
 ### `[module.tx-unpacker]`
 
-Parses transactions and generates UTXO changes, asset deltas, certificates, and governance actions.
-
-```toml
-[module.tx-unpacker]
-bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
-protocol-parameters-subscribe-topic = "cardano.protocol.parameters"
-```
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `publish-utxo-deltas-topic` | string | `"cardano.utxo.deltas"` | Topic for UTXO delta messages |
-| `publish-asset-deltas-topic` | string | `"cardano.asset.deltas"` | Topic for asset delta messages |
-| `publish-withdrawals-topic` | string | `"cardano.withdrawals"` | Topic for withdrawal messages |
-| `publish-certificates-topic` | string | `"cardano.certificates"` | Topic for certificate messages |
-| `publish-governance-topic` | string | `"cardano.governance"` | Topic for governance action messages |
-| `publish-tx-validation-topic` | string | `"cardano.validation.tx"` | Topic for transaction validation results |
+Parses transactions and generates UTXO changes, asset deltas, certificates, and governance actions. No required user-facing settings.
 
 ### `[module.block-vrf-validator]`
 
@@ -188,8 +168,6 @@ store = "memory"
 | `store` | string | `"memory"` | Storage backend: `"memory"`, `"dashmap"`, `"fjall"`, `"fjall-async"`, `"sled"`, `"sled-async"`, `"fake"` |
 | `database-path` | string | `"fjall-immutable-utxos"` | Path to Fjall/Sled database (only used with persistent backends) |
 | `flush-every` | integer | `1000` | Flush to disk every N blocks (Fjall backend only) |
-| `address-delta-topic` | string | `"cardano.address.deltas"` | Topic for address delta messages |
-| `block-totals-topic` | string | `"cardano.block.txs"` | Topic for block totals messages |
 | `address-delta-publish-mode` | string | `"compact"` | Address delta publishing mode |
 
 ### `[module.spo-state]`
@@ -244,16 +222,8 @@ store-votes = false
 
 Tracks governance actions and voting.
 
-```toml
-[module.governance-state]
-stake-drep-distribution-topic = "cardano.drep.distribution"
-stake-spo-distribution-topic = "cardano.spo.distribution"
-```
-
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `stake-drep-distribution-topic` | string | `"cardano.drep.distribution"` | Topic for DRep distribution data |
-| `stake-spo-distribution-topic` | string | `"cardano.spo.distribution"` | Topic for SPO distribution data |
 | `verification-output-file` | string | — | Path to write verification output CSV |
 | `verify-votes-files` | string | — | Glob pattern for vote verification CSV files |
 
@@ -263,33 +233,19 @@ Tracks protocol parameters and their changes across epochs.
 
 ```toml
 [module.parameters-state]
-enact-state-topic = "cardano.enact.state"
 store-history = false
 ```
 
 | Setting | Type | Default | API Endpoints Enabled |
 |---------|------|---------|----------------------|
-| `enact-state-topic` | string | `"cardano.enact.state"` | Topic for governance enact state |
 | `store-history` | bool | `false` | `/epochs/{number}/parameters` |
 
 ### `[module.accounts-state]`
 
-Tracks stake accounts, reward distribution, and stake pool delegation distributions (SPDD).
-
-```toml
-[module.accounts-state]
-drep-state-topic = "cardano.drep.state"
-spdd-retention-epochs = 0
-spdd-db-path = "./fjall-spdd"
-spdd-clear-on-start = true
-```
+Tracks stake accounts and reward distribution.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `drep-state-topic` | string | `"cardano.drep.state"` | Topic for DRep state (when governance is active) |
-| `spdd-retention-epochs` | integer | `0` | Number of SPDD epochs to retain. Enables `/epochs/{number}/stakes` endpoints |
-| `spdd-db-path` | string | `"./fjall-spdd"` | Path to SPDD Fjall database |
-| `spdd-clear-on-start` | bool | `true` | Clear SPDD database on startup |
 | `verify-pots-file` | string | — | Path to CSV file for pot verification |
 | `verify-rewards-files` | string | — | Glob pattern for reward verification CSV files |
 | `verify-spdd-files` | string | — | Glob pattern for SPDD verification CSV files |
@@ -297,29 +253,6 @@ spdd-clear-on-start = true
 ### `[module.epochs-state]`
 
 Tracks fees, blocks minted, and epoch history. No required user-facing settings.
-
-### `[module.assets-state]`
-
-Tracks native asset supply, metadata, transactions, and addresses.
-
-```toml
-[module.assets-state]
-store-assets = false
-store-info = false
-store-history = false
-store-transactions = "none"
-store-addresses = false
-index-by-policy = false
-```
-
-| Setting | Type | Default | API Endpoints Enabled |
-|---------|------|---------|----------------------|
-| `store-assets` | bool | `false` | `/assets` |
-| `store-info` | bool | `false` | `/assets/{asset}` (requires `store-assets`) |
-| `store-history` | bool | `false` | `/assets/{asset}/history` |
-| `store-transactions` | string | `"none"` | `/assets/{asset}/transactions`. Options: `"none"`, `"all"`, or a number like `"20"` for most recent |
-| `store-addresses` | bool | `false` | `/assets/{asset}/addresses` |
-| `index-by-policy` | bool | `false` | Enables policy-based asset lookup (requires `store-assets`) |
 
 ---
 
@@ -348,7 +281,7 @@ Filters stake address changes and resolves stake pointers.
 ```toml
 [module.stake-delta-filter]
 cache-mode = "predefined"
-write-full-cache = "false"
+write-full-cache = false
 ```
 
 | Setting | Type | Default | Description |
@@ -374,65 +307,6 @@ Persistent block and transaction storage.
 | `database-path` | string | `"fjall-blocks-<network>"` | Path to the Fjall database directory |
 | `clear-on-start` | bool | `true` | Wipe database on startup |
 
-### `[module.address-state]`
-
-Address-level transaction and balance tracking.
-
-```toml
-[module.address-state]
-clear-on-start = true
-store-info = false
-store-totals = false
-store-transactions = false
-```
-
-| Setting | Type | Default | API Endpoints Enabled |
-|---------|------|---------|----------------------|
-| `db-path` | string | `"./fjall-addresses"` | Path to Fjall database |
-| `clear-on-start` | bool | `true` | Wipe database on startup |
-| `store-info` | bool | `false` | `/addresses/{address}`, `/addresses/{address}/extended`, `/addresses/{address}/utxos`, `/addresses/{address}/utxos/{asset}` |
-| `store-totals` | bool | `false` | `/addresses/{address}/totals` |
-| `store-transactions` | bool | `false` | `/addresses/{address}/transactions` |
-
-### `[module.historical-accounts-state]`
-
-Historical account data (rewards, delegations, registrations).
-
-```toml
-[module.historical-accounts-state]
-clear-on-start = true
-store-rewards-history = false
-store-active-stake-history = false
-store-registration-history = false
-store-delegation-history = false
-store-mir-history = false
-store-withdrawal-history = false
-store-addresses = false
-store-tx-count = false
-```
-
-| Setting | Type | Default | API Endpoints Enabled |
-|---------|------|---------|----------------------|
-| `db-path` | string | `"./fjall-accounts"` | Path to Fjall database |
-| `clear-on-start` | bool | `true` | Wipe database on startup |
-| `store-rewards-history` | bool | `false` | `/accounts/{stake_address}/rewards` |
-| `store-active-stake-history` | bool | `false` | `/accounts/{stake_address}/history` |
-| `store-registration-history` | bool | `false` | `/accounts/{stake_address}/registrations` |
-| `store-delegation-history` | bool | `false` | `/accounts/{stake_address}/delegations` |
-| `store-mir-history` | bool | `false` | `/accounts/{stake_address}/mirs` |
-| `store-withdrawal-history` | bool | `false` | `/accounts/{stake_address}/withdrawals` |
-| `store-addresses` | bool | `false` | `/accounts/{stake_address}/addresses` |
-| `store-tx-count` | bool | `false` | `/accounts/{stake_address}/addresses/total` (requires `store-addresses`) |
-
-### `[module.historical-epochs-state]`
-
-Historical epoch data.
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `db-path` | string | `"./fjall-epochs"` | Path to Fjall database |
-| `clear-on-start` | bool | `true` | Wipe database on startup |
-
 ---
 
 ## Services
@@ -451,16 +325,6 @@ port = 4340
 |---------|------|---------|-------------|
 | `address` | string | `"0.0.0.0"` | Bind address for the REST API |
 | `port` | integer | `4340` | Port for the REST API |
-
-### `[module.rest-blockfrost]`
-
-Blockfrost-compatible REST API handler configuration.
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `external_api_timeout` | integer | `3` | Timeout in seconds for external API calls (e.g. pool metadata fetching) |
-
-All other settings are internal message bus topic mappings that rarely need overriding.
 
 ### `[module.mcp-server]`
 
@@ -543,29 +407,6 @@ store-delegators = true
 store-metadata = true
 store-updates = true
 store-votes = true
-
-[module.assets-state]
-store-assets = true
-store-info = true
-store-history = true
-store-transactions = "all"
-store-addresses = true
-index-by-policy = true
-
-[module.address-state]
-store-info = true
-store-totals = true
-store-transactions = true
-
-[module.historical-accounts-state]
-store-rewards-history = true
-store-active-stake-history = true
-store-registration-history = true
-store-delegation-history = true
-store-mir-history = true
-store-withdrawal-history = true
-store-addresses = true
-store-tx-count = true
 
 [module.parameters-state]
 store-history = true

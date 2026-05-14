@@ -53,10 +53,8 @@ sudo apt-get install build-essential pkg-config libssl-dev
 git clone https://github.com/input-output-hk/acropolis.git
 cd acropolis
 
-# Build the omnibus process
-make build
-
 # Run the node (mainnet, genesis sync via Mithril)
+# This will build the omnibus process on first run.
 make run
 ```
 
@@ -89,12 +87,6 @@ All build commands are available via `make`. Run `make help` for a full list.
 | `make check` | Check formatting without modifying files |
 | `make clippy` | Run clippy with `-D warnings` (treats warnings as errors) |
 | `make all` | Format, lint, and test in sequence |
-
-To build the entire workspace (all modules and processes):
-
-```sh
-cargo build
-```
 
 To run tests for a specific package:
 
@@ -229,16 +221,18 @@ All services set `ulimits` for file descriptors (default 4096) to handle Fjall L
 
 ## REST API
 
-The omnibus process exposes a Blockfrost-compatible REST API. By default it listens on port **4340**.
+The omnibus process exposes a Blockfrost-compatible REST API. The service itself listens on port **4340**, but when using Docker Compose the host port depends on which service you started (for example, **4340** for preview and **5340** for mainnet — see the [Available Services](#available-services) table).
 
-Once the node is running, you can query it:
+Once the node is running, query the host port for your selected service:
 
 ```sh
-# Check node tip
+# Preview / source builds use port 4340
 curl http://localhost:4340/blocks/latest
-
-# Query a specific epoch
 curl http://localhost:4340/epochs/latest
+
+# Mainnet via Docker Compose maps to host port 5340
+curl http://localhost:5340/blocks/latest
+curl http://localhost:5340/epochs/latest
 ```
 
 The full OpenAPI specification is available in [API/openapi.yaml](../API/openapi.yaml). To browse it interactively:
