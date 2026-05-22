@@ -4,6 +4,8 @@ Auto-generated from all feature plans. Last updated: 2026-02-06
 
 ## Active Technologies
 - Rust 2024 Edition + `uplc-turbo` (pragma-org/uplc), pallas, tokio
+- Rust 2024 Edition + uplc-turbo (pragma-org/uplc, pinned commit), pallas, tokio, rayon, caryatid (568-datum-lifecycle)
+- Fjall v3 (immutable UTxOs), DashMap/HashMap (volatile UTxOs) (568-datum-lifecycle)
 
 ## Project Structure
 
@@ -29,4 +31,5 @@ cargo clippy --all-targets --all-features -- -D warnings
 Rust 2024 Edition: Follow standard conventions
 
 ## Recent Changes
+- 568-datum-lifecycle: Added Rust 2024 Edition + uplc-turbo (pragma-org/uplc, pinned commit), pallas, tokio, rayon, caryatid
 - 568-plutus-phase2-validation: Added Rust 2024 Edition + `uplc-turbo` (pragma-org/uplc), pallas, tokio
