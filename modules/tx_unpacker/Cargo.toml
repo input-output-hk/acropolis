@@ -28,3 +28,6 @@ amaru-uplc = { workspace = true }
 
 [lib]
 path = "src/tx_unpacker.rs"
+
+[dev-dependencies]
+cryptoxide = "0.5.1"

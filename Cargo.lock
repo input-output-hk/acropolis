@@ -578,6 +578,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "cryptoxide 0.5.1",
  "futures",
  "hex",
  "pallas",
