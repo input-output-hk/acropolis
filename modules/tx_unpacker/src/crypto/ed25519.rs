@@ -1,11 +1,10 @@
-use acropolis_common::VKeyWitness;
-use cryptoxide::ed25519;
+use acropolis_common::{crypto::verify_ed25519_signature_strict, VKeyWitness};
 
 pub fn verify_ed25519_signature(witness: &VKeyWitness, data_to_verify: &[u8]) -> bool {
-    ed25519::verify(
-        data_to_verify,
+    verify_ed25519_signature_strict(
         witness.vkey.as_inner(),
         witness.signature.as_inner(),
+        data_to_verify,
     )
 }
 
