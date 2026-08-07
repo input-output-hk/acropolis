@@ -182,7 +182,11 @@ mod tests {
         for i in 0u32..1000 {
             let tx_body_hash = acropolis_common::crypto::keyhash_256(&i.to_le_bytes());
             assert!(
-                cryptoxide::ed25519::verify(tx_body_hash.as_ref(), &witness.vkey, &witness.signature),
+                cryptoxide::ed25519::verify(
+                    tx_body_hash.as_ref(),
+                    &witness.vkey,
+                    &witness.signature
+                ),
                 "rejected a small-order forgery at i={i}"
             );
         }
