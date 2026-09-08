@@ -15,7 +15,9 @@ use caryatid_sdk::Context;
 
 use acropolis_module_rest_blockfrost::routes::{RouteDefinition, ROUTES};
 
-use rmcp::model::{CallToolResult, JsonObject, ListToolsResult, Tool, ToolAnnotations};
+use rmcp::model::{
+    CallToolResponse, CallToolResult, JsonObject, ListToolsResult, Tool, ToolAnnotations,
+};
 
 use crate::resources::handle_resource_with_query;
 
@@ -92,30 +94,26 @@ fn build_uri_from_args(route: &RouteDefinition, args: &JsonObject) -> Result<Str
 pub fn get_all_tools() -> Vec<Tool> {
     ROUTES
         .iter()
-        .map(|route| Tool {
-            name: route_to_tool_name(route).into(),
-            title: Some(route.name.to_string()),
-            description: Some(route.description.into()),
-            input_schema: build_input_schema(route),
-            output_schema: None,
-            annotations: Some(
+        .map(|route| {
+            Tool::new(
+                route_to_tool_name(route),
+                route.description,
+                build_input_schema(route),
+            )
+            .annotate(
                 ToolAnnotations::new()
                     .read_only(true)
                     .destructive(false)
                     .idempotent(true)
                     .open_world(false),
-            ),
-            icons: None,
+            )
         })
         .collect()
 }
 
 /// Get list_tools result
 pub fn list_tools_result() -> ListToolsResult {
-    ListToolsResult {
-        tools: get_all_tools(),
-        next_cursor: None,
-    }
+    ListToolsResult::with_all_items(get_all_tools())
 }
 
 /// Find a route by tool name
@@ -129,7 +127,7 @@ pub async fn handle_tool_call(
     config: Arc<Config>,
     tool_name: &str,
     arguments: Option<JsonObject>,
-) -> Result<CallToolResult> {
+) -> Result<CallToolResponse> {
     // Find the route for this tool
     let route = find_route_by_tool_name(tool_name)
         .ok_or_else(|| anyhow::anyhow!("Unknown tool: {tool_name}"))?;
@@ -150,8 +148,8 @@ pub async fn handle_tool_call(
     let json_result = handle_resource_with_query(context, config, &uri, query_params).await?;
 
     // Return as tool result
-    Ok(CallToolResult::success(vec![rmcp::model::Content::json(
-        json_result,
-    )
-    .map_err(|e| anyhow::anyhow!("JSON error: {e}"))?]))
+    Ok(CallToolResponse::Complete(CallToolResult::success(vec![
+        rmcp::model::ContentBlock::json(json_result)
+            .map_err(|e| anyhow::anyhow!("JSON error: {e}"))?,
+    ])))
 }

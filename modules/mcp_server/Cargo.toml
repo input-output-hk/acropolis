@@ -22,7 +22,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 # MCP SDK - using rmcp with streamable HTTP server transport
-rmcp = { version = "0.8", features = ["server", "transport-streamable-http-server"] }
+rmcp = { version = "3", features = ["server", "transport-streamable-http-server"] }
 
 [lib]
 path = "src/mcp_server.rs"

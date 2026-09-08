@@ -114,7 +114,7 @@ impl AccountsCallback for CountingCallbacks {
                 eprintln!(
                     "  Account #{}: {} (utxo: {}, rewards: {}, pool: {:?}, drep: {:?})",
                     i + 1,
-                    &account.stake_address.to_string().unwrap(),
+                    account.stake_address.to_string().unwrap(),
                     account.address_state.utxo_value,
                     account.address_state.rewards,
                     account.address_state.delegated_spo.as_ref().map(|s| &s[..16]),
@@ -404,12 +404,12 @@ impl SnapshotCallbacks for CountingCallbacks {
         if !metadata.blocks_previous_epoch.is_empty() {
             eprintln!("  Previous epoch top producers (first 3):");
             let mut sorted_previous = metadata.blocks_previous_epoch.clone();
-            sorted_previous.sort_by(|a, b| b.block_count.cmp(&a.block_count));
+            sorted_previous.sort_by_key(|a| std::cmp::Reverse(a.block_count));
             for (i, production) in sorted_previous.iter().take(3).enumerate() {
                 eprintln!(
                     "    [{}] Pool {} produced {} blocks (epoch {})",
                     i + 1,
-                    &production.pool_id,
+                    production.pool_id,
                     production.block_count,
                     production.epoch
                 );
@@ -425,12 +425,12 @@ impl SnapshotCallbacks for CountingCallbacks {
         if !metadata.blocks_current_epoch.is_empty() {
             eprintln!("  Current epoch top producers (first 3):");
             let mut sorted_current = metadata.blocks_current_epoch.clone();
-            sorted_current.sort_by(|a, b| b.block_count.cmp(&a.block_count));
+            sorted_current.sort_by_key(|a| std::cmp::Reverse(a.block_count));
             for (i, production) in sorted_current.iter().take(3).enumerate() {
                 eprintln!(
                     "    [{}] Pool {} produced {} blocks (epoch {})",
                     i + 1,
-                    &production.pool_id,
+                    production.pool_id,
                     production.block_count,
                     production.epoch
                 );
@@ -583,7 +583,7 @@ fn main() {
                     println!(
                         "  {}: {} (utxo: {}, rewards: {})",
                         i + 1,
-                        &account.stake_address.to_string().unwrap(),
+                        account.stake_address.to_string().unwrap(),
                         account.address_state.utxo_value,
                         account.address_state.rewards
                     );

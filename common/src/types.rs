@@ -2161,7 +2161,7 @@ impl VotingProcedures {
             .iter()
             .map(|(voter, single_votes)| {
                 let mut votes = single_votes.voting_procedures.iter().collect::<Vec<(_, _)>>();
-                votes.sort_by(|(a, _), (b, _)| a.cmp(b)); // sort inner map by gaid
+                votes.sort_by_key(|(v, _)| *v); // sort inner map by gaid
                 (*voter, votes)
             })
             .collect::<Vec<_>>()

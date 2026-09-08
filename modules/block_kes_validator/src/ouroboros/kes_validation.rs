@@ -229,10 +229,7 @@ pub fn op_cert_counter_no_validation(
         }
     };
 
-    let pool_id = match header.issuer_vkey() {
-        Some(vkey) => PoolId::from(keyhash_224(vkey)),
-        None => return None,
-    };
+    let pool_id = PoolId::from(keyhash_224(header.issuer_vkey()?));
 
     match header {
         MultiEraHeader::ShelleyCompatible(x) => {

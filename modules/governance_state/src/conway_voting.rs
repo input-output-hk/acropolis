@@ -751,7 +751,7 @@ impl ConwayVoting {
                 self.action_status.get(&elem.voting.procedure.gov_action_id).ok_or_else(|| {
                     anyhow!(
                         "Cannot get action status for {}",
-                        &elem.voting.procedure.gov_action_id
+                        elem.voting.procedure.gov_action_id
                     )
                 })?;
 

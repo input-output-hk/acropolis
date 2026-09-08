@@ -50,7 +50,7 @@ impl VolatileHistoricalAccounts {
 
         while self.start_block + self.window.len() as u64 >= block {
             if let Some(map) = self.window.pop_back() {
-                out.extend(map.into_iter());
+                out.extend(map);
             } else {
                 break;
             }

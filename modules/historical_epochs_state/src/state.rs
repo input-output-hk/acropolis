@@ -79,7 +79,7 @@ impl State {
                 epochs.push(volatile_ea.clone());
             }
         }
-        epochs.sort_by(|a, b| a.epoch.cmp(&b.epoch));
+        epochs.sort_by_key(|e| e.epoch);
         Ok(epochs)
     }
 
@@ -99,7 +99,7 @@ impl State {
                 epochs.push(volatile_ea.clone());
             }
         }
-        epochs.sort_by(|a, b| a.epoch.cmp(&b.epoch));
+        epochs.sort_by_key(|e| e.epoch);
         Ok(epochs)
     }
 }

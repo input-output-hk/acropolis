@@ -14,17 +14,22 @@ use caryatid_sdk::{module, Context, Subscription};
 use chrono::{Duration, Utc};
 use config::Config;
 use mithril_client::{
-    feedback::{FeedbackReceiver, MithrilEvent},
-    ClientBuilder, MessageBuilder, Snapshot,
+    cardano_database_client::{DownloadUnpackOptions, ImmutableFileRange},
+    feedback::{FeedbackReceiver, MithrilEvent, MithrilEventCardanoDatabase},
+    AggregatorDiscoveryType, ClientBuilder, GenesisVerificationKey, MessageBuilder,
 };
+use mithril_common::messages::CardanoDatabaseSnapshotMessage as Snapshot;
 use pallas::storage::hardano;
 use pallas_traverse::MultiEraBlock;
-use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration as SystemDuration;
+use std::{
+    fs::{self, File},
+    sync::atomic::AtomicU64,
+};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, info_span, Instrument};
 
@@ -63,12 +68,14 @@ const SNAPSHOT_METADATA_FILE: &str = "snapshot_metadata.json";
 /// Mithril feedback receiver
 struct FeedbackLogger {
     last_percentage: Arc<Mutex<u64>>,
+    total: Arc<AtomicU64>,
 }
 
 impl FeedbackLogger {
     fn new() -> Self {
         Self {
             last_percentage: Arc::new(Mutex::new(0)),
+            total: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -99,6 +106,24 @@ impl FeedbackReceiver for FeedbackLogger {
             MithrilEvent::CertificateChainValidationStarted { .. } => {
                 info!("Started certificate chain validation");
             }
+            MithrilEvent::CardanoDatabase(MithrilEventCardanoDatabase::Started {
+                total_immutable_files,
+                ..
+            }) => {
+                info!("Downloading {total_immutable_files} immutable file(s)");
+                self.total.store(total_immutable_files, std::sync::atomic::Ordering::Relaxed);
+            }
+            MithrilEvent::CardanoDatabase(
+                MithrilEventCardanoDatabase::ImmutableDownloadCompleted {
+                    immutable_file_number,
+                    ..
+                },
+            ) => {
+                info!(
+                    "Downloaded immutable file {immutable_file_number} of {}",
+                    self.total.load(std::sync::atomic::Ordering::Relaxed)
+                );
+            }
             MithrilEvent::CertificateValidated {
                 certificate_hash, ..
             } => {
@@ -112,7 +137,6 @@ impl FeedbackReceiver for FeedbackLogger {
             } => {
                 info!("Fetched certificate {certificate_hash} from cache");
             }
-
             _ => {} // Catchall for future updates
         }
     }
@@ -172,7 +196,7 @@ impl MithrilSnapshotFetcher {
                     > Duration::hours(download_max_age as i64)
                 {
                     info!("Snapshot is expired by download max age: {download_max_age} hours");
-                    if latest_snapshot_metadata.digest != old_snapshot_metadata.digest
+                    if latest_snapshot_metadata.hash != old_snapshot_metadata.hash
                         && latest_snapshot_metadata.created_at > old_snapshot_metadata.created_at
                     {
                         info!("Latest snapshot is available and newer than the old snapshot");
@@ -203,18 +227,19 @@ impl MithrilSnapshotFetcher {
         let snapshot_metadata_path = Path::new(&directory).join(SNAPSHOT_METADATA_FILE);
 
         let feedback_logger = Arc::new(FeedbackLogger::new());
-        let client = ClientBuilder::aggregator(&aggregator_url, &genesis_key)
+        let client = ClientBuilder::new(AggregatorDiscoveryType::Url(aggregator_url))
+            .set_genesis_verification_key(GenesisVerificationKey::JsonHex(genesis_key))
             .add_feedback_receiver(feedback_logger)
             .build()?;
 
         // Find the latest snapshot
-        let snapshots = client.cardano_database().list().await?;
+        let snapshots = client.cardano_database_v2().list().await?;
         let latest_snapshot = snapshots.first().ok_or(anyhow!("No snapshots available"))?;
         let snapshot = client
-            .cardano_database()
-            .get(&latest_snapshot.digest)
+            .cardano_database_v2()
+            .get(&latest_snapshot.hash)
             .await?
-            .ok_or(anyhow!("No snapshot for digest {}", latest_snapshot.digest))?;
+            .ok_or(anyhow!("No snapshot for digest {}", latest_snapshot.hash))?;
 
         // Check if the snapshot is expired by download max age
         let old_snapshot = Self::load_snapshot_metadata(&snapshot_metadata_path);
@@ -232,10 +257,26 @@ impl MithrilSnapshotFetcher {
         // Download the snapshot
         fs::create_dir_all(&directory)?;
         let dir = Path::new(&directory);
-        client.cardano_database().download_unpack(&snapshot, dir).await?;
+        let range = ImmutableFileRange::Full;
+        client
+            .cardano_database_v2()
+            .download_unpack(&snapshot, &range, dir, DownloadUnpackOptions::default())
+            .await?;
+
+        let digests = client
+            .cardano_database_v2()
+            .download_and_verify_digests(&certificate, &snapshot)
+            .await?;
+        let merkle_proof = client
+            .cardano_database_v2()
+            .verify_cardano_database(&certificate, &snapshot, &range, false, dir, &digests)
+            .await?;
 
         // Register download
-        if let Err(e) = client.cardano_database().add_statistics(&snapshot).await {
+        let files_downloaded = range.length(snapshot.beacon.immutable_file_number);
+        if let Err(e) =
+            client.cardano_database_v2().add_statistics(true, false, files_downloaded).await
+        {
             error!("Could not increment snapshot download statistics: {:?}", e);
             // But that doesn't affect us...
         }
@@ -246,7 +287,9 @@ impl MithrilSnapshotFetcher {
         }
 
         // Verify the snapshot
-        let message = MessageBuilder::new().compute_snapshot_message(&certificate, dir).await?;
+        let message = MessageBuilder::new()
+            .compute_cardano_database_message(&certificate, &merkle_proof)
+            .await?;
 
         if !certificate.match_message(&message) {
             return Err(anyhow!("Snapshot verification failed"));
@@ -565,9 +608,12 @@ mod tests {
         let result = MithrilSnapshotFetcher::load_snapshot_metadata(path);
         assert!(result.is_ok());
         let loaded_snapshot = result.unwrap();
-        assert_eq!(snapshot.digest, loaded_snapshot.digest);
+        assert_eq!(snapshot.hash, loaded_snapshot.hash);
         assert_eq!(snapshot.created_at, loaded_snapshot.created_at);
-        assert_eq!(snapshot.size, loaded_snapshot.size);
+        assert_eq!(
+            snapshot.total_db_size_uncompressed,
+            loaded_snapshot.total_db_size_uncompressed
+        );
     }
 
     #[test]
@@ -606,14 +652,14 @@ mod tests {
     fn test_should_skip_download_if_no_new_snapshot_available() {
         let old_snapshot_metadata = Snapshot {
             created_at: Utc::now() - Duration::hours(10),
-            digest: "old_snapshot_digest".to_string(),
+            hash: "old_snapshot_digest".to_string(),
             ..Snapshot::dummy()
         };
         let config =
             Config::builder().set_override("download-max-age", 8).unwrap().build().unwrap();
         let latest_snapshot_metadata = Snapshot {
             created_at: Utc::now() - Duration::hours(10),
-            digest: "old_snapshot_digest".to_string(),
+            hash: "old_snapshot_digest".to_string(),
             ..Snapshot::dummy()
         };
         assert!(MithrilSnapshotFetcher::should_skip_download(
@@ -627,14 +673,14 @@ mod tests {
     fn test_should_not_skip_download_if_new_snapshot_available() {
         let old_snapshot_metadata = Snapshot {
             created_at: Utc::now() - Duration::hours(10),
-            digest: "old_snapshot_digest".to_string(),
+            hash: "old_snapshot_digest".to_string(),
             ..Snapshot::dummy()
         };
         let config =
             Config::builder().set_override("download-max-age", 8).unwrap().build().unwrap();
         let latest_snapshot_metadata = Snapshot {
             created_at: Utc::now() - Duration::hours(2),
-            digest: "new_snapshot_digest".to_string(),
+            hash: "new_snapshot_digest".to_string(),
             ..Snapshot::dummy()
         };
         assert!(!MithrilSnapshotFetcher::should_skip_download(

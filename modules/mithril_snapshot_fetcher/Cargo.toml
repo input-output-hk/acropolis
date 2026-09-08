@@ -18,8 +18,8 @@ anyhow = { workspace = true }
 async-trait = "0.1.86"
 chrono = { workspace = true }
 config = { workspace = true }
-mithril-client = { version = "0.12", features = ["fs"] }
-mithril-common = { version = "0.6.17" }
+mithril-client = { version = "0.14", features = ["fs", "rustls"] }
+mithril-common = { version = "0.7" }
 pallas = { workspace = true, features = ["hardano"] }
 pallas-traverse = { workspace = true }
 serde_json = { workspace = true }

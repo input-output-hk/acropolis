@@ -48,11 +48,11 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-caryatid_sdk = "0.14.1"
-caryatid_process = "0.14.2"
-caryatid_module_rest_server = "0.15.2"
-caryatid_module_clock = "0.13.2"
-caryatid_module_spy = "0.13.2"
+caryatid_sdk = { version = "0.14.1", git = "https://github.com/input-output-hk/caryatid.git", rev = "538c3f8" }
+caryatid_process = { version = "0.14.3", git = "https://github.com/input-output-hk/caryatid.git", rev = "538c3f8" }
+caryatid_module_rest_server = { version = "0.16.0", git = "https://github.com/input-output-hk/caryatid.git", rev = "538c3f8" }
+caryatid_module_clock = { version = "0.13.2", git = "https://github.com/input-output-hk/caryatid.git", rev = "538c3f8" }
+caryatid_module_spy = { version = "0.13.2", git = "https://github.com/input-output-hk/caryatid.git", rev = "538c3f8" }
 anyhow = "1.0"
 axum = "0.8"
 chrono = "0.4"

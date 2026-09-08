@@ -302,7 +302,7 @@ mod tests {
     }
 
     // Helper functions
-    fn to_cbor<T: for<'c> cbor::encode::Encode<()>>(value: &T) -> Vec<u8> {
+    fn to_cbor<T: cbor::encode::Encode<()>>(value: &T) -> Vec<u8> {
         let mut buf = Vec::new();
         let mut encoder = cbor::Encoder::new(&mut buf);
         encoder.encode(value).unwrap();

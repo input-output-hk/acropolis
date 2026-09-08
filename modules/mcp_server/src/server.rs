@@ -14,9 +14,10 @@ use acropolis_common::messages::Message;
 use caryatid_sdk::Context;
 
 use rmcp::model::{
-    Annotated, CallToolRequestParam, CallToolResult, ErrorCode, ErrorData, Implementation,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParam, RawResource,
-    ReadResourceRequestParam, ReadResourceResult, ResourceContents, ServerCapabilities, ServerInfo,
+    CallToolRequestParams, CallToolResponse, ErrorCode, ErrorData, Implementation,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
+    ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ServerCapabilities,
+    ServerInfo,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::{
@@ -74,62 +75,40 @@ impl ServerHandler for AcropolisMCPServer {
             "MCP get_info called - advertising {} tools and {} resources",
             tools_count, resources_count
         );
-        ServerInfo {
-            protocol_version: Default::default(),
-            capabilities: ServerCapabilities::builder()
+        ServerInfo::new(ServerCapabilities::builder()
                 .enable_resources()
                 .enable_tools()
-                .build(),
-            server_info: Implementation {
-                name: "acropolis-mcp".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                title: Some("Acropolis MCP Server".to_string()),
-                website_url: None,
-                icons: None,
-            },
-            instructions: Some(
-                "Acropolis MCP server provides Cardano blockchain data via Blockfrost-compatible API. \
-                 Use tools like get_epoch_info, get_block_information, get_pool_info etc. to query blockchain state."
-                    .to_string(),
-            ),
-        }
+                .build())
+                .with_server_info(Implementation::new("acropolis-mcp", env!("CARGO_PKG_VERSION")))
+                .with_instructions("Acropolis MCP server provides Cardano blockchain data via Blockfrost-compatible API. \
+                 Use tools like get_epoch_info, get_block_information, get_pool_info etc. to query blockchain state.")
     }
 
     async fn list_resources(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
         info!("MCP client requested resource list");
 
         // Build resource list from the shared routes registry
-        let resources: Vec<Annotated<RawResource>> = get_all_resources()
+        let resources: Vec<Resource> = get_all_resources()
             .iter()
-            .map(|route| Annotated {
-                raw: RawResource {
-                    uri: route.mcp_uri_template.to_string(),
-                    name: route.name.to_string(),
-                    title: None,
-                    description: Some(route.description.to_string()),
-                    mime_type: Some("application/json".to_string()),
-                    size: None,
-                    icons: None,
-                },
-                annotations: None,
+            .map(|route| {
+                Resource::new(route.mcp_uri_template, route.name)
+                    .with_description(route.description)
+                    .with_mime_type("application/json")
             })
             .collect();
 
-        Ok(ListResourcesResult {
-            resources,
-            next_cursor: None,
-        })
+        Ok(ListResourcesResult::with_all_items(resources))
     }
 
     async fn read_resource(
         &self,
-        request: ReadResourceRequestParam,
+        request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, ErrorData> {
+    ) -> Result<ReadResourceResponse, ErrorData> {
         info!("MCP client reading resource: {}", request.uri);
 
         // Use the generic handler that dispatches based on URI
@@ -144,25 +123,24 @@ impl ServerHandler for AcropolisMCPServer {
             })?;
 
         // Return as MCP resource
-        Ok(ReadResourceResult {
-            contents: vec![ResourceContents::TextResourceContents {
-                uri: request.uri,
-                mime_type: Some("application/json".to_string()),
-                text: serde_json::to_string_pretty(&json_result).map_err(|e| {
-                    ErrorData::new(
-                        ErrorCode::INTERNAL_ERROR,
-                        format!("Failed to serialize JSON: {e}"),
-                        None,
-                    )
-                })?,
-                meta: None,
-            }],
-        })
+        let result = ReadResourceResult::new(vec![ResourceContents::TextResourceContents {
+            uri: request.uri,
+            mime_type: Some("application/json".to_string()),
+            text: serde_json::to_string_pretty(&json_result).map_err(|e| {
+                ErrorData::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!("Failed to serialize JSON: {e}"),
+                    None,
+                )
+            })?,
+            meta: None,
+        }]);
+        Ok(ReadResourceResponse::Complete(result))
     }
 
     async fn list_tools(
         &self,
-        _request: Option<PaginatedRequestParam>,
+        _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         let result = list_tools_result();
@@ -175,9 +153,9 @@ impl ServerHandler for AcropolisMCPServer {
 
     async fn call_tool(
         &self,
-        request: CallToolRequestParam,
+        request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         info!("MCP client calling tool: {}", request.name);
 
         handle_tool_call(

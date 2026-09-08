@@ -353,7 +353,7 @@ impl Verifier {
             let mut errors: usize = 0;
             for either in expected_rewards
                 .into_iter()
-                .merge_join_by(rewards.rewards.clone().into_iter(), |i, j| i.0.cmp(&j.0))
+                .merge_join_by(rewards.rewards.clone(), |i, j| i.0.cmp(&j.0))
             {
                 match either {
                     Left(expected_spo) => {
@@ -378,9 +378,7 @@ impl Verifier {
                         for either in expected_spo
                             .1
                             .into_iter()
-                            .merge_join_by(actual_spo.1.into_iter(), |i, j| {
-                                Self::sort_rewards(i, j)
-                            })
+                            .merge_join_by(actual_spo.1, Self::sort_rewards)
                         {
                             match either {
                                 Left(expected) => {

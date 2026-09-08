@@ -29,6 +29,15 @@ pub trait ChainIndex: Send + Sync + 'static {
         self.handle_onchain_tx(info, &tx).await
     }
 
+    /// Called once per block, before any transaction handlers.
+    ///
+    /// Use this for block-level bookkeeping (e.g. tracking the chain tip)
+    /// that must happen even for empty blocks with no transactions.
+    async fn handle_block(&mut self, info: &BlockInfo) -> Result<()> {
+        let _ = info;
+        Ok(())
+    }
+
     /// Called when the chain rolls back to a point.
     ///
     /// Implementations must remove or revert any state derived from slots

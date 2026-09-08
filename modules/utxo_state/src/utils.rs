@@ -78,7 +78,7 @@ pub fn get_vkeys_needed(
 
     // for each voters, get required vkey hashes
     if let Some(voting_procedures) = voting_procedures.as_ref() {
-        for (voter, _) in voting_procedures.votes.iter() {
+        for voter in voting_procedures.votes.keys() {
             if let Some(vkey_hash) = voter.get_voter_key_hash() {
                 vkey_hashes.insert(vkey_hash);
             }

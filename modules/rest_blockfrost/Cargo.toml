@@ -18,7 +18,7 @@ blake2 = "0.10.6"
 config = { workspace = true }
 hex = { workspace = true }
 num-traits = "0.2"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 rust_decimal = "1.37.2"
 serde = { workspace = true }
 serde_cbor = "0.11"
