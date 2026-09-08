@@ -14,17 +14,22 @@ use caryatid_sdk::{module, Context, Subscription};
 use chrono::{Duration, Utc};
 use config::Config;
 use mithril_client::{
-    AggregatorDiscoveryType, ClientBuilder, GenesisVerificationKey, MessageBuilder, cardano_database_client::{DownloadUnpackOptions, ImmutableFileRange}, feedback::{FeedbackReceiver, MithrilEvent, MithrilEventCardanoDatabase},
+    cardano_database_client::{DownloadUnpackOptions, ImmutableFileRange},
+    feedback::{FeedbackReceiver, MithrilEvent, MithrilEventCardanoDatabase},
+    AggregatorDiscoveryType, ClientBuilder, GenesisVerificationKey, MessageBuilder,
 };
 use mithril_common::messages::CardanoDatabaseSnapshotMessage as Snapshot;
 use pallas::storage::hardano;
 use pallas_traverse::MultiEraBlock;
-use std::{fs::{self, File}, sync::atomic::AtomicU64};
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration as SystemDuration;
+use std::{
+    fs::{self, File},
+    sync::atomic::AtomicU64,
+};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, info_span, Instrument};
 
@@ -101,12 +106,23 @@ impl FeedbackReceiver for FeedbackLogger {
             MithrilEvent::CertificateChainValidationStarted { .. } => {
                 info!("Started certificate chain validation");
             }
-            MithrilEvent::CardanoDatabase(MithrilEventCardanoDatabase::Started { total_immutable_files, .. }) =>{
+            MithrilEvent::CardanoDatabase(MithrilEventCardanoDatabase::Started {
+                total_immutable_files,
+                ..
+            }) => {
                 info!("Downloading {total_immutable_files} immutable file(s)");
                 self.total.store(total_immutable_files, std::sync::atomic::Ordering::Relaxed);
             }
-            MithrilEvent::CardanoDatabase(MithrilEventCardanoDatabase::ImmutableDownloadCompleted { immutable_file_number, .. }) =>{
-                info!("Downloaded immutable file {immutable_file_number} of {}", self.total.load(std::sync::atomic::Ordering::Relaxed));
+            MithrilEvent::CardanoDatabase(
+                MithrilEventCardanoDatabase::ImmutableDownloadCompleted {
+                    immutable_file_number,
+                    ..
+                },
+            ) => {
+                info!(
+                    "Downloaded immutable file {immutable_file_number} of {}",
+                    self.total.load(std::sync::atomic::Ordering::Relaxed)
+                );
             }
             MithrilEvent::CertificateValidated {
                 certificate_hash, ..
@@ -242,21 +258,25 @@ impl MithrilSnapshotFetcher {
         fs::create_dir_all(&directory)?;
         let dir = Path::new(&directory);
         let range = ImmutableFileRange::Full;
-        client.cardano_database_v2().download_unpack(&snapshot, &range, dir, DownloadUnpackOptions::default()).await?;
+        client
+            .cardano_database_v2()
+            .download_unpack(&snapshot, &range, dir, DownloadUnpackOptions::default())
+            .await?;
 
-        let digests = client.cardano_database_v2().download_and_verify_digests(&certificate, &snapshot).await?;
-        let merkle_proof = client.cardano_database_v2().verify_cardano_database(
-            &certificate,
-            &snapshot,
-            &range,
-            false,
-            dir,
-            &digests,
-        ).await?;
+        let digests = client
+            .cardano_database_v2()
+            .download_and_verify_digests(&certificate, &snapshot)
+            .await?;
+        let merkle_proof = client
+            .cardano_database_v2()
+            .verify_cardano_database(&certificate, &snapshot, &range, false, dir, &digests)
+            .await?;
 
         // Register download
         let files_downloaded = range.length(snapshot.beacon.immutable_file_number);
-        if let Err(e) = client.cardano_database_v2().add_statistics(true, false, files_downloaded).await {
+        if let Err(e) =
+            client.cardano_database_v2().add_statistics(true, false, files_downloaded).await
+        {
             error!("Could not increment snapshot download statistics: {:?}", e);
             // But that doesn't affect us...
         }
@@ -267,7 +287,9 @@ impl MithrilSnapshotFetcher {
         }
 
         // Verify the snapshot
-        let message = MessageBuilder::new().compute_cardano_database_message(&certificate, &merkle_proof).await?;
+        let message = MessageBuilder::new()
+            .compute_cardano_database_message(&certificate, &merkle_proof)
+            .await?;
 
         if !certificate.match_message(&message) {
             return Err(anyhow!("Snapshot verification failed"));
@@ -588,7 +610,10 @@ mod tests {
         let loaded_snapshot = result.unwrap();
         assert_eq!(snapshot.hash, loaded_snapshot.hash);
         assert_eq!(snapshot.created_at, loaded_snapshot.created_at);
-        assert_eq!(snapshot.total_db_size_uncompressed, loaded_snapshot.total_db_size_uncompressed);
+        assert_eq!(
+            snapshot.total_db_size_uncompressed,
+            loaded_snapshot.total_db_size_uncompressed
+        );
     }
 
     #[test]
