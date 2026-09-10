@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use acropolis_common::{
-    crypto::keyhash_224,
+    crypto::{keyhash_224, verify_ed25519_signature_strict},
     validation::{
         KesSignatureError, KesValidation, KesValidationError, OperationalCertificateError,
     },
@@ -102,7 +102,7 @@ pub fn validate_operational_certificate<'a>(
     message.extend_from_slice(certificate.operational_cert_hot_vkey);
     message.extend_from_slice(&certificate.operational_cert_sequence_number.to_be_bytes());
     message.extend_from_slice(&certificate.operational_cert_kes_period.to_be_bytes());
-    if !issuer.verify(&message, &signature) {
+    if !verify_ed25519_signature_strict(issuer.as_ref(), signature.as_ref(), &message) {
         return Err(OperationalCertificateError::InvalidSignatureOcert {
             issuer: issuer.as_ref().to_vec(),
             pool_id: *pool_id,

@@ -43,6 +43,7 @@ dependencies = [
  "crc",
  "cryptoxide 0.5.3",
  "dashmap",
+ "ed25519-dalek",
  "env_logger",
  "futures",
  "hex",

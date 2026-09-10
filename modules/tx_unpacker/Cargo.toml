@@ -15,7 +15,6 @@ acropolis_codec = { path = "../../codec" }
 caryatid_sdk = { workspace = true }
 anyhow = { workspace = true }
 config = { workspace = true }
-cryptoxide = "0.5.1"
 futures = "0.3.31"
 hex = { workspace = true }
 pallas = { workspace = true }
@@ -29,3 +28,6 @@ amaru-uplc = { workspace = true }
 
 [lib]
 path = "src/tx_unpacker.rs"
+
+[dev-dependencies]
+cryptoxide = "0.5.1"

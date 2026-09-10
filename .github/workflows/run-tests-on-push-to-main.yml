@@ -39,7 +39,9 @@ jobs:
           key: ${{ runner.os }}-${{ github.workflow }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install Shear
-        run: cargo install cargo-shear
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-shear
 
       - name: Run Format
         run: cargo fmt --all -- --check
