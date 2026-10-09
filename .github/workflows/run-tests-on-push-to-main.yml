@@ -39,7 +39,7 @@ jobs:
           key: ${{ runner.os }}-${{ github.workflow }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install Shear
-        run: cargo install cargo-shear
+        run: cargo install cargo-shear --locked
 
       - name: Run Format
         run: cargo fmt --all -- --check
