@@ -1851,29 +1851,39 @@ impl State {
                 if entry.registered {
                     self.proposal_refunds.push((reward_account.clone(), deposit));
                 } else {
-                    // Pay deposit to treasury
-                    self.pots.treasury = self.pots.treasury.saturating_add(deposit);
-
-                    // Decrement account's proposal deposits
-                    let Some(balance) = self.proposal_deposits.get_mut(reward_account) else {
-                        warn!("No proposal deposit for {}", reward_account);
-                        continue;
-                    };
-
-                    if *balance < deposit {
-                        warn!(
-                            "Refund {} exceeds proposal deposit {} for {}",
-                            deposit, *balance, reward_account
-                        );
-                        continue;
-                    }
-
-                    *balance -= deposit;
-                    if *balance == 0 {
-                        self.proposal_deposits.remove(reward_account);
-                    }
+                    self.pay_forfeited_proposal_deposit_to_treasury(reward_account, deposit);
                 }
+            } else {
+                // Never seen, so never registered
+                self.pay_forfeited_proposal_deposit_to_treasury(reward_account, deposit);
             }
+        }
+    }
+
+    fn pay_forfeited_proposal_deposit_to_treasury(
+        &mut self,
+        reward_account: &StakeAddress,
+        deposit: Lovelace,
+    ) {
+        self.pots.treasury = self.pots.treasury.saturating_add(deposit);
+
+        // Decrement account's proposal deposits
+        let Some(balance) = self.proposal_deposits.get_mut(reward_account) else {
+            warn!("No proposal deposit for {}", reward_account);
+            return;
+        };
+
+        if *balance < deposit {
+            warn!(
+                "Refund {} exceeds proposal deposit {} for {}",
+                deposit, *balance, reward_account
+            );
+            return;
+        }
+
+        *balance -= deposit;
+        if *balance == 0 {
+            self.proposal_deposits.remove(reward_account);
         }
     }
 
@@ -2051,6 +2061,9 @@ mod tests {
         Withdrawal,
     };
     use acropolis_common::{
+        GovActionId, GovernanceAction, GovernanceOutcome, ProposalProcedure, VotingOutcome,
+    };
+    use acropolis_common::{
         Registration, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, TxCertificateWithPos, VoteDelegation,
     };
@@ -2171,6 +2184,49 @@ mod tests {
         }
 
         ctx.get_validation().as_result().unwrap();
+    }
+
+    fn expired_proposal(reward_account: &StakeAddress, deposit: Lovelace) -> GovernanceOutcome {
+        GovernanceOutcome {
+            voting: VotingOutcome {
+                procedure: ProposalProcedure {
+                    deposit,
+                    reward_account: reward_account.clone(),
+                    gov_action_id: GovActionId::default(),
+                    gov_action: GovernanceAction::Information,
+                    anchor: Anchor {
+                        url: String::new(),
+                        data_hash: Vec::new(),
+                    },
+                },
+                votes_cast: None,
+                votes_threshold: None,
+                accepted: false,
+            },
+            action_to_perform: GovernanceOutcomeVariant::NoAction,
+        }
+    }
+
+    #[test]
+    fn forfeited_deposit_of_never_registered_return_account_goes_to_treasury() {
+        // Preview epoch 706: two expired proposals returned to an account that was never
+        // registered; the ledger moves both deposits to the treasury.
+        let mut state = State::default();
+        let reward_account = create_address(&STAKE_KEY_HASH);
+        let deposit = 100_000_000_000;
+        state.proposal_deposits.insert(reward_account.clone(), 2 * deposit);
+
+        state.handle_forfeited_deposits(&GovernanceOutcomesMessage {
+            alonzo_babbage_outcomes: Vec::new(),
+            conway_outcomes: vec![
+                expired_proposal(&reward_account, deposit),
+                expired_proposal(&reward_account, deposit),
+            ],
+        });
+
+        assert_eq!(state.pots.treasury, 2 * deposit);
+        assert!(state.proposal_refunds.is_empty());
+        assert!(!state.proposal_deposits.contains_key(&reward_account));
     }
 
     #[test]
