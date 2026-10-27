@@ -27,6 +27,7 @@ make run-bootstrap
 ```
 
 Set the log level with `make run LOG_LEVEL=debug` (options: `error`, `warn`, `info`, `debug`, `trace`).
+Keep run data (Mithril snapshot, Fjall stores) out of the source tree with `make run DATA_DIR=/path`.
 
 ### Docker
 

@@ -9,6 +9,15 @@ PYTHON := python3
 PROCESS_PKG := acropolis_process_omnibus
 LOG_LEVEL ?= info
 
+# Optional root for the omnibus on-disk data (Mithril snapshots, fjall stores, caches).
+# When set, the run-* targets first write $(DATA_DIR)/<network>/paths.toml (target
+# data-config, see scripts/omnibus-data-paths.sh) and load it last. Empty: module defaults.
+DATA_DIR ?=
+DATA_ROOT = $(abspath $(DATA_DIR))
+NETWORK = mainnet
+BASE_CONFIG = omnibus.toml
+DATA_CONFIG = $(if $(DATA_DIR),--config "$(DATA_ROOT)/$(NETWORK)/paths.toml")
+
 
 # Test snapshots
 SNAPSHOT_SMALL ?= tests/fixtures/snapshot-small.cbor
@@ -23,7 +32,7 @@ SECTIONS_ALL := --params --governance --pools --accounts --utxo
 
 .PHONY: help all build test run run-preview run-bootstrap run-bootstrap-preview run-bootstrap-utxo-validation run-block-header-validation run-test-blocks run-test-vrf-wrong-leader run-midnight run-midnight-indexer fmt clippy
 .PHONY: snapshot-summary snapshot-sections-all snapshot-bootstrap
-.PHONY: snap-test-streaming run-bootstrap-store-spdd-drdd build-release
+.PHONY: snap-test-streaming run-bootstrap-store-spdd-drdd build-release data-config
 
 help:
 	@echo "Acropolis Makefile Targets:"
@@ -54,10 +63,12 @@ help:
 	@echo "Variables:"
 	@echo "  SNAPSHOT=<path>          Path to snapshot file (default: Conway epoch 507)"
 	@echo "  LOG_LEVEL=<level>        Set log level (default: info, options: error, warn, info, debug, trace)"
+	@echo "  DATA_DIR=<dir>           Store run data (Mithril, fjall, caches) under <dir>/<network> (run-* targets)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make snap-test-streaming"
 	@echo "  make run LOG_LEVEL=debug"
+	@echo "  make run DATA_DIR=/Volumes/data/acropolis"
 	@echo "  make snap-test-streaming SNAPSHOT=path/to/snapshot.cbor"
 
 all: fmt clippy test
@@ -71,32 +82,40 @@ build-release:
 test:
 	$(CARGO) test
 
-run:
-	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG)
+run-preview run-bootstrap-preview: NETWORK = preview
+run-preview run-bootstrap-preview: BASE_CONFIG = omnibus-preview.toml
 
-run-preview:
-	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus-preview.toml
+data-config:
+ifneq ($(DATA_DIR),)
+	scripts/omnibus-data-paths.sh "$(DATA_ROOT)/$(NETWORK)" processes/omnibus/$(BASE_CONFIG)
+endif
 
-run-bootstrap:
-	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml
+run: data-config
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml $(DATA_CONFIG)
 
-run-bootstrap-preview:
-	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus-preview.toml --config omnibus.bootstrap.preview.toml
+run-preview: data-config
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus-preview.toml $(DATA_CONFIG)
 
-run-bootstrap-utxo-validation:
-	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap-utxo-validation.toml
+run-bootstrap: data-config
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml $(DATA_CONFIG)
 
-run-block-header-validation:
-	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.block-header-validation.toml
+run-bootstrap-preview: data-config
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus-preview.toml --config omnibus.bootstrap.preview.toml $(DATA_CONFIG)
 
-run-bootstrap-store-spdd-drdd:
-	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml --config omnibus.store-spdd-drdd.toml
+run-bootstrap-utxo-validation: data-config
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap-utxo-validation.toml $(DATA_CONFIG)
 
-run-test-blocks:
-	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config test-blocks/omnibus.test.toml
+run-block-header-validation: data-config
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.block-header-validation.toml $(DATA_CONFIG)
 
-run-test-vrf-wrong-leader:
-	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config test-vrf-wrong-leader/omnibus.test.toml
+run-bootstrap-store-spdd-drdd: data-config
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml --config omnibus.store-spdd-drdd.toml $(DATA_CONFIG)
+
+run-test-blocks: data-config
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config test-blocks/omnibus.test.toml $(DATA_CONFIG)
+
+run-test-vrf-wrong-leader: data-config
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config test-vrf-wrong-leader/omnibus.test.toml $(DATA_CONFIG)
 
 run-midnight-mainnet:
 	cd processes/midnight_indexer && $(CARGO) run --release --bin acropolis_process_midnight_indexer -- --config config.mainnet.toml
