@@ -347,11 +347,11 @@ pub struct ProtocolParamsMessage {
 }
 
 /// Generated after all governance actions for the current epoch are processed.
-/// Includes info about all actions that are accepted or expired at the epoch edge.
-/// `VotingOutcome` informs about action_id, voting outcome and votes cast for the
-/// action. If the action is not accepted or has no associated state change (like
-/// Information), then it is included into `refunds` field. Otherwise info is
-/// specified in `enact_state`/`withdrawals` field and not repeated in `refunds`.
+/// Includes info about all actions that end at the epoch edge: accepted (ratified, enacted
+/// now), expired, or dropped by the ledger along with them (descendants of an expired
+/// action, or siblings of an enacted one, with their descendants). Every ended action's
+/// deposit is returned. `action_to_perform` holds the enact state element or treasury
+/// withdrawal of an accepted action, `NoAction` otherwise.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceOutcomesMessage {
     pub alonzo_babbage_outcomes: Vec<AlonzoBabbageVotingOutcome>,
