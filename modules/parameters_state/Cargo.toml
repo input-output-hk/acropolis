@@ -18,7 +18,7 @@ anyhow = { workspace = true }
 blake2 = "0.10.6"
 config = { workspace = true }
 hex = { workspace = true }
-pallas = { workspace = true }
+pallas-configs = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

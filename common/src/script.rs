@@ -97,7 +97,7 @@ pub enum NativeScript {
     ScriptPubkey(AddrKeyhash),
     ScriptAll(Vec<NativeScript>),
     ScriptAny(Vec<NativeScript>),
-    ScriptNOfK(u32, Vec<NativeScript>),
+    ScriptNOfK(i64, Vec<NativeScript>),
     InvalidBefore(u64),
     InvalidHereafter(u64),
 }
@@ -232,7 +232,7 @@ impl NativeScript {
                 let count = scripts
                     .iter()
                     .map(|script| script.eval(vkey_hashes_provided, low_bnd, upp_bnd))
-                    .fold(0, |x, y| x + y as u32);
+                    .fold(0, |x, y| x + y as i64);
                 count >= *val
             }
             Self::InvalidBefore(val) => {

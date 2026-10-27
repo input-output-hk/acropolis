@@ -109,7 +109,7 @@ Key configuration sections:
 
 ## Cardano-Specific Context
 
-- Uses **Pallas** library (`pallas = "0.34.0"`) for Cardano primitives and CBOR parsing
+- Uses **Pallas** library (`pallas = "1.4.0"`) for Cardano primitives and CBOR parsing
 - Supports multiple eras (Shelley through Conway)
 - Can bootstrap from Genesis files or ledger state snapshots (CBOR format)
 - Integrates with Mithril for snapshot verification and fetching

@@ -4,7 +4,7 @@ use crate::{
 };
 use acropolis_common::*;
 use anyhow::{Result, anyhow};
-use pallas_primitives::{Nullable, alonzo, conway};
+use pallas_primitives::{alonzo, conway};
 use pallas_traverse::MultiEraCert;
 
 #[allow(clippy::too_many_arguments)]
@@ -17,7 +17,7 @@ pub fn to_pool_reg(
     reward_account: &pallas_primitives::RewardAccount,
     pool_owners: &[pallas_primitives::AddrKeyhash],
     relays: &[pallas_primitives::Relay],
-    pool_metadata: &Nullable<pallas_primitives::PoolMetadata>,
+    pool_metadata: &Option<pallas_primitives::PoolMetadata>,
     network_id: NetworkId,
     force_reward_network_id: bool,
 ) -> Result<PoolRegistration> {
@@ -45,13 +45,15 @@ pub fn to_pool_reg(
             })
             .collect(),
         relays: relays.iter().map(map_relay).collect(),
-        pool_metadata: match pool_metadata {
-            Nullable::Some(md) => Some(PoolMetadata {
-                url: md.url.clone(),
-                hash: DataHash::from(*md.hash),
-            }),
-            _ => None,
-        },
+        pool_metadata: pool_metadata
+            .as_ref()
+            .map(|md| -> Result<PoolMetadata> {
+                Ok(PoolMetadata {
+                    url: md.url.clone(),
+                    hash: DataHash::try_from(md.hash.as_ref())?,
+                })
+            })
+            .transpose()?,
     })
 }
 

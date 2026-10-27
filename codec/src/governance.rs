@@ -17,7 +17,7 @@ fn map_u32_to_u64(n: Option<u32>) -> Option<u64> {
 fn map_constitution(constitution: &conway::Constitution) -> Constitution {
     Constitution {
         anchor: map_anchor(&constitution.anchor),
-        guardrail_script: map_nullable(to_hash, &constitution.guardrail_script),
+        guardrail_script: constitution.guardrail_script.as_ref().map(to_hash),
     }
 }
 
@@ -308,7 +308,7 @@ fn map_governance_action(action: &conway::GovAction) -> Result<GovernanceAction>
             Ok(GovernanceAction::ParameterChange(ParameterChangeAction {
                 previous_action_id: map_nullable_gov_action_id(id)?,
                 protocol_param_update: map_conway_protocol_param_update(protocol_update),
-                script_hash: map_nullable(|x: &PallasScriptHash| to_hash(x), script),
+                script_hash: script.as_ref().map(|x: &PallasScriptHash| to_hash(x)),
             }))
         }
 
@@ -324,7 +324,7 @@ fn map_governance_action(action: &conway::GovAction) -> Result<GovernanceAction>
                 rewards: HashMap::from_iter(
                     withdrawals.iter().map(|(account, coin)| (account.to_vec(), *coin)),
                 ),
-                script_hash: map_nullable(|x: &PallasScriptHash| to_hash(x), script),
+                script_hash: script.as_ref().map(|x: &PallasScriptHash| to_hash(x)),
             }),
         ),
 

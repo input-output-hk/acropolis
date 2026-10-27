@@ -8,7 +8,7 @@ use acropolis_common::{
     BlockInfo, GenesisDelegates, PoolId,
 };
 use imbl::HashMap;
-use pallas::{crypto::key::ed25519, ledger::traverse::MultiEraHeader};
+use pallas::{codec::minicbor, crypto::key::ed25519, ledger::traverse::MultiEraHeader};
 use tracing::error;
 
 use crate::ouroboros::{kes, praos, tpraos};
@@ -146,7 +146,7 @@ pub fn validate_block_kes<'a>(
     let body_sig = body_signature(header).ok_or(Box::new(KesValidationError::Other(
         "Block header missing KES body signature".to_string(),
     )))?;
-    let raw_header_body = header.header_body_cbor().ok_or(Box::new(KesValidationError::Other(
+    let raw_header_body = header_body_cbor(header).ok_or(Box::new(KesValidationError::Other(
         "Block header body CBOR not available".to_string(),
     )))?;
 
@@ -249,6 +249,21 @@ fn body_signature<'a>(header: &'a MultiEraHeader) -> Option<&'a [u8]> {
         MultiEraHeader::BabbageCompatible(x) => Some(&x.body_signature),
         _ => None,
     }
+}
+
+/// The original CBOR of the header body, i.e. the bytes the KES signature covers.
+/// A Shelley-based header is `[header_body, body_signature]`, so this is its first element.
+fn header_body_cbor<'a>(header: &'a MultiEraHeader) -> Option<&'a [u8]> {
+    match header {
+        MultiEraHeader::ShelleyCompatible(_) | MultiEraHeader::BabbageCompatible(_) => {}
+        _ => return None,
+    }
+    let cbor = header.cbor();
+    let mut decoder = minicbor::Decoder::new(cbor);
+    decoder.array().ok()?;
+    let start = decoder.position();
+    decoder.skip().ok()?;
+    Some(&cbor[start..decoder.position()])
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@ use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use caryatid_sdk::{module, Context};
 use config::Config;
-use pallas::ledger::configs::{
+use pallas_configs::{
     byron::{genesis_utxos, GenesisFile as ByronGenesisFile},
     shelley::GenesisFile as ShelleyGenesisFile,
 };

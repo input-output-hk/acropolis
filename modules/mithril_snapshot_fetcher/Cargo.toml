@@ -20,7 +20,7 @@ chrono = { workspace = true }
 config = { workspace = true }
 mithril-client = { version = "0.14", features = ["fs", "rustls"] }
 mithril-common = { version = "0.7" }
-pallas = { workspace = true, features = ["hardano"] }
+pallas-hardano = { workspace = true }
 pallas-traverse = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
