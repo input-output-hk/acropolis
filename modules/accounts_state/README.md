@@ -24,6 +24,23 @@ from Postgres on a DBSync database:
 ) TO 'pots.mainnet.csv' WITH CSV HEADER
 ```
 
+Without a DBSync database, the same values are available from the Koios `/totals`
+endpoint (backed by DBSync's `ada_pots`). Use `deposits_stake` for the `deposits` column:
+`deposits_drep` and `deposits_proposal` are not part of the pot this module tracks.
+Koios returns at most 1000 rows per request, so page with `offset`:
+
+```shell
+KOIOS=https://preview.koios.rest/api/v1   # or https://api.koios.rest/api/v1 for mainnet
+LAST_EPOCH=1200
+{
+  echo "epoch,reserves,treasury,deposits"
+  for offset in 0 1000 2000; do
+    curl -s "$KOIOS/totals?order=epoch_no.asc&offset=$offset&limit=1000"
+  done | jq -r --argjson last "$LAST_EPOCH" \
+    '.[] | select(.epoch_no <= $last) | [.epoch_no, .reserves, .treasury, .deposits_stake] | map(tostring) | join(",")'
+} > pots.preview.csv
+```
+
 Then configure this as (e.g.)
 
 ```toml
