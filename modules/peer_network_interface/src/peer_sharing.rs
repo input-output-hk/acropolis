@@ -2,9 +2,14 @@
 //!
 //! Primary reference: Ouroboros Network Specification.
 use minicbor::Decoder;
-use pallas::network::{
-    miniprotocols::handshake::{self, n2n::VersionData},
-    multiplexer::{Bearer, Plexer},
+use pallas_network2::{
+    bearer::{Bearer, BearerReadHalf},
+    behavior::AnyMessage,
+    protocol::{
+        PROTOCOL_CLIENT, PROTOCOL_SERVER,
+        handshake::{self, n2n::VersionData},
+        peersharing,
+    },
 };
 use std::collections::HashMap;
 use std::{
@@ -14,13 +19,13 @@ use std::{
 };
 use tracing::{debug, warn};
 
-/// Node-to-node mux mini-protocol number for peer-sharing.
-const PROTOCOL_N2N_PEER_SHARING: u16 = 10;
-
 /// Peer-sharing mode value sent during the V11+ handshake.
 /// Pallas 0.35 hardcodes `PEER_SHARING_DISABLED (0)` in all convenience
 /// constructors, so we build the version table ourselves.
 const PEER_SHARING_ENABLED: u8 = 1;
+
+/// Mux channel of the peer's peer-sharing replies: the responder side of the protocol.
+const PEER_SHARING_REPLY_CHANNEL: u16 = peersharing::CHANNEL_ID | PROTOCOL_SERVER;
 
 /// Errors that can occur during a peer-sharing exchange.
 #[derive(thiserror::Error, Debug)]
@@ -94,26 +99,15 @@ fn is_v6_link_local(v6: &Ipv6Addr) -> bool {
     (segs[0] & 0xffc0) == 0xfe80
 }
 
-// ---- CBOR message encoding / decoding ----
+// ---- CBOR message decoding ----
 // Peer-sharing protocol messages:
 //   msgShareRequest = [0, base.word8]
 //   msgSharePeers   = [1, peerAddresses]
 //   msgDone         = [2]
 //   peerAddress     = [0, word32, portNumber] | [1, word32×4, portNumber]
-fn encode_request(amount: u8) -> Vec<u8> {
-    // CBOR: array(2) = 0x82, uint(0) = 0x00, uint(amount)
-    if amount <= 23 {
-        // CBOR major type 0: values 0..=23 use one byte; 24..=255 need 0x18 + byte
-        vec![0x82, 0x00, amount]
-    } else {
-        vec![0x82, 0x00, 0x18, amount] // 0x18: uint follows in next byte
-    }
-}
-
-fn encode_done() -> Vec<u8> {
-    // CBOR: array(1) = 0x81, uint(2) = 0x02
-    vec![0x81, 0x02]
-}
+// Requests are encoded by pallas-network2. Responses are decoded here: pallas-network2
+// reads the address words in network byte order (see the note in `decode_response`) and
+// does not bound the number of entries.
 
 /// Decode a `MsgSharePeers` CBOR response, accepting at most `limit` addresses.
 ///
@@ -251,51 +245,56 @@ async fn request_peers_inner(
     ipv6_enabled: bool,
     allow_non_public_peer_addrs: bool,
 ) -> Result<Vec<String>, PeerSharingError> {
-    // Step 1: TCP connect
+    // Step 1: TCP connect. Peer-sharing runs on its own short-lived connection; the hot
+    // connection's multiplexer is owned by the chainsync/blockfetch worker.
     let bearer = Bearer::connect_tcp(address)
         .await
         .map_err(|e| PeerSharingError::ConnectionFailed(e.to_string()))?;
+    let (mut reader, mut writer) = bearer.into_split();
+    let connection_failed = |e: std::io::Error| PeerSharingError::ConnectionFailed(e.to_string());
 
-    // Step 2: Set up multiplexer — subscribe channels before spawning
-    let mut plexer = Plexer::new(bearer);
-    let hs_channel = plexer.subscribe_client(0); // handshake protocol
-    let mut ps_channel = plexer.subscribe_client(PROTOCOL_N2N_PEER_SHARING);
-    let running = plexer.spawn();
-
-    // Step 3: V11 handshake with PeerSharing=Enabled.
-    // Pallas 0.35 hardcodes PeerSharing=Disabled(0) in all convenience constructors,
+    // Step 2: V11 handshake with PeerSharing=Enabled.
+    // Pallas hardcodes PeerSharing=Disabled(0) in all convenience constructors,
     // so we build the table manually with PeerSharing=Enabled(1).
     let versions = version_table_peer_sharing_enabled(magic as u64);
-    let mut hs_client = handshake::Client::new(hs_channel);
+    writer
+        .write_message(
+            AnyMessage::Handshake(handshake::Message::Propose(versions)),
+            0,
+            PROTOCOL_CLIENT,
+        )
+        .await
+        .map_err(connection_failed)?;
 
-    match hs_client.handshake(versions).await {
+    match read_handshake_reply(&mut reader).await {
         Err(e) => {
             debug!(peer = %address, error = %e, "V11 handshake failed (peer may not support V11+)");
-            running.abort().await;
             return Ok(vec![]);
         }
-        Ok(handshake::Confirmation::Rejected(reason)) => {
-            debug!(peer = %address, ?reason, "V11 handshake rejected by peer");
-            running.abort().await;
+        Ok(handshake::Message::Accept(..)) => {} // Accepted — proceed
+        Ok(reply) => {
+            debug!(peer = %address, ?reply, "V11 handshake rejected by peer");
             return Ok(vec![]);
         }
-        Ok(_) => {} // Accepted — proceed
     }
 
-    // Step 4: Send MsgShareRequest
-    let request_bytes = encode_request(amount);
-    ps_channel
-        .enqueue_chunk(request_bytes)
+    // Step 3: Send MsgShareRequest
+    writer
+        .write_message(
+            AnyMessage::PeerSharing(peersharing::Message::ShareRequest(amount)),
+            0,
+            PROTOCOL_CLIENT,
+        )
         .await
-        .map_err(|e| PeerSharingError::ConnectionFailed(e.to_string()))?;
+        .map_err(connection_failed)?;
 
-    // Step 5: Receive MsgSharePeers — accumulate chunks until we can decode
+    // Step 4: Receive MsgSharePeers — accumulate segments until we can decode
     let mut buffer = Vec::new();
     loop {
-        let chunk = ps_channel
-            .dequeue_chunk()
-            .await
-            .map_err(|e| PeerSharingError::ConnectionFailed(e.to_string()))?;
+        let (channel, chunk) = reader.read_segment().await.map_err(connection_failed)?;
+        if channel != PEER_SHARING_REPLY_CHANNEL {
+            continue;
+        }
         buffer.extend_from_slice(&chunk);
 
         // Try decoding — succeed on valid CBOR, continue if incomplete
@@ -306,18 +305,34 @@ async fn request_peers_inner(
             allow_non_public_peer_addrs,
         ) {
             Ok(addrs) => {
-                // Step 6: Send MsgDone (best-effort)
-                let _ = ps_channel.enqueue_chunk(encode_done()).await;
-                running.abort().await;
+                // Step 5: Send MsgDone (best-effort); dropping the halves closes the socket
+                let _ = writer
+                    .write_message(
+                        AnyMessage::PeerSharing(peersharing::Message::Done),
+                        0,
+                        PROTOCOL_CLIENT,
+                    )
+                    .await;
                 return Ok(addrs);
             }
             Err(PeerSharingError::CborDecode(_)) if !looks_complete(&buffer) => {
                 // Incomplete CBOR — wait for more chunks
                 continue;
             }
-            Err(e) => {
-                running.abort().await;
-                return Err(e);
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Read segments until the handshake reply (Accept, Refuse or QueryReply) is complete.
+async fn read_handshake_reply(
+    reader: &mut BearerReadHalf,
+) -> std::io::Result<handshake::Message<VersionData>> {
+    let mut partial = HashMap::new();
+    loop {
+        for msg in reader.read_full_msgs::<AnyMessage>(&mut partial).await? {
+            if let AnyMessage::Handshake(reply) = msg {
+                return Ok(reply);
             }
         }
     }
