@@ -85,7 +85,6 @@ pub struct NetworkManager {
     /// Addresses from the static `node_addresses` config. Configured peers are always
     /// retried on disconnect and are never blacklisted.
     configured_addrs: HashSet<String>,
-    connect_timeout: Duration,
     ipv6_enabled: bool,
     allow_non_public_peer_addrs: bool,
     discovery_interval: Duration,
@@ -105,7 +104,6 @@ impl NetworkManager {
         peer_sharing_enabled: bool,
         churn_interval_secs: u64,
         peer_sharing_timeout_secs: u64,
-        connect_timeout_secs: u64,
         ipv6_enabled: bool,
         allow_non_public_peer_addrs: bool,
         discovery_interval_secs: u64,
@@ -141,7 +139,6 @@ impl NetworkManager {
             min_hot_peers,
             cold_origin: HashSet::new(),
             configured_addrs,
-            connect_timeout: Duration::from_secs(connect_timeout_secs),
             ipv6_enabled,
             allow_non_public_peer_addrs,
             discovery_interval: Duration::from_secs(discovery_interval_secs),
@@ -455,17 +452,8 @@ impl NetworkManager {
     pub fn handle_new_connection(&mut self, address: String, delay: Duration) -> PeerId {
         let id = PeerId(self.next_id);
         self.next_id += 1;
-        let sender = PeerMessageSender {
-            sink: self.events_sender.clone(),
-            id,
-        };
-        let conn = PeerConnection::new(
-            address,
-            self.network_magic,
-            sender,
-            delay,
-            self.connect_timeout,
-        );
+        let sender = PeerMessageSender::new(id, self.events_sender.clone());
+        let conn = PeerConnection::new(address, self.network_magic, sender, delay);
         let peer = PeerData::new(conn);
         let points = self.flow_handler.handle_new_connection(id, self.sync_point.as_ref());
         peer.find_intersect(points);
@@ -709,6 +697,10 @@ pub struct PeerMessageSender {
 }
 
 impl PeerMessageSender {
+    pub(crate) fn new(id: PeerId, sink: mpsc::Sender<NetworkEvent>) -> Self {
+        Self { id, sink }
+    }
+
     pub async fn write(&self, event: PeerEvent) -> Result<()> {
         self.sink
             .send(NetworkEvent::PeerUpdate {
@@ -805,7 +797,6 @@ mod tests {
             cfg.peer_sharing_enabled,
             cfg.churn_interval_secs,
             cfg.peer_sharing_timeout_secs,
-            cfg.connect_timeout_secs,
             cfg.ipv6_enabled,
             cfg.allow_non_public_peer_addrs,
             cfg.discovery_interval_secs,
@@ -822,17 +813,13 @@ mod tests {
     }
 
     fn add_test_peer(manager: &mut NetworkManager, peer: PeerId) {
-        let sender = PeerMessageSender {
-            sink: manager.events_sender.clone(),
-            id: peer,
-        };
+        let sender = PeerMessageSender::new(peer, manager.events_sender.clone());
         // Delay prevents immediate network activity; tests drive state manually.
         let conn = PeerConnection::new(
             "test-peer:3001".to_string(),
             0,
             sender,
             Duration::from_secs(3600),
-            Duration::from_secs(15),
         );
         manager.peers.insert(peer, PeerData::new(conn));
     }
@@ -931,17 +918,8 @@ mod tests {
     }
 
     fn add_test_peer_with_address(manager: &mut NetworkManager, peer: PeerId, address: &str) {
-        let sender = PeerMessageSender {
-            sink: manager.events_sender.clone(),
-            id: peer,
-        };
-        let conn = PeerConnection::new(
-            address.to_string(),
-            0,
-            sender,
-            Duration::from_secs(3600),
-            Duration::from_secs(15),
-        );
+        let sender = PeerMessageSender::new(peer, manager.events_sender.clone());
+        let conn = PeerConnection::new(address.to_string(), 0, sender, Duration::from_secs(3600));
         manager.peers.insert(peer, PeerData::new(conn));
     }
 
