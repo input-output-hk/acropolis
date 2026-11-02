@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::{connection::Header, network::PeerId};
 use acropolis_common::{BlockHash, hash::Hash};
-use pallas::network::miniprotocols::Point;
+use pallas_network2::protocol::Point;
 use tracing::warn;
 
 #[derive(Debug)]
