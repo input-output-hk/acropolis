@@ -2,14 +2,14 @@ use std::time::Duration;
 
 use acropolis_common::{BlockHash, Era};
 use anyhow::{Result, bail};
-pub use pallas::network::miniprotocols::Point;
 use pallas::{
     ledger::traverse::MultiEraHeader,
     network::{
         facades::PeerClient,
-        miniprotocols::{blockfetch, chainsync},
+        miniprotocols::{self as legacy, blockfetch, chainsync},
     },
 };
+use pallas_network2::protocol::Point;
 use tokio::{
     select,
     sync::{mpsc, oneshot},
@@ -162,16 +162,17 @@ impl PeerConnectionWorker {
                     };
                     match cmd {
                         ChainsyncCommand::FindIntersect(points) => {
+                            let points = points.into_iter().map(to_legacy).collect();
                             let (point, tip) = client.find_intersect(points).await?;
-                            reached = point;
+                            reached = point.map(from_legacy);
                             if reached.is_none() {
-                                self.sender.write(PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip.0))).await?;
+                                self.sender.write(PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(from_legacy(tip.0)))).await?;
                             }
                         }
                         ChainsyncCommand::FindTip(done) => {
-                            let points = reached.as_slice().to_vec();
+                            let points = reached.iter().cloned().map(to_legacy).collect();
                             let (_, tip) = client.find_intersect(points).await?;
-                            if done.send(tip.0).is_err() {
+                            if done.send(from_legacy(tip.0)).is_err() {
                                 bail!("parent process has disconnected");
                             }
                         }
@@ -187,7 +188,7 @@ impl PeerConnectionWorker {
         mut commands: mpsc::UnboundedReceiver<BlockfetchCommand>,
     ) -> Result<()> {
         while let Some(BlockfetchCommand::Fetch(hash, slot)) = commands.recv().await {
-            let point = Point::Specific(slot, hash.to_vec());
+            let point = legacy::Point::Specific(slot, hash.to_vec());
             let body = client.fetch_single(point).await?;
             self.sender.write(PeerEvent::BlockFetched(BlockFetched { slot, hash, body })).await?;
         }
@@ -206,13 +207,16 @@ impl PeerConnectionWorker {
                 let point = Point::Specific(parsed.slot, parsed.hash.to_vec());
                 Ok(Some(ParsedChainsyncMessage {
                     point,
-                    event: PeerChainSyncEvent::RollForward(parsed, tip.0),
+                    event: PeerChainSyncEvent::RollForward(parsed, from_legacy(tip.0)),
                 }))
             }
-            chainsync::NextResponse::RollBackward(point, tip) => Ok(Some(ParsedChainsyncMessage {
-                point: point.clone(),
-                event: PeerChainSyncEvent::RollBackward(point, tip.0),
-            })),
+            chainsync::NextResponse::RollBackward(point, tip) => {
+                let point = from_legacy(point);
+                Ok(Some(ParsedChainsyncMessage {
+                    point: point.clone(),
+                    event: PeerChainSyncEvent::RollBackward(point, from_legacy(tip.0)),
+                }))
+            }
             chainsync::NextResponse::Await => Ok(None),
         }
     }
@@ -250,4 +254,20 @@ struct ParsedChainsyncMessage {
 
 enum BlockfetchCommand {
     Fetch(BlockHash, u64),
+}
+
+// The chainsync/blockfetch clients still come from pallas-network; the rest of the module
+// speaks pallas-network2 points.
+fn to_legacy(point: Point) -> legacy::Point {
+    match point {
+        Point::Origin => legacy::Point::Origin,
+        Point::Specific(slot, hash) => legacy::Point::Specific(slot, hash),
+    }
+}
+
+fn from_legacy(point: legacy::Point) -> Point {
+    match point {
+        legacy::Point::Origin => Point::Origin,
+        legacy::Point::Specific(slot, hash) => Point::Specific(slot, hash),
+    }
 }
