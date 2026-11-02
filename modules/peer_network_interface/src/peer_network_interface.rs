@@ -21,7 +21,7 @@ use acropolis_common::{
 use anyhow::{Result, bail};
 use caryatid_sdk::{Context, Subscription, module};
 use config::Config;
-use pallas::network::miniprotocols::Point;
+use pallas_network2::protocol::Point;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 

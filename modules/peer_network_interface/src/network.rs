@@ -12,7 +12,7 @@ use crate::{
 };
 use acropolis_common::BlockHash;
 use anyhow::{Context as _, Result, bail};
-use pallas::network::miniprotocols::Point;
+use pallas_network2::protocol::Point;
 use tokio::{sync::mpsc, time};
 use tracing::{debug, info, warn};
 

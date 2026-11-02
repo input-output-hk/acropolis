@@ -8,7 +8,7 @@ use acropolis_common::messages::{
 };
 use anyhow::Result;
 use caryatid_sdk::{Context, Subscription};
-use pallas::network::miniprotocols::Point;
+use pallas_network2::protocol::Point;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 

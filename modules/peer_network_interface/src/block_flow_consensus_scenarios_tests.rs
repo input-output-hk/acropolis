@@ -17,7 +17,7 @@ use acropolis_module_consensus::Consensus;
 use acropolis_test_utils::mainnet_genesis_values;
 use caryatid_sdk::{Context, Subscription, mock_bus::MockBus};
 use config::{Config, FileFormat};
-use pallas::network::miniprotocols::Point;
+use pallas_network2::protocol::Point;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Duration, timeout};
 
