@@ -114,22 +114,11 @@ impl PeerNetworkInterface {
             let sync_point = match cfg.sync_point {
                 SyncPoint::Origin => {
                     info!("Starting sync from origin");
-                    Some(Point::Origin)
-                }
-                SyncPoint::Tip => {
-                    // TODO: Temporary, only applicable in Direct mode
-                    if block_flow_mode.is_consensus() {
-                        warn!(
-                            "Requested sync point is Tip, which is not supported in Consensus mode."
-                        );
-                        return;
-                    }
-                    info!("Starting sync from tip");
-                    None
+                    Point::Origin
                 }
                 SyncPoint::Cache => {
                     info!("Starting sync from cache at {:?}", cache_sync_point);
-                    Some(cache_sync_point)
+                    cache_sync_point
                 }
                 SyncPoint::Dynamic => {
                     match Self::wait_initial_command(&mut command_subscription).await {
@@ -139,7 +128,7 @@ impl PeerNetworkInterface {
                                 sink.last_epoch = Some(epoch);
                                 info!("Starting sync from slot {} in epoch {}", slot, epoch);
                             }
-                            Some(point)
+                            point
                         }
                         Err(error) => {
                             warn!("sync command never received: {error:#}");
@@ -172,16 +161,7 @@ impl PeerNetworkInterface {
                 cfg.peer_sharing_cooldown_secs,
             );
 
-            match sync_point {
-                Some(point) => manager.sync_to_point(point),
-                None => {
-                    // Tip mode
-                    if let Err(error) = manager.sync_to_tip().await {
-                        warn!("could not sync to tip: {error:#}");
-                        return;
-                    }
-                }
-            }
+            manager.sync_to_point(sync_point);
 
             if let Err(err) = manager.run().await {
                 error!("chain sync failed: {err:#}");

@@ -96,13 +96,6 @@ impl PeerConnection {
         }
     }
 
-    /// Only `sync-point = "tip"` (direct block flow mode) asks for the tip, and no shipped
-    /// configuration uses it. `InitiatorBehavior` cannot answer: it has no per-peer
-    /// `FindIntersect` and bans the peer on `IntersectNotFound` instead of reporting the tip.
-    pub async fn find_tip(&self) -> Result<Point> {
-        unimplemented!("find-tip is not supported on pallas-network2 (`sync-point = \"tip\"`)")
-    }
-
     /// Reaches the peer only while its chainsync is new: `InitiatorBehavior` sends
     /// `FindIntersect` once per connection. The network manager never asks a syncing peer
     /// for a new intersection with the shipped configurations, so a second call is only
@@ -139,9 +132,6 @@ pub enum PeerEvent {
 pub enum PeerChainSyncEvent {
     RollForward(Header, Point),
     RollBackward(Point, Point),
-    /// Not produced until pallas-network2 reports a missing intersection.
-    #[allow(dead_code)]
-    IntersectNotFound(Point),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -504,30 +494,6 @@ mod tests {
         }
     }
 
-    /// A peer that only accepts the handshake.
-    #[derive(Default)]
-    struct HandshakingPeer;
-
-    impl Rules for HandshakingPeer {
-        type Message = AnyMessage;
-
-        fn reply_to(
-            &self,
-            pid: PeerId,
-            msg: AnyMessage,
-            _jitter: Duration,
-            queue: &mut ReplyQueue<AnyMessage>,
-        ) {
-            if let AnyMessage::Handshake(handshake::Message::Propose(versions)) = msg {
-                accept(queue, &pid, versions);
-            }
-        }
-
-        fn jitter(&self) -> Duration {
-            Duration::ZERO
-        }
-    }
-
     /// A peer that accepts the handshake and finds no intersection.
     #[derive(Default)]
     struct NoIntersectionPeer;
@@ -801,36 +767,36 @@ mod tests {
         );
     }
 
-    /// Needed by `sync-point = "tip"` only.
+    /// A peer that shares no ancestor with our chain is behind us or on another chain: the
+    /// network manager must hear it to drop and replace that peer. In pallas-network2 1.4.0,
+    /// `InitiatorBehavior` instead marks the peer as misbehaving and bans it without any
+    /// event, so the network manager waits forever for headers from that peer.
+    /// Waiting for the missing-intersection event to reach pallas:
+    /// <https://github.com/txpipe/pallas/pull/841>
+    /// `PeerChainSyncEvent` has no variant for it until then; this peer never rolls, so any
+    /// chain-sync event from it can only be the missing intersection. Match
+    /// `PeerChainSyncEvent::IntersectNotFound` once it is reintroduced.
     #[tokio::test]
-    #[ignore = "find-tip is not implemented on pallas-network2; `sync-point = \"tip\"` seems unused in practice"]
-    async fn find_tip_returns_the_peer_tip() {
-        let harness = Harness::new();
-        let connection = harness.open_with::<HandshakingPeer>(0, "peer.test:3001");
-        sleep(Duration::from_millis(200)).await;
-        assert_eq!(connection.find_tip().await.unwrap(), tip().0);
-    }
-
-    /// The network manager retries from the tip on `IntersectNotFound`. In pallas-network2
-    /// 1.4.0, `InitiatorBehavior` instead marks the peer as misbehaving and bans it without
-    /// any event, so the network manager waits forever for headers from that peer.
-    /// Waiting for a pallas PR adding `InitiatorEvent::IntersectNotFound`.
-    // TODO: reference the pallas PR adding `InitiatorEvent::IntersectNotFound` once opened.
-    #[tokio::test]
-    #[ignore = "pallas-network2 1.4.0 bans a peer on IntersectNotFound without reporting it; waiting for a pallas PR adding InitiatorEvent::IntersectNotFound"]
+    #[ignore = "pallas-network2 1.4.0 bans a peer on IntersectNotFound without reporting it; waiting for txpipe/pallas#841"]
     async fn missing_intersection_is_reported() {
         let mut harness = Harness::new();
         let connection = harness.open_with::<NoIntersectionPeer>(0, "peer.test:3001");
         connection.find_intersect(vec![Point::Specific(1, vec![0; 32])]).unwrap();
         assert!(
-            harness
-                .receives(|_, event| matches!(
-                    event,
-                    PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(_))
-                ))
-                .await,
-            "IntersectNotFound never reported"
+            harness.receives(|_, event| matches!(event, PeerEvent::ChainSync(_))).await,
+            "missing intersection never reported"
         );
+        // Once `PeerChainSyncEvent::IntersectNotFound` is reintroduced (txpipe/pallas#841),
+        // replace the assert above with:
+        // assert!(
+        //     harness
+        //         .receives(|_, event| matches!(
+        //             event,
+        //             PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(_))
+        //         ))
+        //         .await,
+        //     "IntersectNotFound never reported"
+        // );
     }
 
     /// The network manager replaces a peer once it hears it is gone. Here the peer drops the
