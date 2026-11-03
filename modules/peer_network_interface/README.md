@@ -14,7 +14,7 @@ Currently the module supports two modes of block management:
 
 Peer sharing can be disabled by setting `peer-sharing-enabled` to `false`. By default this mode is enabled.
 
-The peer network interface module can either run independently, from the origin or current tip, or be triggered by a
+The peer network interface module can either run independently, from the origin or its block cache, or be triggered by a
 Mithril snapshot event (the default) where it starts from where the snapshot left off, and follows the chain from there.
 
 ## Configuration

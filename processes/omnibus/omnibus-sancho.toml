@@ -20,7 +20,7 @@ topic = "cardano.sequence.start"
 [module.rest-blockfrost]
 
 [module.peer-network-interface]
-sync-point = "cache" #"cache" # "origin", "tip", "snapshot"
+sync-point = "cache" #"cache" # "origin", "snapshot"
 node-addresses = ["sancho-testnet.able-pool.io:6002"]
 magic-number = 4
 
