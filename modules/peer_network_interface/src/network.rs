@@ -11,7 +11,7 @@ use crate::{
     peer_sharing::request_peers,
 };
 use acropolis_common::BlockHash;
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result};
 use pallas_network2::protocol::Point;
 use tokio::{sync::mpsc, time};
 use tracing::{debug, info, warn};
@@ -508,27 +508,6 @@ impl NetworkManager {
         id
     }
 
-    pub async fn sync_to_tip(&mut self) -> Result<()> {
-        loop {
-            let Some(upstream) = self.flow_handler.preferred_upstream() else {
-                bail!("no peers");
-            };
-            let Some(peer) = self.peers.get(&upstream) else {
-                bail!("preferred upstream not found");
-            };
-            match peer.conn.find_tip().await {
-                Ok(point) => {
-                    self.sync_to_point(point);
-                    return Ok(());
-                }
-                Err(e) => {
-                    warn!("could not fetch tip from {}: {e:#}", peer.conn.address);
-                    self.handle_disconnect(upstream);
-                }
-            }
-        }
-    }
-
     pub fn sync_to_point(&mut self, point: Point) {
         for peer in self.peers.values() {
             peer.find_intersect(vec![point.clone()]);
@@ -575,14 +554,6 @@ impl NetworkManager {
                 info!("peer {:?} rolled back to {:?}", peer, point);
                 self.flow_handler.handle_roll_backward(peer, point);
                 self.continue_sync(peer);
-            }
-            PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip)) => {
-                self.flow_handler.handle_tip(peer, tip.clone());
-                // We called find_intersect on a peer, and it didn't recognize any of the points we passed.
-                // That peer must either be behind us or on a different fork; either way, that chain should sync from its own tip
-                if let Some(peer) = self.peers.get(&peer) {
-                    peer.find_intersect(vec![tip]);
-                }
             }
             PeerEvent::BlockFetched(fetched) => {
                 if let Some(data) = self.peers.get_mut(&peer) {
