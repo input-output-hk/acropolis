@@ -3,7 +3,7 @@ use acropolis_common::{DataHash, Era, Lovelace};
 use anyhow::{anyhow, Result};
 use pallas::codec as pallas_codec;
 use pallas::codec::utils::Nullable;
-use pallas::ledger::primitives::{alonzo, babbage, conway};
+use pallas::ledger::primitives::{alonzo, babbage, conway, dijkstra};
 use pallas::ledger::traverse::{MultiEraOutput, MultiEraTx};
 
 fn get_alonzo_value_size_in_bytes(val: &alonzo::Value) -> u64 {
@@ -85,6 +85,23 @@ fn get_conway_value_size_in_words(output: &conway::TransactionOutput) -> u64 {
     get_conway_value_size_in_bytes(output).div_ceil(8)
 }
 
+fn get_dijkstra_value_size_in_bytes(output: &dijkstra::TransactionOutput) -> u64 {
+    match output {
+        dijkstra::TransactionOutput::Legacy(output) => {
+            get_alonzo_value_size_in_bytes(&output.amount)
+        }
+        dijkstra::TransactionOutput::PostAlonzo(output) => {
+            let mut buf = Vec::new();
+            let _ = pallas_codec::minicbor::encode(&output.value, &mut buf);
+            buf.len() as u64
+        }
+    }
+}
+
+fn get_dijkstra_value_size_in_words(output: &dijkstra::TransactionOutput) -> u64 {
+    get_dijkstra_value_size_in_bytes(output).div_ceil(8)
+}
+
 fn conway_compute_min_lovelace(
     output: &conway::TransactionOutput,
     protocol_params: &ProtocolParams,
@@ -95,6 +112,17 @@ fn conway_compute_min_lovelace(
     Ok(coins_per_utxo_byte * (get_conway_value_size_in_words(output) + 160))
 }
 
+/// Dijkstra keeps the Babbage/Conway rule: coins per UTxO byte times (size + 160).
+fn dijkstra_compute_min_lovelace(
+    output: &dijkstra::TransactionOutput,
+    protocol_params: &ProtocolParams,
+) -> Result<Lovelace> {
+    let coins_per_utxo_byte = protocol_params
+        .coins_per_utxo_byte()
+        .ok_or_else(|| anyhow!("Coins per utxo byte are not set"))?;
+    Ok(coins_per_utxo_byte * (get_dijkstra_value_size_in_words(output) + 160))
+}
+
 pub fn get_value_size_in_bytes(output: &MultiEraOutput) -> u64 {
     match output {
         MultiEraOutput::AlonzoCompatible(output, _) => {
@@ -102,6 +130,7 @@ pub fn get_value_size_in_bytes(output: &MultiEraOutput) -> u64 {
         }
         MultiEraOutput::Babbage(output) => get_babbage_value_size_in_bytes(output),
         MultiEraOutput::Conway(output) => get_conway_value_size_in_bytes(output),
+        MultiEraOutput::Dijkstra(output) => get_dijkstra_value_size_in_bytes(output),
         _ => 0,
     }
 }
@@ -153,6 +182,13 @@ pub fn compute_min_lovelace(
                 protocol_params,
             )?),
             _ => Err(anyhow!("Invalid output for Conway era")),
+        },
+        Era::Dijkstra => match output {
+            MultiEraOutput::Dijkstra(output) => Ok(dijkstra_compute_min_lovelace(
+                output.as_ref(),
+                protocol_params,
+            )?),
+            _ => Err(anyhow!("Invalid output for Dijkstra era")),
         },
     }
 }

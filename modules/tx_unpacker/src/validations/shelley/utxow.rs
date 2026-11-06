@@ -313,7 +313,7 @@ mod tests {
     ) -> Result<(), UTxOWValidationError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
-        let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
+        let native_scripts = acropolis_codec::map_native_scripts(&tx.multi_era_native_scripts());
         let metadata = acropolis_codec::map_metadata(&tx.metadata());
         validate(
             &tx,

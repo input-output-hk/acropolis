@@ -114,6 +114,7 @@ pub enum Era {
     Alonzo,
     Babbage,
     Conway,
+    Dijkstra,
 }
 
 impl From<Era> for u8 {
@@ -126,6 +127,7 @@ impl From<Era> for u8 {
             Era::Alonzo => 4,
             Era::Babbage => 5,
             Era::Conway => 6,
+            Era::Dijkstra => 7,
         }
     }
 }
@@ -141,6 +143,7 @@ impl TryFrom<u8> for Era {
             4 => Ok(Era::Alonzo),
             5 => Ok(Era::Babbage),
             6 => Ok(Era::Conway),
+            7 => Ok(Era::Dijkstra),
             n => bail!("Impossible era {n}"),
         }
     }
@@ -2454,10 +2457,11 @@ mod tests {
         assert_eq!(Era::default() as u8, 0);
         assert_eq!(Era::Byron as u8, 0);
         assert_eq!(Era::Conway as u8, 6);
-        assert!(Era::try_from(7).is_err());
+        assert_eq!(Era::Dijkstra as u8, 7);
+        assert!(Era::try_from(8).is_err());
 
-        for ei in 0..=6 {
-            for ej in 0..=6 {
+        for ei in 0..=7 {
+            for ej in 0..=7 {
                 assert_eq!(
                     Era::try_from(ei).unwrap() < Era::try_from(ej).unwrap(),
                     ei < ej

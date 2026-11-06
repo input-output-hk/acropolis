@@ -1,6 +1,7 @@
 use acropolis_common::{AddrKeyhash, NativeScript, Signature, VKey, VKeyWitness};
 use anyhow::{Result, anyhow};
-use pallas_primitives::{KeepRaw, alonzo};
+use pallas_primitives::alonzo;
+use pallas_traverse::MultiEraNativeScript;
 
 fn map_vkey_witness(vkey_witness: &alonzo::VKeyWitness) -> Result<VKeyWitness> {
     Ok(VKeyWitness::new(
@@ -47,8 +48,12 @@ pub fn map_native_script(script: &alonzo::NativeScript) -> NativeScript {
     }
 }
 
-pub fn map_native_scripts<'b>(
-    native_scripts: &[KeepRaw<'b, alonzo::NativeScript>],
-) -> Vec<NativeScript> {
-    native_scripts.iter().map(|script| map_native_script(script)).collect()
+pub fn map_native_scripts(native_scripts: &[MultiEraNativeScript<'_>]) -> Vec<NativeScript> {
+    // TODO: Dijkstra is not properly supported yet. `as_alonzo_compatible()` drops every
+    // Dijkstra native script, including ones without `RequireGuard` we could map. Mapping
+    // them needs a `RequireGuard` variant in acropolis_common's `NativeScript`.
+    native_scripts
+        .iter()
+        .filter_map(|script| script.as_alonzo_compatible().map(map_native_script))
+        .collect()
 }
