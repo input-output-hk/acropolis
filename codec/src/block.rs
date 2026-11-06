@@ -53,6 +53,7 @@ pub fn map_to_block_era(block: &MultiEraBlock) -> Result<Era> {
         PallasEra::Alonzo => Era::Alonzo,
         PallasEra::Babbage => Era::Babbage,
         PallasEra::Conway => Era::Conway,
+        PallasEra::Dijkstra => Era::Dijkstra,
         x => bail!(
             "Block slot {}, number {} has impossible era: {x:?}",
             block.slot(),
