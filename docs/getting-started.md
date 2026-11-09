@@ -115,6 +115,19 @@ All run commands accept a `LOG_LEVEL` variable:
 make run LOG_LEVEL=debug    # Options: error, warn, info, debug, trace
 ```
 
+By default a run keeps its data (Mithril snapshot, Fjall stores, caches) inside the source
+tree, and a Mithril snapshot takes tens of GB. To keep it elsewhere, set `DATA_DIR`:
+
+```sh
+make run-preview DATA_DIR=/Volumes/data/acropolis    # data under /Volumes/data/acropolis/preview
+```
+
+The run then writes `<DATA_DIR>/<network>/paths.toml`, a config overlay that sets the storage
+paths of the modules the run enables (see `scripts/omnibus-data-paths.sh`, and the
+`directory` / `database-path` / `db-path` settings in the
+[Configuration Reference](configuration.md)), and loads it after the other configs. The
+genesis files under `modules/*/downloads/` are fetched at build time and stay where they are.
+
 ### Genesis Mode vs Snapshot Bootstrap
 
 **Genesis mode** (default) starts from the genesis block and syncs the full chain via Mithril. This is the simplest way to get started but takes longer to reach the chain tip.
