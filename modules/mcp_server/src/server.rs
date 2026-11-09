@@ -17,7 +17,7 @@ use rmcp::model::{
     CallToolRequestParams, CallToolResponse, ErrorCode, ErrorData, Implementation,
     ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
     ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ServerCapabilities,
-    ServerInfo,
+    ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::{
@@ -68,14 +68,14 @@ impl AcropolisMCPServer {
 }
 
 impl ServerHandler for AcropolisMCPServer {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let tools_count = crate::tools::get_all_tools().len();
         let resources_count = get_all_resources().len();
         info!(
             "MCP get_info called - advertising {} tools and {} resources",
             tools_count, resources_count
         );
-        ServerInfo::new(ServerCapabilities::builder()
+        ServerConfig::new(ServerCapabilities::builder()
                 .enable_resources()
                 .enable_tools()
                 .build())
