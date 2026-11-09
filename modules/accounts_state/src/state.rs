@@ -819,7 +819,7 @@ impl State {
         self.spos = self
             .spos
             .iter()
-            .filter(|(id, _)| !retiring.contains(id))
+            .filter(|(id, _)| !retiring.contains(*id))
             .map(|(id, reg)| (*id, reg.clone()))
             .collect();
 

@@ -404,7 +404,7 @@ mod tests {
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 1);
         assert_eq!(
-            state.blocks_minted.get(&keyhash_224(issuer).into()),
+            state.blocks_minted.get(&PoolId::from(keyhash_224(issuer))),
             Some(&2)
         );
     }
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 0);
         assert_eq!(
-            state.blocks_minted.get(&keyhash_224(b"issuer").into()),
+            state.blocks_minted.get(&PoolId::from(keyhash_224(b"issuer"))),
             None
         );
     }
