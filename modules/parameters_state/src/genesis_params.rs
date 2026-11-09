@@ -3,13 +3,13 @@ use acropolis_common::{
     protocol_params::{AlonzoParams, BabbageParams, ByronParams, ConwayParams, ShelleyParams},
     rational_number::{rational_number_from_f32, RationalNumber},
     Anchor, BlockVersionData, Committee, Constitution, CostModel, Credential, DRepVotingThresholds,
-    Era, HeavyDelegate, MagicNumber, PoolId, PoolVotingThresholds, ProtocolConsts, SoftForkRule,
-    TxFeePolicy,
+    Era, HeavyDelegate, MagicNumber, PoolId, PoolVotingThresholds, ProtocolConsts, ScriptHash,
+    SoftForkRule, TxFeePolicy,
 };
 use anyhow::{anyhow, bail, Result};
 use base64::prelude::*;
 use hex::decode;
-use pallas::ledger::configs::*;
+use pallas_configs::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -128,7 +128,13 @@ fn map_drep_thresholds(thresholds: &conway::DRepVotingThresholds) -> Result<DRep
 pub fn map_constitution(constitution: &conway::Constitution) -> Result<Constitution> {
     Ok(Constitution {
         anchor: map_anchor(&constitution.anchor)?,
-        guardrail_script: Some(decode_hex_string(&constitution.script, 28)?.try_into().unwrap()),
+        guardrail_script: constitution
+            .script
+            .as_deref()
+            .map(|script| -> Result<ScriptHash> {
+                Ok(decode_hex_string(script, 28)?.try_into().unwrap())
+            })
+            .transpose()?,
     })
 }
 

@@ -47,20 +47,20 @@ fn alonzo_compute_min_lovelace(
     Ok(lovelace_per_utxo_word * output_entry_size)
 }
 
-fn get_babbage_value_size_in_bytes(output: &babbage::MintedTransactionOutput) -> u64 {
+fn get_babbage_value_size_in_bytes(output: &babbage::TransactionOutput) -> u64 {
     let value = match output {
-        babbage::MintedTransactionOutput::Legacy(output) => &output.amount,
-        babbage::MintedTransactionOutput::PostAlonzo(output) => &output.value,
+        babbage::TransactionOutput::Legacy(output) => &output.amount,
+        babbage::TransactionOutput::PostAlonzo(output) => &output.value,
     };
     get_alonzo_value_size_in_bytes(value)
 }
 
-fn get_babbage_value_size_in_words(output: &babbage::MintedTransactionOutput) -> u64 {
+fn get_babbage_value_size_in_words(output: &babbage::TransactionOutput) -> u64 {
     get_babbage_value_size_in_bytes(output).div_ceil(8)
 }
 
 fn babbage_compute_min_lovelace(
-    output: &babbage::MintedTransactionOutput,
+    output: &babbage::TransactionOutput,
     protocol_params: &ProtocolParams,
 ) -> Result<Lovelace> {
     let coins_per_utxo_byte = protocol_params
@@ -70,12 +70,10 @@ fn babbage_compute_min_lovelace(
     Ok(coins_per_utxo_byte * (get_babbage_value_size_in_words(output) + 160))
 }
 
-fn get_conway_value_size_in_bytes(output: &conway::MintedTransactionOutput) -> u64 {
+fn get_conway_value_size_in_bytes(output: &conway::TransactionOutput) -> u64 {
     match output {
-        conway::MintedTransactionOutput::Legacy(output) => {
-            get_alonzo_value_size_in_bytes(&output.amount)
-        }
-        conway::MintedTransactionOutput::PostAlonzo(output) => {
+        conway::TransactionOutput::Legacy(output) => get_alonzo_value_size_in_bytes(&output.amount),
+        conway::TransactionOutput::PostAlonzo(output) => {
             let mut buf = Vec::new();
             let _ = pallas_codec::minicbor::encode(&output.value, &mut buf);
             buf.len() as u64
@@ -83,12 +81,12 @@ fn get_conway_value_size_in_bytes(output: &conway::MintedTransactionOutput) -> u
     }
 }
 
-fn get_conway_value_size_in_words(output: &conway::MintedTransactionOutput) -> u64 {
+fn get_conway_value_size_in_words(output: &conway::TransactionOutput) -> u64 {
     get_conway_value_size_in_bytes(output).div_ceil(8)
 }
 
 fn conway_compute_min_lovelace(
-    output: &conway::MintedTransactionOutput,
+    output: &conway::TransactionOutput,
     protocol_params: &ProtocolParams,
 ) -> Result<Lovelace> {
     let coins_per_utxo_byte = protocol_params
@@ -161,13 +159,19 @@ pub fn compute_min_lovelace(
 
 pub fn get_aux_data_hash(tx: &MultiEraTx) -> Result<Option<DataHash>> {
     let aux_data_hash_bytes = match tx {
-        MultiEraTx::AlonzoCompatible(tx, _) => tx.transaction_body.auxiliary_data_hash.as_ref(),
-        MultiEraTx::Babbage(tx) => tx.transaction_body.auxiliary_data_hash.as_ref(),
-        MultiEraTx::Conway(tx) => tx.transaction_body.auxiliary_data_hash.as_ref(),
+        MultiEraTx::AlonzoCompatible(tx, _) => {
+            tx.transaction_body.auxiliary_data_hash.as_ref().map(|h| h.as_slice())
+        }
+        MultiEraTx::Babbage(tx) => {
+            tx.transaction_body.auxiliary_data_hash.as_ref().map(|h| h.as_slice())
+        }
+        MultiEraTx::Conway(tx) => {
+            tx.transaction_body.auxiliary_data_hash.as_ref().map(|h| h.as_slice())
+        }
         _ => None,
     };
     let aux_data_hash = aux_data_hash_bytes
-        .map(|x| DataHash::try_from(x.to_vec()).map_err(|_| anyhow!("Invalid metadata hash")))
+        .map(|x| DataHash::try_from(x).map_err(|_| anyhow!("Invalid metadata hash")))
         .transpose()?;
     Ok(aux_data_hash)
 }

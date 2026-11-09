@@ -483,7 +483,7 @@ pub fn to_tx_mirs(tx: &Tx, network_id: NetworkId) -> Result<Vec<TransactionMIR>>
             {
                 match &cert.target {
                     alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
-                        for (cred, amount) in creds.clone().to_vec() {
+                        for (cred, amount) in creds.clone() {
                             certs.push(TransactionMIR {
                                 cert_index: cert_index as u64,
                                 pot: match cert.source {
@@ -639,7 +639,7 @@ pub fn to_tx_metadata(tx: &Tx) -> Result<Vec<TransactionMetadataItem>> {
     };
     let mut items = Vec::new();
     if let MultiEraMeta::AlonzoCompatible(metadata) = tx_decoded.metadata() {
-        for (label, datum) in &metadata.clone().to_vec() {
+        for (label, datum) in metadata.iter() {
             items.push(TransactionMetadataItem {
                 label: label.to_string(),
                 json_metadata: acropolis_codec::map_metadatum(datum),

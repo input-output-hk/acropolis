@@ -1,8 +1,6 @@
 use acropolis_common::{hash::Hash, rational_number::RationalNumber, *};
 use anyhow::{Result, anyhow};
-use pallas_primitives::{
-    ExUnitPrices as PallasExUnitPrices, Nullable, Relay as PallasRelay, conway,
-};
+use pallas_primitives::{ExUnitPrices as PallasExUnitPrices, Relay as PallasRelay, conway};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// Convert a Pallas Hash reference to an Acropolis Hash (owned)
@@ -33,29 +31,6 @@ pub fn to_vrf_key(pallas_hash: &pallas_primitives::Hash<32>) -> VrfKeyHash {
     VrfKeyHash::try_from(pallas_hash.as_ref()).unwrap()
 }
 
-pub fn map_nullable<Src: Clone, Dst>(
-    f: impl FnOnce(&Src) -> Dst,
-    nullable_src: &Nullable<Src>,
-) -> Option<Dst> {
-    match nullable_src {
-        Nullable::Some(src) => Some(f(src)),
-        _ => None,
-    }
-}
-
-pub fn map_nullable_result<Src: Clone, Dst>(
-    f: impl FnOnce(&Src) -> Result<Dst>,
-    nullable_src: &Nullable<Src>,
-) -> Result<Option<Dst>> {
-    match nullable_src {
-        Nullable::Some(src) => {
-            let res = f(src)?;
-            Ok(Some(res))
-        }
-        _ => Ok(None),
-    }
-}
-
 pub fn map_unit_interval(pallas_interval: &conway::UnitInterval) -> RationalNumber {
     RationalNumber::new(pallas_interval.numerator, pallas_interval.denominator)
 }
@@ -78,24 +53,15 @@ pub fn map_execution_costs(pallas_ex_costs: &PallasExUnitPrices) -> ExUnitPrices
 pub fn map_relay(relay: &PallasRelay) -> Relay {
     match relay {
         PallasRelay::SingleHostAddr(port, ipv4, ipv6) => Relay::SingleHostAddr(SingleHostAddr {
-            port: match port {
-                Nullable::Some(port) => Some(*port as u16),
-                _ => None,
-            },
-            ipv4: match ipv4 {
-                Nullable::Some(ipv4) => <[u8; 4]>::try_from(ipv4).ok().map(Ipv4Addr::from),
-                _ => None,
-            },
-            ipv6: match ipv6 {
-                Nullable::Some(ipv6) => <[u8; 16]>::try_from(ipv6).ok().map(Ipv6Addr::from),
-                _ => None,
-            },
+            port: port.map(|p| p as u16),
+            ipv4: ipv4.as_ref().and_then(|ipv4| <[u8; 4]>::try_from(ipv4).ok()).map(Ipv4Addr::from),
+            ipv6: ipv6
+                .as_ref()
+                .and_then(|ipv6| <[u8; 16]>::try_from(ipv6).ok())
+                .map(Ipv6Addr::from),
         }),
         PallasRelay::SingleHostName(port, dns_name) => Relay::SingleHostName(SingleHostName {
-            port: match port {
-                Nullable::Some(port) => Some(*port as u16),
-                _ => None,
-            },
+            port: port.map(|p| p as u16),
             dns_name: dns_name.clone(),
         }),
         PallasRelay::MultiHostName(dns_name) => Relay::MultiHostName(MultiHostName {
@@ -126,10 +92,8 @@ pub fn map_gov_action_id(pallas_action_id: &conway::GovActionId) -> Result<GovAc
     })
 }
 
-pub fn map_nullable_gov_action_id(
-    id: &Nullable<conway::GovActionId>,
-) -> Result<Option<GovActionId>> {
-    map_nullable_result(map_gov_action_id, id)
+pub fn map_nullable_gov_action_id(id: &Option<conway::GovActionId>) -> Result<Option<GovActionId>> {
+    id.as_ref().map(map_gov_action_id).transpose()
 }
 
 pub fn map_anchor(anchor: &conway::Anchor) -> Anchor {
@@ -139,7 +103,7 @@ pub fn map_anchor(anchor: &conway::Anchor) -> Anchor {
     }
 }
 
-/// Map a Nullable Anchor to ours
-pub fn map_nullable_anchor(anchor: &Nullable<conway::Anchor>) -> Option<Anchor> {
-    map_nullable(map_anchor, anchor)
+/// Map an optional Anchor to ours
+pub fn map_nullable_anchor(anchor: &Option<conway::Anchor>) -> Option<Anchor> {
+    anchor.as_ref().map(map_anchor)
 }

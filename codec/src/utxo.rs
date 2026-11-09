@@ -63,26 +63,26 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
     Value::new(lovelace, assets)
 }
 
-pub fn map_datum(datum: &Option<conway::MintedDatumOption>) -> Option<Datum> {
+pub fn map_datum(datum: &Option<conway::DatumOption>) -> Option<Datum> {
     match datum {
-        Some(conway::MintedDatumOption::Hash(h)) => Some(Datum::Hash(DatumHash::from(**h))),
-        Some(conway::MintedDatumOption::Data(d)) => Some(Datum::Inline(d.raw_cbor().to_vec())),
+        Some(conway::DatumOption::Hash(h)) => Some(Datum::Hash(DatumHash::from(**h))),
+        Some(conway::DatumOption::Data(d)) => Some(Datum::Inline(d.raw_cbor().to_vec())),
         None => None,
     }
 }
 
-pub fn map_reference_script(script: &Option<conway::MintedScriptRef>) -> Option<ReferenceScript> {
+pub fn map_reference_script(script: &Option<conway::ScriptRef>) -> Option<ReferenceScript> {
     match script {
-        Some(conway::PseudoScript::NativeScript(script)) => {
+        Some(conway::ScriptRef::NativeScript(script)) => {
             Some(ReferenceScript::Native(map_native_script(script)))
         }
-        Some(conway::PseudoScript::PlutusV1Script(script)) => {
+        Some(conway::ScriptRef::PlutusV1Script(script)) => {
             Some(ReferenceScript::PlutusV1(script.as_ref().to_vec()))
         }
-        Some(conway::PseudoScript::PlutusV2Script(script)) => {
+        Some(conway::ScriptRef::PlutusV2Script(script)) => {
             Some(ReferenceScript::PlutusV2(script.as_ref().to_vec()))
         }
-        Some(conway::PseudoScript::PlutusV3Script(script)) => {
+        Some(conway::ScriptRef::PlutusV3Script(script)) => {
             Some(ReferenceScript::PlutusV3(script.as_ref().to_vec()))
         }
         None => None,

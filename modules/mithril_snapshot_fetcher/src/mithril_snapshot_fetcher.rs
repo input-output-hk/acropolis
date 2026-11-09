@@ -19,7 +19,7 @@ use mithril_client::{
     AggregatorDiscoveryType, ClientBuilder, GenesisVerificationKey, MessageBuilder,
 };
 use mithril_common::messages::CardanoDatabaseSnapshotMessage as Snapshot;
-use pallas::storage::hardano;
+use pallas_hardano::storage as hardano;
 use pallas_traverse::MultiEraBlock;
 use std::io::Write;
 use std::path::Path;
