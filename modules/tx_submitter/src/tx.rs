@@ -14,6 +14,7 @@ impl Transaction {
         let id = TxHash::from(*parsed.hash());
         let era = match parsed.era() {
             Era::Conway => 6,
+            Era::Dijkstra => 7,
             other => bail!("cannot submit {other} era transactions"),
         };
         Ok(Self {

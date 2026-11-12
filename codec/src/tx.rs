@@ -77,7 +77,17 @@ pub fn map_transaction_consumes_produces(
         match output.address() {
             Ok(pallas_address) => match map_address(&pallas_address) {
                 Ok(address) => {
-                    let reference_script = map_reference_script(&output.script_ref());
+                    // TODO: Dijkstra is not properly supported yet. `as_conway()` drops every
+                    // reference script of a Dijkstra output, including Native/PlutusV1-V3 ones
+                    // we could map. Mapping them, plus PlutusV4 and `RequireGuard`, needs new
+                    // `ReferenceScript`/`NativeScript` variants in acropolis_common.
+                    let reference_script = map_reference_script(
+                        &output
+                            .multi_era_script_ref()
+                            .as_ref()
+                            .and_then(|s| s.as_conway())
+                            .cloned(),
+                    );
                     let script_ref = reference_script.as_ref().map(|s| s.get_script_ref());
 
                     if let (Some(r_script), Some(s_ref)) =
@@ -116,6 +126,8 @@ pub fn map_transaction_consumes_produces(
 pub fn map_transaction_donation(tx: &MultiEraTx) -> Option<u64> {
     match tx {
         MultiEraTx::Conway(conway) => conway.transaction_body.donation.map(u64::from),
+        MultiEraTx::Dijkstra(tx) => tx.transaction_body.donation.map(u64::from),
+        MultiEraTx::DijkstraSub(tx, _) => tx.sub_transaction_body.donation.map(u64::from),
         _ => None,
     }
 }
@@ -123,6 +135,8 @@ pub fn map_transaction_donation(tx: &MultiEraTx) -> Option<u64> {
 pub fn map_transaction_treasury_value(tx: &MultiEraTx) -> Option<u64> {
     match tx {
         MultiEraTx::Conway(conway) => conway.transaction_body.treasury_value,
+        MultiEraTx::Dijkstra(tx) => tx.transaction_body.treasury_value,
+        MultiEraTx::DijkstraSub(tx, _) => tx.sub_transaction_body.treasury_value,
         _ => None,
     }
 }
@@ -155,11 +169,16 @@ pub fn map_metadata(metadata: &MultiEraMeta) -> Option<Metadata> {
 pub fn map_scripts_witnesses(tx: &MultiEraTx) -> Vec<(ScriptHash, ReferenceScript)> {
     let mut scripts_provided = Vec::new();
 
-    for script in tx.native_scripts() {
-        scripts_provided.push((
-            ScriptHash::from(*script.original_hash()),
-            ReferenceScript::Native(map_native_script(script)),
-        ));
+    // TODO: Dijkstra is not properly supported yet. `as_alonzo_compatible()` drops every
+    // Dijkstra native script, including ones without `RequireGuard` we could map. Mapping
+    // them needs a `RequireGuard` variant in acropolis_common's `NativeScript`.
+    for script in tx.multi_era_native_scripts() {
+        if let Some(native) = script.as_alonzo_compatible() {
+            scripts_provided.push((
+                ScriptHash::from(*script.hash()),
+                ReferenceScript::Native(map_native_script(native)),
+            ));
+        }
     }
 
     for script in tx.plutus_v1_scripts() {
