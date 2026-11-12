@@ -26,5 +26,5 @@ validators = [
 force-validation = true
 
 [module.peer-network-interface]
-sync-point = "origin" #"cache" # "origin", "tip", "snapshot"
+sync-point = "origin" #"cache" # "origin", "snapshot"
 node-addresses = []

@@ -19,7 +19,7 @@ topic = "cardano.sequence.start"
 [module.rest-blockfrost]
 
 [module.peer-network-interface]
-sync-point = "origin" #"cache" # "origin", "tip", "snapshot"
+sync-point = "origin" #"cache" # "origin", "snapshot"
 node-addresses = [
     "localhost:3001",
     "localhost:3002",
