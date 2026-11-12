@@ -28,6 +28,7 @@ pub struct ActionStatus {
     ratification_epoch: Option<u64>,
     enactment_epoch: Option<u64>,
     expiration_epoch: Option<u64>,
+    dropped_epoch: Option<u64>,
 }
 
 impl ActionStatus {
@@ -37,6 +38,7 @@ impl ActionStatus {
             ratification_epoch: None,
             enactment_epoch: None,
             expiration_epoch: None,
+            dropped_epoch: None,
         }
     }
 
@@ -47,6 +49,15 @@ impl ActionStatus {
     pub fn is_accepted(&self) -> bool {
         self.ratification_epoch.is_some()
     }
+}
+
+/// Ledger governance purpose (`GovRelation`)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GovPurpose {
+    ParameterChange,
+    HardFork,
+    Committee,
+    Constitution,
 }
 
 #[derive(Default)]
@@ -763,6 +774,8 @@ impl ConwayVoting {
                     "{:?},{:?},,",
                     action_status.ratification_epoch, action_status.enactment_epoch
                 )
+            } else if action_status.dropped_epoch.is_some() {
+                format!(",,{:?},", action_status.dropped_epoch)
             } else {
                 format!(",,,{:?}", action_status.expiration_epoch)
             };
@@ -792,6 +805,84 @@ impl ConwayVoting {
         }
 
         Ok(())
+    }
+
+    /// Purpose of an action: actions of the same purpose are chained through their previous
+    /// action id. Information and treasury withdrawals have none.
+    fn purpose(action: &GovernanceAction) -> Option<GovPurpose> {
+        match action {
+            GovernanceAction::ParameterChange(_) => Some(GovPurpose::ParameterChange),
+            GovernanceAction::HardForkInitiation(_) => Some(GovPurpose::HardFork),
+            GovernanceAction::NoConfidence(_) | GovernanceAction::UpdateCommittee(_) => {
+                Some(GovPurpose::Committee)
+            }
+            GovernanceAction::NewConstitution(_) => Some(GovPurpose::Constitution),
+            GovernanceAction::TreasuryWithdrawals(_) | GovernanceAction::Information => None,
+        }
+    }
+
+    /// Adds to `dropped` the active actions chained, directly or not, to `parent`
+    fn collect_descendants(
+        &self,
+        parent: &GovActionId,
+        finalized: &HashSet<GovActionId>,
+        dropped: &mut HashSet<GovActionId>,
+    ) {
+        for action_id in &self.proposal_order {
+            if finalized.contains(action_id) || dropped.contains(action_id) {
+                continue;
+            }
+            let Some((_, proc)) = self.proposals.get(action_id) else {
+                continue;
+            };
+            if proc.gov_action.get_previous_action_id().as_ref() == Some(parent) {
+                dropped.insert(action_id.clone());
+                self.collect_descendants(action_id, finalized, dropped);
+            }
+        }
+    }
+
+    /// Actions the ledger removes along with the `enacted` and `expired` ones (EPOCH rule,
+    /// proposalsApplyEnactment): the descendants of expired actions, and for each enacted
+    /// action with a purpose, its siblings (the other actions with the same purpose and
+    /// previous action) and their descendants. Returned in proposal order.
+    fn dropped_actions(
+        &self,
+        enacted: &[GovActionId],
+        expired: &[GovActionId],
+    ) -> Vec<GovActionId> {
+        let finalized: HashSet<GovActionId> = enacted.iter().chain(expired).cloned().collect();
+        let mut dropped = HashSet::new();
+
+        for expired_id in expired {
+            self.collect_descendants(expired_id, &finalized, &mut dropped);
+        }
+
+        for enacted_id in enacted {
+            let Some((_, enacted)) = self.proposals.get(enacted_id) else {
+                continue;
+            };
+            let Some(purpose) = Self::purpose(&enacted.gov_action) else {
+                continue;
+            };
+            let parent = enacted.gov_action.get_previous_action_id();
+            for action_id in &self.proposal_order {
+                if finalized.contains(action_id) || dropped.contains(action_id) {
+                    continue;
+                }
+                let Some((_, proc)) = self.proposals.get(action_id) else {
+                    continue;
+                };
+                if Self::purpose(&proc.gov_action) == Some(purpose)
+                    && proc.gov_action.get_previous_action_id() == parent
+                {
+                    dropped.insert(action_id.clone());
+                    self.collect_descendants(action_id, &finalized, &mut dropped);
+                }
+            }
+        }
+
+        self.proposal_order.iter().filter(|id| dropped.contains(*id)).cloned().collect()
     }
 
     fn delay_ratification(proposal_procedure: &ProposalProcedure) -> bool {
@@ -889,7 +980,42 @@ impl ConwayVoting {
             outcome.push(one_outcome);
         }
 
+        // Dropped actions are finalized now too, so that their deposits are returned
+        let (enacted, expired): (Vec<_>, Vec<_>) =
+            outcome.iter().partition(|oc| oc.voting.accepted);
+        let enacted: Vec<_> =
+            enacted.iter().map(|oc| oc.voting.procedure.gov_action_id.clone()).collect();
+        let expired: Vec<_> =
+            expired.iter().map(|oc| oc.voting.procedure.gov_action_id.clone()).collect();
+        for action_id in self.dropped_actions(&enacted, &expired) {
+            outcome.push(self.drop_action(&action_id, new_block.epoch)?);
+        }
+
         Ok(outcome)
+    }
+
+    /// Marks `action_id` as dropped at `epoch` and returns its (not accepted) outcome
+    fn drop_action(&mut self, action_id: &GovActionId, epoch: u64) -> Result<GovernanceOutcome> {
+        let (_, procedure) = self
+            .proposals
+            .get(action_id)
+            .ok_or_else(|| anyhow!("Proposal {action_id} not found"))?
+            .clone();
+        let status = self
+            .action_status
+            .get_mut(action_id)
+            .ok_or_else(|| anyhow!("Cannot get action status for {action_id}"))?;
+        status.dropped_epoch = Some(epoch);
+
+        Ok(GovernanceOutcome {
+            voting: VotingOutcome {
+                procedure,
+                votes_cast: None,
+                votes_threshold: None,
+                accepted: false,
+            },
+            action_to_perform: GovernanceOutcomeVariant::NoAction,
+        })
     }
 
     pub fn log_conway_voting_stats(&self, new_epoch: u64) {
@@ -934,7 +1060,7 @@ impl ConwayVoting {
             if one_outcome.voting.accepted {
                 action.ratification_epoch = Some(new_epoch - 1);
                 action.enactment_epoch = Some(new_epoch);
-            } else {
+            } else if action.dropped_epoch.is_none() {
                 if action.is_active(new_epoch) {
                     bail!(
                         "Impossible outcome: {action_id} votes {:?}, not ended at {new_epoch}",
@@ -975,8 +1101,96 @@ mod tests {
     use super::*;
     use acropolis_common::rational_number::RationalNumber;
     use acropolis_common::{
-        Anchor, CommitteeChange, CommitteeCredential, StakeAddress, UpdateCommitteeAction,
+        Anchor, CommitteeChange, CommitteeCredential, ParameterChangeAction, StakeAddress,
+        UpdateCommitteeAction,
     };
+
+    fn action_id(id: u8) -> GovActionId {
+        GovActionId {
+            transaction_id: TxHash::default(),
+            action_index: id,
+        }
+    }
+
+    /// Adds an active proposal with `gov_action` to `voting`
+    fn add_proposal(voting: &mut ConwayVoting, id: u8, gov_action: GovernanceAction) {
+        let proc = ProposalProcedure {
+            deposit: 0,
+            reward_account: StakeAddress::default(),
+            gov_action_id: action_id(id),
+            gov_action,
+            anchor: Anchor {
+                url: "".to_owned(),
+                data_hash: Vec::new(),
+            },
+        };
+        voting.proposals.insert(action_id(id), (0, proc));
+        voting.proposal_order.push(action_id(id));
+        voting.action_status.insert(action_id(id), ActionStatus::new(0, 10));
+    }
+
+    fn parameter_change(previous: Option<u8>) -> GovernanceAction {
+        GovernanceAction::ParameterChange(ParameterChangeAction {
+            previous_action_id: previous.map(action_id),
+            protocol_param_update: Box::default(),
+            script_hash: None,
+        })
+    }
+
+    /// Preview epoch 736: three parameter changes chained to the same (empty) root; once
+    /// one is enacted the ledger drops the two others, with their descendants.
+    #[test]
+    fn enactment_drops_siblings_and_their_descendants() -> Result<()> {
+        let (enacted, sibling, sibling_child, enacted_child, other_purpose, no_purpose) =
+            (1, 2, 3, 4, 5, 6);
+        let mut voting = ConwayVoting::new(None, None, None)?;
+        add_proposal(&mut voting, enacted, parameter_change(None));
+        add_proposal(&mut voting, sibling, parameter_change(None));
+        add_proposal(&mut voting, sibling_child, parameter_change(Some(sibling)));
+        add_proposal(&mut voting, enacted_child, parameter_change(Some(enacted)));
+        add_proposal(
+            &mut voting,
+            other_purpose,
+            GovernanceAction::NoConfidence(None),
+        );
+        add_proposal(&mut voting, no_purpose, GovernanceAction::Information);
+
+        let dropped = voting.dropped_actions(&[action_id(enacted)], &[]);
+
+        assert_eq!(dropped, vec![action_id(sibling), action_id(sibling_child)]);
+        Ok(())
+    }
+
+    #[test]
+    fn expiry_drops_descendants() -> Result<()> {
+        let (expired, child, grandchild, unrelated) = (1, 2, 3, 4);
+        let mut voting = ConwayVoting::new(None, None, None)?;
+        add_proposal(&mut voting, expired, parameter_change(None));
+        add_proposal(&mut voting, child, parameter_change(Some(expired)));
+        add_proposal(&mut voting, grandchild, parameter_change(Some(child)));
+        add_proposal(&mut voting, unrelated, parameter_change(None));
+
+        let dropped = voting.dropped_actions(&[], &[action_id(expired)]);
+
+        assert_eq!(dropped, vec![action_id(child), action_id(grandchild)]);
+        Ok(())
+    }
+
+    #[test]
+    fn dropped_action_ends_before_its_voting_period() -> Result<()> {
+        let (dropped, dropped_epoch) = (1, 5);
+        let mut voting = ConwayVoting::new(None, None, None)?;
+        add_proposal(&mut voting, dropped, parameter_change(None));
+
+        let outcome = voting.drop_action(&action_id(dropped), dropped_epoch)?;
+        voting.update_action_status_with_outcomes(dropped_epoch, std::slice::from_ref(&outcome))?;
+        let status = voting.action_status.get(&action_id(dropped)).unwrap();
+
+        assert_eq!(status.dropped_epoch, Some(dropped_epoch));
+        assert_eq!(status.expiration_epoch, None);
+        assert!(!voting.proposals.contains_key(&action_id(dropped)));
+        Ok(())
+    }
 
     fn create_governance_outcome(id: u8, accepted: bool) -> GovernanceOutcome {
         let votes = VoteResult::<VoteCount> {
@@ -1031,6 +1245,7 @@ mod tests {
                 ratification_epoch: None,
                 enactment_epoch: None,
                 expiration_epoch: None,
+                dropped_epoch: None,
             },
         );
 
@@ -1055,6 +1270,7 @@ mod tests {
             ratification_epoch: None,
             enactment_epoch: None,
             expiration_epoch: None,
+            dropped_epoch: None,
         };
         voting.action_status.insert(oc2.voting.procedure.gov_action_id.clone(), as2.clone());
         match voting.update_action_status_with_outcomes(2, std::slice::from_ref(&oc2)) {
