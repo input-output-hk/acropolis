@@ -9,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+use acropolis_codec::map_to_block_era;
 use acropolis_common::{BlockHash, Era};
 use anyhow::{Result, anyhow};
 use pallas::ledger::traverse::{MultiEraBlock, MultiEraHeader};
@@ -147,8 +148,8 @@ pub enum PeerEvent {
 
 #[derive(Debug)]
 pub enum PeerChainSyncEvent {
-    /// The peer found where to start from; it sends headers once asked.
-    IntersectionFound,
+    /// The peer found where to start from, at this point; it sends headers once asked.
+    IntersectionFound(Point),
     RollForward(Header, Point),
     /// The header of an epoch boundary block, which the network manager does not follow:
     /// only chainsync has to go on.
@@ -176,20 +177,29 @@ pub struct BlockFetched {
 /// Decode a chainsync header; `None` for an epoch boundary block.
 fn parse_header(variant: u8, byron_tag: Option<u8>, cbor: Vec<u8>) -> Result<Option<Header>> {
     let hdr = MultiEraHeader::decode(variant, byron_tag, &cbor)?;
+    Ok(header_from(&hdr, Era::try_from(variant)?))
+}
+
+/// The header of a fetched block, from its body; `None` for an epoch boundary block.
+pub(crate) fn header_of(body: &[u8]) -> Result<Option<Header>> {
+    let block = MultiEraBlock::decode(body)?;
+    Ok(header_from(&block.header(), map_to_block_era(&block)?))
+}
+
+fn header_from(hdr: &MultiEraHeader, era: Era) -> Option<Header> {
     if hdr.as_eb().is_some() {
         // skip EpochBoundary blocks
-        return Ok(None);
+        return None;
     }
-    let era = Era::try_from(variant)?;
     let parent_hash = hdr.previous_hash().map(|h| BlockHash::new(*h));
-    Ok(Some(Header {
+    Some(Header {
         hash: BlockHash::new(*hdr.hash()),
         slot: hdr.slot(),
         number: hdr.number(),
-        bytes: cbor,
+        bytes: hdr.cbor().to_vec(),
         era,
         parent_hash,
-    }))
+    })
 }
 
 /// The peer sent something we cannot decode. A peer whose headers or blocks we cannot read
@@ -275,8 +285,8 @@ async fn drive<I: Interface<AnyMessage>>(
 /// ([`PeerConnection::continue_sync`]). Fails when the peer sent something we cannot decode.
 fn translate(event: InitiatorEvent) -> Result<Option<PeerEvent>, UndecodableReply> {
     match event {
-        InitiatorEvent::IntersectionFound(..) => Ok(Some(PeerEvent::ChainSync(
-            PeerChainSyncEvent::IntersectionFound,
+        InitiatorEvent::IntersectionFound(_peer, point, _tip) => Ok(Some(PeerEvent::ChainSync(
+            PeerChainSyncEvent::IntersectionFound(point),
         ))),
         InitiatorEvent::BlockHeaderReceived(_peer, header, tip) => {
             let byron_tag = header.byron_prefix.map(|prefix| prefix.0);
@@ -687,7 +697,7 @@ mod tests {
             harness
                 .receives(|_, event| matches!(
                     event,
-                    PeerEvent::ChainSync(PeerChainSyncEvent::IntersectionFound)
+                    PeerEvent::ChainSync(PeerChainSyncEvent::IntersectionFound(_))
                 ))
                 .await,
             "no intersection found"
@@ -721,6 +731,43 @@ mod tests {
                     && matches!(event, PeerEvent::BlockFetched(block) if block.slot == BLOCK_SLOT))
                 .await,
             "block not fetched"
+        );
+    }
+
+    fn block_point() -> Point {
+        Point::Specific(BLOCK_SLOT, block_hash().to_vec())
+    }
+
+    /// The first chainsync event the network manager hears of.
+    async fn first_chain_sync_event(harness: &mut Harness) -> Option<PeerChainSyncEvent> {
+        let search = async {
+            while let Some(event) = harness.events.recv().await {
+                if let NetworkEvent::PeerUpdate {
+                    event: PeerEvent::ChainSync(event),
+                    ..
+                } = event
+                {
+                    return Some(event);
+                }
+            }
+            None
+        };
+        timeout(WAIT, search).await.ok().flatten()
+    }
+
+    /// The network manager learns where the intersection is: it fetches the block there for
+    /// its header (Leios) before asking for the next one.
+    #[tokio::test]
+    async fn intersection_found_tells_the_point() {
+        let mut harness = Harness::new();
+        let connection = harness.open_with::<ServingPeer>(0, "peer.test:3001");
+        connection.find_intersect(vec![block_point()]).unwrap();
+        assert!(
+            matches!(
+                first_chain_sync_event(&mut harness).await,
+                Some(PeerChainSyncEvent::IntersectionFound(point)) if point == block_point()
+            ),
+            "intersection point not reported"
         );
     }
 

@@ -428,6 +428,7 @@ dependencies = [
 name = "acropolis_module_peer_network_interface"
 version = "0.2.0"
 dependencies = [
+ "acropolis_codec",
  "acropolis_common",
  "acropolis_module_consensus",
  "acropolis_test_utils",
