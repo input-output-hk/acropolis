@@ -6,7 +6,11 @@ use std::{
 use crate::{
     BlockSink,
     block_flow::BlockFlowHandler,
-    connection::{HOUSEKEEPING_INTERVAL, PeerChainSyncEvent, PeerConnection, PeerEvent, header_of},
+    chain_state::SpecificPoint,
+    connection::{
+        EbFetched, EbReply, HOUSEKEEPING_INTERVAL, PeerChainSyncEvent, PeerConnection, PeerEvent,
+        header_of,
+    },
     peer_manager::{PeerManager, PeerManagerConfig},
     peer_sharing::request_peers,
 };
@@ -36,6 +40,8 @@ const FETCH_STALL_INTERVAL: Duration = HOUSEKEEPING_INTERVAL.saturating_mul(2);
 struct PeerData {
     conn: PeerConnection,
     reqs: Vec<(BlockHash, u64)>,
+    /// Leios: endorser blocks asked of this peer whose transactions have not arrived yet.
+    eb_reqs: Vec<SpecificPoint>,
     /// True once any protocol event has been received from this peer (ChainSync, BlockFetch,
     /// etc.). Used to distinguish a cold-promoted peer that never managed to connect from
     /// one that ran successfully and then disconnected.
@@ -57,6 +63,7 @@ impl PeerData {
         Self {
             conn,
             reqs: vec![],
+            eb_reqs: vec![],
             established: false,
             body_since_check: false,
             awaited_at_check: false,
@@ -103,6 +110,29 @@ impl PeerData {
 
     fn ack_block(&mut self, hash: BlockHash) {
         self.reqs.retain(|(h, _)| *h != hash);
+    }
+
+    fn request_eb(&mut self, eb: &SpecificPoint) -> bool {
+        if let Err(error) = self.conn.request_eb(eb.hash, eb.slot) {
+            warn!(
+                "could not request endorser block from {}: {error:#}",
+                self.conn.address
+            );
+            return false;
+        }
+        self.eb_reqs.push(eb.clone());
+        true
+    }
+
+    fn request_eb_txs(&mut self, eb: &SpecificPoint, tx_count: usize) -> bool {
+        if let Err(error) = self.conn.request_eb_txs(eb.hash, eb.slot, tx_count) {
+            warn!(
+                "could not request endorser block transactions from {}: {error:#}",
+                self.conn.address
+            );
+            return false;
+        }
+        true
     }
 }
 
@@ -588,6 +618,7 @@ impl NetworkManager {
                     );
                 }
             }
+            PeerEvent::EbFetched(fetched) => self.handle_eb_fetched(peer, fetched),
             PeerEvent::Disconnected => {
                 self.handle_disconnect(peer);
             }
@@ -596,6 +627,7 @@ impl NetworkManager {
         // Retry wants that were temporarily unresolved (e.g. out-of-order
         // BlockWanted vs announcement, or announcer churn during disconnects).
         self.retry_pending_wanted();
+        self.fetch_endorsements();
         // Bodies arrived or requests went away: chainsync may resume.
         self.update_chainsync();
     }
@@ -630,11 +662,7 @@ impl NetworkManager {
     /// already published.
     fn handle_intersection_block(&mut self, peer: PeerId, body: &[u8]) {
         match header_of(body) {
-            // TODO: Leios. Keep it for the block after the intersection, which may certify
-            // the endorser block it announced.
-            Ok(Some(header)) => {
-                debug!(?peer, hash = %header.hash, slot = header.slot, "intersection header")
-            }
+            Ok(Some(header)) => self.flow_handler.handle_intersection_header(peer, header),
             // An epoch boundary block, which announces no endorser block.
             Ok(None) => {}
             Err(error) => warn!(?peer, "undecodable intersection header: {error:#}"),
@@ -739,6 +767,52 @@ impl NetworkManager {
                 continue;
             }
             self.request_block(slot, hash, others);
+        }
+    }
+
+    /// Leios: the body of an endorser block says how many transactions to ask the same peer
+    /// for; the transactions go to the blocks that certify it.
+    fn handle_eb_fetched(&mut self, peer: PeerId, fetched: EbFetched) {
+        let eb = SpecificPoint {
+            slot: fetched.slot,
+            hash: fetched.hash,
+        };
+        let txs = match fetched.reply {
+            EbReply::TxCount(0) => vec![],
+            EbReply::TxCount(tx_count) => {
+                if let Some(data) = self.peers.get_mut(&peer)
+                    && !data.request_eb_txs(&eb, tx_count)
+                {
+                    self.handle_disconnect(peer);
+                }
+                return;
+            }
+            EbReply::Txs(txs) => txs,
+        };
+        if let Some(data) = self.peers.get_mut(&peer) {
+            data.eb_reqs.retain(|asked| *asked != eb);
+        }
+        self.flow_handler.handle_endorsed_txs(eb.hash, txs);
+    }
+
+    /// Leios: ask for the endorser blocks that blocks to publish wait for, each of one peer
+    /// that announced a block certifying it. A peer that disconnects takes its requests
+    /// along, so they are asked again of another one.
+    fn fetch_endorsements(&mut self) {
+        for (eb, announcers) in self.flow_handler.awaited_endorsements() {
+            if self.peers.values().any(|peer| peer.eb_reqs.contains(&eb)) {
+                continue;
+            }
+            for announcer in announcers {
+                let Some(peer) = self.peers.get_mut(&announcer) else {
+                    continue;
+                };
+                if peer.request_eb(&eb) {
+                    break; // only fetch from one
+                } else {
+                    self.handle_disconnect(announcer);
+                }
+            }
         }
     }
 
@@ -1034,6 +1108,8 @@ mod tests {
             bytes: vec![],
             era: Era::Conway,
             parent_hash: Some(parent_hash),
+            certifies_eb: false,
+            announced_eb: None,
         }
     }
 

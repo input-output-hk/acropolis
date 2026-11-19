@@ -2848,7 +2848,7 @@ checksum = "9af2cbf772fa6d1c11358f92ef554cb6b386201210bcf0e91fb7fba8a907fb40"
 dependencies = [
  "az",
  "bytemuck",
- "half 2.7.1",
+ "half 1.8.3",
  "typenum",
 ]
 
@@ -4658,9 +4658,8 @@ dependencies = [
 
 [[package]]
 name = "pallas"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30dba72b5c4f7a36bbef678e8510b772e54b9b39881c01a2c5a06e6c12ac968f"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "pallas-addresses",
  "pallas-codec",
@@ -4676,9 +4675,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-addresses"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "437b3c5d2379d69f0680e141fef43ef84e5eab865ed2bead9d79f27d5f8f05ea"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "base58",
  "bech32 0.11.1",
@@ -4692,9 +4690,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-codec"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13eb5bdb10cf59b459194b490275a484f72bf09000a29627c502cff23f0a785a"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "hex",
  "minicbor 0.26.5",
@@ -4704,9 +4701,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-configs"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c14b461dc1a13d00af18a33b3b24984dd8ae03837c9ccd03541731e2e7e4be4f"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "base64 0.22.1",
  "num-rational",
@@ -4720,9 +4716,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-crypto"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "574843d39df30b8ebc6abb8e38b76dae49759a0c6db4b1b97ce92873ba8a7945"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "cryptoxide 0.4.4",
  "hex",
@@ -4734,9 +4729,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-hardano"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f09d9198ee9bde37ad76e09880ac4163898380cef097a10722d77223ea64e7e6"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "binary-layout",
  "hex",
@@ -4755,9 +4749,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-math"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "333d44d12c3a795ec21b5639a73015a1e9d0d666ee307b10abb9318d865c27b5"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "dashu-base",
  "dashu-int",
@@ -4767,9 +4760,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-network"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "821d868eb0947abf993b68f4e55920a5766972c091670a1f689f650e9619f63a"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "byteorder",
  "hex",
@@ -4785,9 +4777,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-network2"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bd0fd4f6bc5925b5abbce9a004f0994aeaf519d954c0ced2553f62fb32d133b"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "byteorder",
  "chrono",
@@ -4805,9 +4796,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-primitives"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78b9d39156ed1eeebdd0df2fe7dbdd4ba842fb55c712e0d9029d2b61f9588ceb"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "hex",
  "pallas-codec",
@@ -4818,9 +4808,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-traverse"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "305418aaa400d7a16e9f47f811a8b9ef8fdfe918116d91ba8db06d59ca712723"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "hex",
  "itertools 0.14.0",
@@ -4835,9 +4824,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-txbuilder"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acdf803aba20d786cc0228992a9bccbbaa2c673c35b99740d403a829b27a3e84"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "hex",
  "pallas-addresses",
@@ -4852,9 +4840,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-utxorpc"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "534e9234541fd6258f7908000ec3c8011c0d873a92d3c03d8bb140e7e4c93682"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "pallas-codec",
  "pallas-crypto",
@@ -4867,9 +4854,8 @@ dependencies = [
 
 [[package]]
 name = "pallas-validate"
-version = "1.5.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b3e002f613ab9515d3c4c08fe4c00b9c0f7d7a09de23463afa1ca63d2a20cf6"
+version = "1.5.0"
+source = "git+https://github.com/SundaeSwap-finance/pallas?branch=leios-musashi#5bea8d0efa060f3dbc0786a1fc86d0278388d560"
 dependencies = [
  "chrono",
  "hex",
@@ -6749,7 +6735,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.52.0",

@@ -1004,6 +1004,7 @@ mod tests {
         RawBlockMessage {
             header: vec![byte],
             body: vec![byte],
+            endorsed_txs: vec![],
         }
     }
 

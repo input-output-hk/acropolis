@@ -266,12 +266,14 @@ impl BlockSink {
         &mut self,
         header: &Header,
         body: &[u8],
+        endorsed_txs: &[Vec<u8>],
         tip: Option<&Point>,
     ) -> Result<()> {
         let info = self.make_block_info(header, tip);
         let raw_block = RawBlockMessage {
             header: header.bytes.clone(),
             body: body.to_vec(),
+            endorsed_txs: endorsed_txs.to_vec(),
         };
         if let Some(cache) = self.upstream_cache.as_mut() {
             let record = UpstreamCacheRecord {

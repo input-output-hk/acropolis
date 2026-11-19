@@ -446,6 +446,9 @@ impl MithrilSnapshotFetcher {
                             let message = RawBlockMessage {
                                 header: block.header().cbor().to_vec(),
                                 body: raw_block,
+                                // TODO: Leios. Snapshots do not carry the endorser
+                                // blocks.
+                                endorsed_txs: vec![],
                             };
 
                             let message_enum = Message::Cardano((
