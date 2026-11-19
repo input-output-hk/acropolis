@@ -17,7 +17,7 @@ use acropolis_module_consensus::Consensus;
 use acropolis_test_utils::mainnet_genesis_values;
 use caryatid_sdk::{Context, Subscription, mock_bus::MockBus};
 use config::{Config, FileFormat};
-use pallas::network::miniprotocols::Point;
+use pallas_network2::protocol::Point;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Duration, timeout};
 
@@ -195,6 +195,8 @@ fn make_header(slot: u64, number: u64, hash: BlockHash, parent: BlockHash) -> He
         bytes: vec![],
         era: Era::Conway,
         parent_hash: Some(parent),
+        certifies_eb: false,
+        announced_eb: None,
     }
 }
 
