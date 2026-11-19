@@ -99,7 +99,7 @@ node-addresses = [
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `node-addresses` | array of strings | — | **Required.** List of upstream peer addresses (`host:port`) |
-| `sync-point` | string | — | Sync start point. `"origin"` for genesis+upstream, `"dynamic"` for snapshot or Mithril modes, `"tip"` for chain tip, `"cache"` for cached position |
+| `sync-point` | string | — | Sync start point. `"origin"` for genesis+upstream, `"dynamic"` for snapshot or Mithril modes, `"cache"` for cached position |
 | `magic-number` | integer | — | Network magic number (e.g. `764824073` for mainnet, `2` for preview) |
 | `cache-dir` | path | — | Directory for caching chain sync state |
 | `target-peer-count` | integer | `15` | Target number of peers to maintain |
