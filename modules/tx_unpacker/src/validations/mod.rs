@@ -25,6 +25,7 @@ pub fn validate_tx(
         Era::Alonzo => PallasEra::Alonzo,
         Era::Babbage => PallasEra::Babbage,
         Era::Conway => PallasEra::Conway,
+        Era::Dijkstra => PallasEra::Dijkstra,
         Era::Byron => PallasEra::Byron,
     };
 

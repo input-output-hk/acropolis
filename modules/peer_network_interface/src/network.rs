@@ -7,7 +7,9 @@ use crate::{
     BlockSink,
     block_flow::BlockFlowHandler,
     chain_state::SpecificPoint,
-    connection::{HOUSEKEEPING_INTERVAL, PeerChainSyncEvent, PeerConnection, PeerEvent, header_of},
+    connection::{
+        EbReply, HOUSEKEEPING_INTERVAL, PeerChainSyncEvent, PeerConnection, PeerEvent, header_of,
+    },
     peer_manager::{PeerManager, PeerManagerConfig},
     peer_sharing::request_peers,
 };
@@ -17,12 +19,14 @@ use pallas_network2::protocol::Point;
 use tokio::{sync::mpsc, time};
 use tracing::{debug, info, warn};
 
-/// Blocks requested from all peers whose body has not arrived yet, from which on no peer is
-/// asked for its next header. Catching up, chainsync outruns blockfetch (pallas-network2 sends
-/// a peer one single-block range at a time) and every header waiting for its body stays in
-/// memory (pallas' blockfetch queues, the chain state); without a cap that grows with the
-/// distance to the tip. One cap for all peers together.
-const MAX_PENDING_FETCHES: usize = 512;
+/// Blocks requested from all peers whose body has not arrived yet, endorser blocks whose
+/// transactions have not arrived yet included, from which on no peer is asked for its next
+/// header. Catching up, chainsync outruns blockfetch (pallas-network2 sends a peer one
+/// single-block range at a time) and leios-fetch (one request at a time per peer), and every
+/// header waiting for its body or its endorsed transactions stays in memory (pallas' queues,
+/// the chain state); without a cap that grows with the distance to the tip. One cap for all
+/// peers together.
+const MAX_PENDING_FETCHES: usize = 128;
 
 /// Requested blocks still to arrive down to which a stopped chainsync runs again. That asks
 /// every peer for its next header at once, each of which may request a block: well below the
@@ -31,11 +35,12 @@ const RESUME_PENDING_FETCHES: usize = MAX_PENDING_FETCHES / 2;
 
 /// A peer that sent no block body over a whole interval while blocks were requested from it
 /// is taken as not serving them. Two housekeeping intervals: a serving peer gets its next range
-/// on its own housekeeping, whose ticks are not aligned with these.
+/// on its own housekeeping, whose ticks are not aligned with these. Same for endorser blocks
+/// and leios-fetch replies.
 const FETCH_STALL_INTERVAL: Duration = HOUSEKEEPING_INTERVAL.saturating_mul(2);
 
 /// What is fetched of peers, each kind with its own requests and stall check: blocks over
-/// blockfetch.
+/// blockfetch, endorser blocks over leios-fetch.
 trait Fetch {
     /// For logs.
     const WHAT: &'static str;
@@ -93,9 +98,10 @@ impl Fetch for RBs {
         conn.request_block(block.hash, block.slot)
     }
 
-    /// Peers that announced the block, `stalled` last: a block asked for is never given up on
-    /// while announced (consensus wants it once, Direct mode publishes in order), so a lone
-    /// announcer is asked again. Its body is still used if it arrives late.
+    /// Peers that announced the block, `stalled` last, as for an endorser block: a block asked
+    /// for is never given up on while announced (consensus wants it once, Direct mode
+    /// publishes in order), so a lone announcer is asked again. Its body is still used if it
+    /// arrives late.
     fn rerequest_to(
         flow: &BlockFlowHandler,
         block: &SpecificPoint,
@@ -143,24 +149,89 @@ impl Fetch for RBs {
     }
 }
 
-/// Requests asked of a peer and not served yet, each kind with its own stall check.
+/// Leios: endorser blocks, until their transactions arrive.
+struct Ebs;
+
+impl Fetch for Ebs {
+    const WHAT: &'static str = "leios-fetch reply";
+
+    fn requests(peer: &PeerData) -> &Pending {
+        &peer.reqs.ebs
+    }
+
+    fn requests_mut(peer: &mut PeerData) -> &mut Pending {
+        &mut peer.reqs.ebs
+    }
+
+    fn send(conn: &PeerConnection, eb: &SpecificPoint) -> Result<()> {
+        conn.request_eb(eb.hash, eb.slot)
+    }
+
+    /// Peers that announced a block certifying it, `stalled` last: unlike a block, an endorser
+    /// block cannot be given up on, the block certifying it is not published without its
+    /// transactions.
+    fn rerequest_to(
+        flow: &BlockFlowHandler,
+        eb: &SpecificPoint,
+        stalled: PeerId,
+    ) -> Option<Vec<PeerId>> {
+        let mut announcers = flow.eb_announcers(eb)?;
+        announcers.sort_by_key(|announcer| *announcer == stalled);
+        Some(announcers)
+    }
+
+    type Reply = EbReply;
+    type Content = Vec<Vec<u8>>;
+
+    /// The body of an endorser block says how many transactions to ask the same peer for.
+    fn content(
+        manager: &mut NetworkManager,
+        peer: PeerId,
+        eb: &SpecificPoint,
+        reply: Self::Reply,
+    ) -> Option<Self::Content> {
+        match reply {
+            EbReply::TxCount(0) => Some(vec![]),
+            EbReply::TxCount(tx_count) => {
+                if let Some(data) = manager.peers.get_mut(&peer)
+                    && !data.request_eb_txs(eb, tx_count)
+                {
+                    manager.handle_disconnect(peer);
+                }
+                None
+            }
+            EbReply::Txs(txs) => Some(txs),
+        }
+    }
+
+    /// The transactions go to the blocks that certify it.
+    fn deliver(manager: &mut NetworkManager, _peer: PeerId, eb: SpecificPoint, txs: Vec<Vec<u8>>) {
+        manager.flow_handler.handle_endorsed_txs(eb.hash, txs);
+    }
+}
+
+/// Requests asked of a peer and not served yet, each kind with its own stall check: a peer may
+/// serve blocks and not endorser blocks.
 struct Requests {
     rbs: Pending,
+    ebs: Pending,
 }
 
 impl Requests {
     fn new() -> Self {
         Self {
             rbs: Pending::new(),
+            ebs: Pending::new(),
         }
     }
 
     fn clear(&mut self) {
         self.rbs.reqs.clear();
+        self.ebs.reqs.clear();
     }
 
     fn len(&self) -> usize {
-        self.rbs.reqs.len()
+        self.rbs.reqs.len() + self.ebs.reqs.len()
     }
 }
 
@@ -257,6 +328,17 @@ impl PeerData {
             return false;
         }
         F::requests_mut(self).reqs.push(point.clone());
+        true
+    }
+
+    fn request_eb_txs(&mut self, eb: &SpecificPoint, tx_count: usize) -> bool {
+        if let Err(error) = self.conn.request_eb_txs(eb.hash, eb.slot, tx_count) {
+            warn!(
+                "could not request endorser block transactions from {}: {error:#}",
+                self.conn.address
+            );
+            return false;
+        }
         true
     }
 }
@@ -635,6 +717,7 @@ impl NetworkManager {
         self.flow_handler.handle_disconnect(victim_id, self.peers.keys().next().copied());
 
         self.rerequest_inflight(victim.reqs.rbs.reqs);
+        self.eb_rerequest_inflight();
         // Requests no other peer announced went away with the victim.
         self.update_chainsync();
 
@@ -718,6 +801,9 @@ impl NetworkManager {
                 if let Some(peers) = self.flow_handler.handle_roll_forward(peer, header) {
                     self.request::<RBs>(&SpecificPoint { slot, hash }, peers);
                 }
+                // From the preferred upstream: a new endorser block awaited. From another
+                // peer: one more announcer, for an endorser block none may be asked for.
+                self.fetch_endorsement_of(slot, hash);
                 // Only once this header's block is requested: it then counts toward
                 // `MAX_PENDING_FETCHES` when deciding whether to ask for the next header.
                 self.continue_sync(peer);
@@ -745,6 +831,14 @@ impl NetworkManager {
                     hash: fetched.hash,
                 },
                 fetched.body,
+            ),
+            PeerEvent::EbFetched(fetched) => self.handle_reply::<Ebs>(
+                peer,
+                SpecificPoint {
+                    slot: fetched.slot,
+                    hash: fetched.hash,
+                },
+                fetched.reply,
             ),
             PeerEvent::Disconnected => {
                 self.handle_disconnect(peer);
@@ -789,11 +883,7 @@ impl NetworkManager {
     /// already published.
     fn handle_intersection_block(&mut self, peer: PeerId, body: &[u8]) {
         match header_of(body) {
-            // TODO: Leios. Keep it for the block after the intersection, which may certify
-            // the endorser block it announced.
-            Ok(Some(header)) => {
-                debug!(?peer, hash = %header.hash, slot = header.slot, "intersection header")
-            }
+            Ok(Some(header)) => self.flow_handler.handle_intersection_header(peer, header),
             // An epoch boundary block, which announces no endorser block.
             Ok(None) => {}
             Err(error) => warn!(?peer, "undecodable intersection header: {error:#}"),
@@ -801,7 +891,8 @@ impl NetworkManager {
         self.continue_sync(peer);
     }
 
-    /// Blocks requested from all peers whose body has not arrived yet.
+    /// Blocks requested from all peers whose body has not arrived yet, and endorser blocks
+    /// whose transactions have not.
     fn pending_fetches(&self) -> usize {
         self.peers.values().map(|peer| peer.reqs.len()).sum()
     }
@@ -841,9 +932,11 @@ impl NetworkManager {
     }
 
     /// Requests a peer leaves unanswered (e.g. a block it no longer has) would count forever
-    /// and, once at the cap, hold every peer's chainsync.
+    /// and, once at the cap, hold every peer's chainsync. Each kind separately: a peer may serve
+    /// blocks and not endorser blocks.
     fn on_fetch_stall_tick(&mut self) {
         self.on_fetch_stall::<RBs>();
+        self.on_fetch_stall::<Ebs>();
     }
 
     /// A peer that sent no reply over a whole interval while asked is asked for none of those
@@ -915,6 +1008,23 @@ impl NetworkManager {
         }
     }
 
+    /// Leios: once a peer has gone, ask again for the endorser blocks it was asked for, of
+    /// another peer that announced a block certifying them. No list needed: they are the ones
+    /// blocks to publish wait for that no peer is asked for, along with those of the blocks
+    /// queued if it was the preferred upstream, whose headers came earlier.
+    fn eb_rerequest_inflight(&mut self) {
+        for (eb, announcers) in self.flow_handler.awaited_endorsements() {
+            self.request::<Ebs>(&eb, announcers);
+        }
+    }
+
+    /// Leios: ask for the endorser block the block at that point certifies, if awaited.
+    fn fetch_endorsement_of(&mut self, slot: u64, hash: BlockHash) {
+        if let Some((eb, announcers)) = self.flow_handler.awaited_endorsement_of(slot, hash) {
+            self.request::<Ebs>(&eb, announcers);
+        }
+    }
+
     /// Called when a hot peer disconnects. Removes from `peers`, re-routes in-flight fetches,
     /// and (when peer_manager is active) promotes a cold peer if below `min_hot_peers`.
     pub fn on_peer_disconnected(&mut self, id: PeerId) {
@@ -945,6 +1055,7 @@ impl NetworkManager {
         self.flow_handler.handle_disconnect(id, self.peers.keys().next().copied());
 
         self.rerequest_inflight(peer.reqs.rbs.reqs);
+        self.eb_rerequest_inflight();
 
         if self.peer_manager.is_none() {
             // Disabled mode: reconnect with 5s backoff
@@ -1101,7 +1212,7 @@ mod tests {
     use super::*;
     use crate::block_flow::BlockFlowHandler;
     use crate::configuration::{InterfaceConfig, SyncPoint};
-    use crate::connection::{BlockFetched, Header, PeerChainSyncEvent, PeerEvent};
+    use crate::connection::{BlockFetched, EbFetched, Header, PeerChainSyncEvent, PeerEvent};
     use acropolis_common::configuration::BlockFlowMode;
     use acropolis_common::messages::Message;
     use acropolis_common::{BlockHash, Era};
@@ -1219,6 +1330,8 @@ mod tests {
             bytes: vec![],
             era: Era::Conway,
             parent_hash: Some(parent_hash),
+            certifies_eb: false,
+            announced_eb: None,
         }
     }
 
@@ -1610,6 +1723,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn endorser_blocks_being_fetched_count_toward_the_fetch_cap() {
+        let mut manager = test_consensus_manager().await;
+        let peer = PeerId(4);
+        let (conn, mut commands) = PeerConnection::detached("peer.test:3001");
+        manager.peers.insert(peer, PeerData::new(conn));
+        let mut continued = || {
+            std::iter::from_fn(|| commands.try_recv().ok())
+                .filter(|cmd| matches!(cmd, InitiatorCommand::ContinueSync(_)))
+                .count()
+        };
+        let eb_at = |slot: u64| {
+            let mut bytes = [0; 32];
+            bytes[..8].copy_from_slice(&slot.to_le_bytes());
+            SpecificPoint {
+                slot,
+                hash: BlockHash::new(bytes),
+            }
+        };
+        let txs_fetched = |slot: u64| {
+            PeerEvent::EbFetched(EbFetched {
+                slot,
+                hash: eb_at(slot).hash,
+                reply: EbReply::Txs(vec![]),
+            })
+        };
+        manager.peers.get_mut(&peer).unwrap().reqs.ebs.reqs =
+            (0..MAX_PENDING_FETCHES as u64).map(eb_at).collect();
+
+        manager.handle_peer_update(
+            peer,
+            PeerEvent::ChainSync(PeerChainSyncEvent::IntersectionFound(Point::Origin)),
+        );
+        assert_eq!(continued(), 0, "next header asked at the cap");
+
+        let to_resume = (MAX_PENDING_FETCHES - RESUME_PENDING_FETCHES) as u64;
+        for slot in 0..to_resume - 1 {
+            manager.handle_peer_update(peer, txs_fetched(slot));
+        }
+        assert_eq!(continued(), 0, "next header asked while paused");
+
+        manager.handle_peer_update(peer, txs_fetched(to_resume - 1));
+        assert_eq!(continued(), 1, "next header not asked at half the cap");
+    }
+
+    #[tokio::test]
     async fn blocks_a_peer_does_not_serve_are_asked_of_another_announcer() {
         let mut manager = test_consensus_manager().await;
         let (stalled, other) = (PeerId(5), PeerId(6));
@@ -1645,6 +1803,138 @@ mod tests {
             manager.peers[&stalled].reqs.rbs.reqs.is_empty(),
             "block asked of two peers at once"
         );
+    }
+
+    /// Leios: `N` peers, the first one preferred, at the block announcing an endorser block;
+    /// each then rolls forward to the block certifying it. Returns the commands sent to each.
+    async fn peers_certifying_an_endorser_block<const N: usize>() -> (
+        NetworkManager,
+        [(PeerId, mpsc::UnboundedReceiver<InitiatorCommand>); N],
+        SpecificPoint,
+    ) {
+        let mut manager = test_consensus_manager().await;
+        manager.flow_handler = BlockFlowHandler::Direct {
+            chain: crate::chain_state::ChainState::new(
+                acropolis_common::params::SECURITY_PARAMETER_K,
+            ),
+        };
+        let peers: [_; N] = std::array::from_fn(|i| {
+            let (conn, commands) = PeerConnection::detached(&format!("peer{i}.test:3001"));
+            let id = PeerId(8 + i as u64);
+            manager.peers.insert(id, PeerData::new(conn));
+            (id, commands)
+        });
+        let eb = SpecificPoint {
+            slot: 400,
+            hash: BlockHash::new([7; 32]),
+        };
+        let mut announcing = test_header(400, 40, BlockHash::new([1; 32]), BlockHash::new([0; 32]));
+        announcing.announced_eb = Some(eb.hash);
+        let mut certifying = test_header(401, 41, BlockHash::new([2; 32]), announcing.hash);
+        certifying.certifies_eb = true;
+        let at_announcing = Point::Specific(announcing.slot, announcing.hash.to_vec());
+        manager.flow_handler.set_preferred_upstream(Some(peers[0].0));
+        for &(peer, _) in &peers {
+            manager.flow_handler.handle_intersection_header(peer, announcing.clone());
+            manager.flow_handler.handle_roll_backward(peer, at_announcing.clone());
+            manager.handle_peer_update(
+                peer,
+                PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(
+                    certifying.clone(),
+                    at_announcing.clone(),
+                )),
+            );
+        }
+        (manager, peers, eb)
+    }
+
+    fn asked_eb(commands: &mut mpsc::UnboundedReceiver<InitiatorCommand>) -> bool {
+        sent(commands).iter().any(|cmd| matches!(cmd, InitiatorCommand::FetchEb(..)))
+    }
+
+    /// Leios: an endorser block a peer leaves unanswered is asked of another peer that
+    /// announced a block certifying it.
+    #[tokio::test]
+    async fn endorser_blocks_a_peer_does_not_serve_are_asked_of_another_announcer() {
+        let (mut manager, [(stalled, mut stalled_commands), (other, mut other_commands)], eb) =
+            peers_certifying_an_endorser_block::<2>().await;
+        assert_eq!(manager.peers[&stalled].reqs.ebs.reqs, vec![eb.clone()]);
+        assert!(
+            manager.peers[&other].reqs.ebs.reqs.is_empty(),
+            "asked of both peers"
+        );
+        sent(&mut stalled_commands);
+
+        // The first check sees the request, the second one a whole interval without a reply.
+        manager.on_fetch_stall_tick();
+        assert_eq!(manager.peers[&stalled].reqs.ebs.reqs, vec![eb.clone()]);
+        manager.on_fetch_stall_tick();
+
+        assert!(
+            manager.peers[&stalled].reqs.ebs.reqs.is_empty(),
+            "request left on the stalled peer"
+        );
+        assert_eq!(
+            manager.peers[&other].reqs.ebs.reqs,
+            vec![eb.clone()],
+            "endorser block not asked of the other announcer"
+        );
+        assert!(asked_eb(&mut other_commands));
+
+        // The other peer stalls too: the endorser block is asked again of the first one.
+        manager.on_fetch_stall_tick();
+        assert!(manager.peers[&other].reqs.ebs.reqs.is_empty());
+        assert_eq!(manager.peers[&stalled].reqs.ebs.reqs, vec![eb.clone()]);
+        assert!(asked_eb(&mut stalled_commands));
+
+        // A late reply from a stalled peer is still used, and no longer awaited of the other.
+        manager.handle_peer_update(
+            other,
+            PeerEvent::EbFetched(EbFetched {
+                slot: eb.slot,
+                hash: eb.hash,
+                reply: EbReply::Txs(vec![b"endorsed tx".to_vec()]),
+            }),
+        );
+        assert_eq!(manager.flow_handler.awaited_endorsements(), vec![]);
+        assert!(
+            manager.peers[&stalled].reqs.ebs.reqs.is_empty(),
+            "request left on the peer asked again"
+        );
+    }
+
+    /// Leios: an announcer that fails to take a re-request disconnects, which asks another peer
+    /// for the endorser block: no further announcer is asked.
+    #[tokio::test]
+    async fn an_endorser_block_asked_again_goes_to_one_peer_only() {
+        let (mut manager, [_stalled, (gone, gone_commands), _last], eb) =
+            peers_certifying_an_endorser_block::<3>().await;
+        drop(gone_commands);
+
+        manager.on_fetch_stall::<Ebs>();
+        manager.on_fetch_stall::<Ebs>();
+
+        assert!(!manager.peers.contains_key(&gone));
+        let asked: Vec<PeerId> = manager
+            .peers
+            .iter()
+            .filter(|(_, peer)| peer.reqs.ebs.reqs.contains(&eb))
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(asked.len(), 1, "asked of {asked:?}");
+    }
+
+    /// Leios: the endorser blocks asked of a peer that disconnects are asked of another
+    /// announcer.
+    #[tokio::test]
+    async fn endorser_blocks_of_a_disconnected_peer_are_asked_of_another_announcer() {
+        let (mut manager, [(gone, _), (other, mut other_commands)], eb) =
+            peers_certifying_an_endorser_block::<2>().await;
+
+        manager.on_peer_disconnected(gone);
+
+        assert_eq!(manager.peers[&other].reqs.ebs.reqs, vec![eb]);
+        assert!(asked_eb(&mut other_commands));
     }
 
     /// A Conway block from preview, already in the repository for the bootstrapper tests.

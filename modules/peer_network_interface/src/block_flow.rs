@@ -121,6 +121,57 @@ impl BlockFlowHandler {
         }
     }
 
+    /// Handle the header of the block at a peer's intersection.
+    pub fn handle_intersection_header(&mut self, peer: PeerId, header: Header) {
+        match self {
+            BlockFlowHandler::Direct { chain } => chain.handle_intersection_header(peer, header),
+            // TODO: Leios. Consensus mode does not fetch endorser blocks yet.
+            BlockFlowHandler::Consensus(_) => {}
+        }
+    }
+
+    /// Leios: the endorser blocks that blocks to publish wait for, with the peers to ask.
+    pub fn awaited_endorsements(&self) -> Vec<(SpecificPoint, Vec<PeerId>)> {
+        match self {
+            BlockFlowHandler::Direct { chain } => chain.awaited_endorsements(),
+            // TODO: Leios. Consensus mode publishes a certifying block without the
+            // transactions of the endorser block it certifies.
+            BlockFlowHandler::Consensus(_) => vec![],
+        }
+    }
+
+    /// Leios: the peers to ask for that endorser block, if blocks to publish wait for its
+    /// transactions.
+    pub fn eb_announcers(&self, eb: &SpecificPoint) -> Option<Vec<PeerId>> {
+        match self {
+            BlockFlowHandler::Direct { chain } => chain.eb_announcers(eb),
+            // TODO: Leios. See `awaited_endorsements`.
+            BlockFlowHandler::Consensus(_) => None,
+        }
+    }
+
+    /// Leios: the endorser block the block at that point certifies, with the peers to ask, if
+    /// blocks to publish wait for its transactions.
+    pub fn awaited_endorsement_of(
+        &self,
+        slot: u64,
+        hash: BlockHash,
+    ) -> Option<(SpecificPoint, Vec<PeerId>)> {
+        match self {
+            BlockFlowHandler::Direct { chain } => chain.awaited_endorsement_of(slot, hash),
+            // TODO: Leios. Consensus mode publishes a certifying block without the
+            // transactions of the endorser block it certifies.
+            BlockFlowHandler::Consensus(_) => None,
+        }
+    }
+
+    /// Leios: the transactions of an endorser block.
+    pub fn handle_endorsed_txs(&mut self, eb_hash: BlockHash, txs: Vec<Vec<u8>>) {
+        if let BlockFlowHandler::Direct { chain } = self {
+            chain.handle_endorsed_txs(eb_hash, txs);
+        }
+    }
+
     /// Handle a peer rolling back.
     pub fn handle_roll_backward(&mut self, peer: PeerId, point: Point) {
         match self {
@@ -244,8 +295,14 @@ impl BlockFlowHandler {
                 while let Some(event) = chain.next_unpublished_event() {
                     let tip = chain.preferred_upstream_tip();
                     match event {
-                        ChainEvent::RollForward { header, body } => {
-                            block_sink.announce_roll_forward(header, body, tip).await?;
+                        ChainEvent::RollForward {
+                            header,
+                            body,
+                            endorsed_txs,
+                        } => {
+                            block_sink
+                                .announce_roll_forward(header, body, endorsed_txs, tip)
+                                .await?;
                             *published_blocks += 1;
                             if published_blocks.is_multiple_of(100) {
                                 debug!("Published block {}", header.number);
@@ -600,7 +657,9 @@ impl ConsensusFlowState {
                     }
                 }
                 ConsensusBlockEvent::Fetched { header, body } => {
-                    block_sink.announce_roll_forward(&header, &body, None).await?;
+                    // TODO: Leios. Without the transactions of the endorser block it may
+                    // certify.
+                    block_sink.announce_roll_forward(&header, &body, &[], None).await?;
                     self.published_points.push_back(SpecificPoint {
                         slot: header.slot,
                         hash: header.hash,
@@ -819,6 +878,8 @@ mod tests {
             bytes: vec![],
             era: acropolis_common::Era::Conway,
             parent_hash: Some(GENESIS_HASH),
+            certifies_eb: false,
+            announced_eb: None,
         };
 
         let result = handler.handle_roll_forward(PEER_1, header.clone());
@@ -841,6 +902,8 @@ mod tests {
             bytes: vec![],
             era: acropolis_common::Era::Conway,
             parent_hash: Some(GENESIS_HASH),
+            certifies_eb: false,
+            announced_eb: None,
         };
 
         handler.handle_roll_forward(PEER_1, header.clone());

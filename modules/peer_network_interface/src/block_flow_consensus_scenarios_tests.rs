@@ -195,6 +195,8 @@ fn make_header(slot: u64, number: u64, hash: BlockHash, parent: BlockHash) -> He
         bytes: vec![],
         era: Era::Conway,
         parent_hash: Some(parent),
+        certifies_eb: false,
+        announced_eb: None,
     }
 }
 

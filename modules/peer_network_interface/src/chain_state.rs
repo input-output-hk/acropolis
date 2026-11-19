@@ -3,13 +3,15 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use crate::{connection::Header, network::PeerId};
 use acropolis_common::{BlockHash, hash::Hash};
 use pallas_network2::protocol::Point;
-use tracing::warn;
+use tracing::{error, warn};
 
 #[derive(Debug)]
 struct BlockData {
     header: Header,
     announced_by: Vec<PeerId>,
     body: Option<Vec<u8>>,
+    /// Leios: the transactions of the endorser block this block certifies, once fetched.
+    endorsed_txs: Option<Vec<Vec<u8>>>,
 }
 
 #[derive(Debug, Default)]
@@ -25,6 +27,7 @@ impl SlotBlockData {
                 header,
                 announced_by: vec![id],
                 body: None,
+                endorsed_txs: None,
             });
         }
     }
@@ -65,6 +68,17 @@ impl SlotBlockData {
         if block.body.is_none() {
             block.body = Some(body);
         }
+    }
+
+    fn track_endorsed_txs(&mut self, hash: BlockHash, txs: Vec<Vec<u8>>) {
+        if let Some(block) = self.blocks.iter_mut().find(|b| b.header.hash == hash) {
+            block.endorsed_txs = Some(txs);
+        }
+    }
+
+    fn endorsed_txs(&self, hash: BlockHash) -> Option<&[Vec<u8>]> {
+        let block = self.blocks.iter().find(|b| b.header.hash == hash)?;
+        block.endorsed_txs.as_deref()
     }
 
     fn header(&self, hash: BlockHash) -> Option<&Header> {
@@ -196,6 +210,20 @@ impl ChainState {
         self.block_announcers(slot, hash)
     }
 
+    /// The header of the block at a peer's intersection: a point we gave, so a block already
+    /// published, and the parent of the first block chainsync brings.
+    pub fn handle_intersection_header(&mut self, id: PeerId, header: Header) {
+        let point = SpecificPoint {
+            slot: header.slot,
+            hash: header.hash,
+        };
+        self.blocks.entry(header.slot).or_default().track_announcement(id, header);
+        // Starting from a sync point, nothing was published here yet.
+        if self.published_blocks.is_empty() {
+            self.published_blocks.push_back(point);
+        }
+    }
+
     pub fn handle_roll_backward(&mut self, id: PeerId, point: Point) {
         let is_preferred = self.preferred_upstream == Some(id);
         let mut rolled_back = false;
@@ -251,6 +279,8 @@ impl ChainState {
                 bytes: vec![],
                 era: acropolis_common::Era::Byron,
                 parent_hash: None,
+                certifies_eb: false,
+                announced_eb: None,
             };
         };
         let hash = Hash::try_from(hash).unwrap_or_default();
@@ -266,6 +296,8 @@ impl ChainState {
                 bytes: vec![],
                 era: acropolis_common::Era::default(),
                 parent_hash: None,
+                certifies_eb: false,
+                announced_eb: None,
             }
         }
     }
@@ -275,6 +307,87 @@ impl ChainState {
             return;
         };
         slot_blocks.track_body(hash, body);
+    }
+
+    /// Leios: the transactions of the endorser block of that hash, for the blocks to publish
+    /// that certify it.
+    pub fn handle_endorsed_txs(&mut self, eb_hash: BlockHash, txs: Vec<Vec<u8>>) {
+        let certifying: Vec<SpecificPoint> = self
+            .unpublished_blocks
+            .iter()
+            .filter(|block| {
+                self.header_at(block)
+                    .and_then(|header| self.certified_eb(header))
+                    .is_some_and(|eb| eb.hash == eb_hash)
+            })
+            .cloned()
+            .collect();
+        for block in certifying {
+            if let Some(slot_blocks) = self.blocks.get_mut(&block.slot) {
+                slot_blocks.track_endorsed_txs(block.hash, txs.clone());
+            }
+        }
+    }
+
+    /// Leios: the endorser blocks whose transactions blocks to publish still wait for, each
+    /// with the peers that announced a block certifying it: a node serves such a block only
+    /// once it holds the endorser block.
+    pub fn awaited_endorsements(&self) -> Vec<(SpecificPoint, Vec<PeerId>)> {
+        self.iter_awaited_endorsements().collect()
+    }
+
+    /// Leios: the peers to ask for that endorser block, if blocks to publish wait for its
+    /// transactions: those that announced the first block certifying it.
+    pub fn eb_announcers(&self, eb: &SpecificPoint) -> Option<Vec<PeerId>> {
+        self.iter_awaited_endorsements()
+            .find(|(awaited, _)| awaited == eb)
+            .map(|(_, announcers)| announcers)
+    }
+
+    fn iter_awaited_endorsements(&self) -> impl Iterator<Item = (SpecificPoint, Vec<PeerId>)> + '_ {
+        self.unpublished_blocks.iter().filter_map(|block| {
+            let slot_blocks = self.blocks.get(&block.slot)?;
+            if slot_blocks.endorsed_txs(block.hash).is_some() {
+                return None;
+            }
+            let eb = self.certified_eb(slot_blocks.header(block.hash)?)?;
+            Some((eb, slot_blocks.announcers(block.hash)))
+        })
+    }
+
+    /// Leios: the endorser block the block at that point certifies, with the peers to ask, if
+    /// blocks to publish wait for its transactions.
+    pub fn awaited_endorsement_of(
+        &self,
+        slot: u64,
+        hash: BlockHash,
+    ) -> Option<(SpecificPoint, Vec<PeerId>)> {
+        let slot_blocks = self.blocks.get(&slot)?;
+        let eb = self.certified_eb(slot_blocks.header(hash)?)?;
+        if slot_blocks.endorsed_txs(hash).is_some()
+            || !self.unpublished_blocks.contains(&SpecificPoint { slot, hash })
+        {
+            return None;
+        }
+        Some((eb, slot_blocks.announcers(hash)))
+    }
+
+    /// Leios: the endorser block a block certifies, the one its parent announced at the
+    /// parent's slot; `None` if it certifies none, or if the parent is unknown.
+    fn certified_eb(&self, header: &Header) -> Option<SpecificPoint> {
+        if !header.certifies_eb {
+            return None;
+        }
+        let parent_hash = header.parent_hash?;
+        let parent = self.blocks.values().rev().find_map(|blocks| blocks.header(parent_hash))?;
+        Some(SpecificPoint {
+            slot: parent.slot,
+            hash: parent.announced_eb?,
+        })
+    }
+
+    fn header_at(&self, block: &SpecificPoint) -> Option<&Header> {
+        self.blocks.get(&block.slot)?.header(block.hash)
     }
 
     pub fn handle_new_preferred_upstream(&mut self, id: PeerId) {
@@ -372,7 +485,24 @@ impl ChainState {
         let block = self.unpublished_blocks.front()?;
         let slot_blocks = self.blocks.get(&block.slot)?;
         let (header, body) = slot_blocks.body(block.hash)?;
-        Some(ChainEvent::RollForward { header, body })
+        let endorsed_txs = if self.certified_eb(header).is_some() {
+            slot_blocks.endorsed_txs(block.hash)?
+        } else {
+            if header.certifies_eb {
+                error!(
+                    hash = %header.hash,
+                    slot = header.slot,
+                    "block certifies an endorser block its parent's header does not name; \
+                     publishing it without the endorsed transactions"
+                );
+            }
+            &[]
+        };
+        Some(ChainEvent::RollForward {
+            header,
+            body,
+            endorsed_txs,
+        })
     }
 
     pub fn handle_event_published(&mut self) {
@@ -405,8 +535,15 @@ impl ChainState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChainEvent<'a> {
-    RollForward { header: &'a Header, body: &'a [u8] },
-    RollBackward { header: &'a Header },
+    RollForward {
+        header: &'a Header,
+        body: &'a [u8],
+        /// Leios: the transactions of the endorser block the block certifies, applied first.
+        endorsed_txs: &'a [Vec<u8>],
+    },
+    RollBackward {
+        header: &'a Header,
+    },
 }
 
 #[cfg(test)]
@@ -433,6 +570,8 @@ mod tests {
             bytes: desc.as_bytes().to_vec(),
             era: Era::Conway,
             parent_hash: None, // Tests don't need parent hash tracking
+            certifies_eb: false,
+            announced_eb: None,
         };
         let body = desc.as_bytes().to_vec();
         (header, body)
@@ -469,6 +608,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h1,
                 body: b1.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -506,6 +646,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h1,
                 body: b1.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -514,6 +655,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h2,
                 body: b2.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -539,6 +681,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h1,
                 body: b1.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -551,6 +694,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h2,
                 body: b2.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -573,6 +717,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h3,
                 body: b3.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -585,6 +730,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h4,
                 body: b4.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -610,6 +756,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h1,
                 body: b1.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -622,6 +769,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h2a,
                 body: b2a.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -647,6 +795,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h2b,
                 body: b2b.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -663,6 +812,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h3b,
                 body: b3b.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -686,6 +836,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h1,
                 body: b1.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -711,6 +862,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h3,
                 body: b3.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -753,6 +905,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h1,
                 body: b1.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -764,6 +917,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &p1h2,
                 body: p1b2.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -775,6 +929,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &p1h3,
                 body: p1b3.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -801,6 +956,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &p2h2,
                 body: p2b2.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -809,6 +965,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &p2h3,
                 body: p2b3.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -833,6 +990,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h1,
                 body: b1.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -844,6 +1002,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h2,
                 body: b2.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -855,6 +1014,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h3,
                 body: b3.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -882,6 +1042,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h2,
                 body: b2.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -906,6 +1067,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h1,
                 body: b1.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -917,6 +1079,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h2,
                 body: b2.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -940,6 +1103,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h3,
                 body: b3.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -979,6 +1143,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h1,
                 body: b1.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -987,6 +1152,7 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h2,
                 body: b2.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
@@ -1000,9 +1166,82 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &h3,
                 body: b3.as_slice(),
+                endorsed_txs: &[],
             }),
         );
         state.handle_event_published();
         assert_eq!(state.next_unpublished_event(), None);
+    }
+
+    /// Leios: the block at the intersection, which announces an endorser block, and the next
+    /// block, which certifies it.
+    fn make_announcing_and_certifying_blocks() -> (Header, Header, Vec<u8>) {
+        let (mut announcing, _) = make_block(1, "announcing block");
+        announcing.announced_eb = Some(BlockHash::new([7; 32]));
+        let (mut certifying, body) = make_block(2, "certifying block");
+        certifying.parent_hash = Some(announcing.hash);
+        certifying.certifies_eb = true;
+        (announcing, certifying, body)
+    }
+
+    #[test]
+    fn should_publish_a_certifying_block_with_the_transactions_it_endorses() {
+        let mut state = make_test_chain_state();
+        let peer = PeerId(0);
+        state.handle_new_preferred_upstream(peer);
+        let (announcing, certifying, body) = make_announcing_and_certifying_blocks();
+
+        // Chainsync starts at the announcing block, which was published already.
+        state.handle_intersection_header(peer, announcing.clone());
+        state.handle_roll_backward(
+            peer,
+            Point::Specific(announcing.slot, announcing.hash.to_vec()),
+        );
+        assert_eq!(state.next_unpublished_event(), None);
+
+        state.handle_roll_forward(peer, certifying.clone());
+        state.handle_body_fetched(certifying.slot, certifying.hash, body.clone());
+        assert_eq!(state.next_unpublished_event(), None);
+        let eb = SpecificPoint {
+            slot: announcing.slot,
+            hash: BlockHash::new([7; 32]),
+        };
+        assert_eq!(state.awaited_endorsements(), vec![(eb, vec![peer])]);
+
+        let txs = vec![b"endorsed tx".to_vec()];
+        state.handle_endorsed_txs(BlockHash::new([7; 32]), txs.clone());
+        assert_eq!(state.awaited_endorsements(), vec![]);
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &certifying,
+                body: body.as_slice(),
+                endorsed_txs: &txs,
+            }),
+        );
+    }
+
+    #[test]
+    fn should_publish_a_certifying_block_whose_parent_is_unknown_without_endorsed_txs() {
+        let mut state = make_test_chain_state();
+        let peer = PeerId(0);
+        state.handle_new_preferred_upstream(peer);
+        let (announcing, certifying, body) = make_announcing_and_certifying_blocks();
+
+        state.handle_roll_backward(
+            peer,
+            Point::Specific(announcing.slot, announcing.hash.to_vec()),
+        );
+        state.handle_roll_forward(peer, certifying.clone());
+        state.handle_body_fetched(certifying.slot, certifying.hash, body.clone());
+        assert_eq!(state.awaited_endorsements(), vec![]);
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &certifying,
+                body: body.as_slice(),
+                endorsed_txs: &[],
+            }),
+        );
     }
 }

@@ -12,21 +12,27 @@ use std::{
 use acropolis_codec::map_to_block_era;
 use acropolis_common::{BlockHash, Era};
 use anyhow::{Result, anyhow};
+use pallas::codec::minicbor;
+use pallas::ledger::primitives::dijkstra::EndorserBlock;
 use pallas::ledger::traverse::{MultiEraBlock, MultiEraHeader};
 use pallas_network2::{
     Interface, Manager, PeerId,
     behavior::{
         AnyMessage,
         initiator::{
-            Config as HandshakeConfig, HandshakeBehavior, InitiatorBehavior, InitiatorCommand,
-            InitiatorEvent,
+            Config as HandshakeConfig, DisconnectReason, HandshakeBehavior, InitiatorBehavior,
+            InitiatorCommand, InitiatorEvent,
         },
     },
     interface::TcpInterface,
-    protocol::{Point, handshake::n2n::VersionTable},
+    protocol::{
+        Point,
+        handshake::n2n::VersionTable,
+        leiosfetch::{self, Bitmaps},
+    },
 };
 use tokio::{select, sync::mpsc};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::network::PeerEventReporter;
 
@@ -140,8 +146,26 @@ impl PeerConnection {
     /// network manager does so after each `IntersectionFound`, `RollForward`, `EpochBoundary`
     /// and `RollBackward`, or chainsync stops there.
     pub fn continue_sync(&self) -> Result<()> {
+        self.execute(InitiatorCommand::ContinueSync(self.peer_id()?))
+    }
+
+    /// Leios: the body of the endorser block at that point, to know how many transactions
+    /// it has. pallas-network2 holds the request until the peer opens the Leios mini-protocols.
+    pub fn request_eb(&self, hash: BlockHash, slot: u64) -> Result<()> {
+        let point = Point::Specific(slot, hash.to_vec());
+        self.execute(InitiatorCommand::FetchEb(self.peer_id()?, point))
+    }
+
+    /// Leios: every transaction of the endorser block at that point.
+    pub fn request_eb_txs(&self, hash: BlockHash, slot: u64, tx_count: usize) -> Result<()> {
+        let point = Point::Specific(slot, hash.to_vec());
+        let txs = Bitmaps::all(tx_count);
+        self.execute(InitiatorCommand::FetchEbTxs(self.peer_id()?, point, txs))
+    }
+
+    fn peer_id(&self) -> Result<PeerId> {
         let (peer, _) = self.commands.as_ref().map_err(|err| anyhow!("{err:#}"))?;
-        self.execute(InitiatorCommand::ContinueSync(peer.clone()))
+        Ok(peer.clone())
     }
 
     fn execute(&self, cmd: InitiatorCommand) -> Result<()> {
@@ -154,6 +178,7 @@ impl PeerConnection {
 pub enum PeerEvent {
     ChainSync(PeerChainSyncEvent),
     BlockFetched(BlockFetched),
+    EbFetched(EbFetched),
     Disconnected,
 }
 
@@ -177,6 +202,10 @@ pub struct Header {
     pub bytes: Vec<u8>,
     pub era: Era,
     pub parent_hash: Option<BlockHash>,
+    /// Leios: the block certifies the endorser block its parent announced.
+    pub certifies_eb: bool,
+    /// Leios: the hash of the endorser block this block announces.
+    pub announced_eb: Option<BlockHash>,
 }
 
 #[derive(Debug)]
@@ -184,6 +213,22 @@ pub struct BlockFetched {
     pub slot: u64,
     pub hash: BlockHash,
     pub body: Vec<u8>,
+}
+
+/// Leios: what leios-fetch brought for the endorser block at that point.
+#[derive(Debug)]
+pub struct EbFetched {
+    pub slot: u64,
+    pub hash: BlockHash,
+    pub reply: EbReply,
+}
+
+#[derive(Debug)]
+pub enum EbReply {
+    /// From its body, all the network manager needs.
+    TxCount(usize),
+    /// Each transaction in its block form, in order.
+    Txs(Vec<Vec<u8>>),
 }
 
 /// Decode a chainsync header; `None` for an epoch boundary block.
@@ -211,6 +256,8 @@ fn header_from(hdr: &MultiEraHeader, era: Era) -> Option<Header> {
         bytes: hdr.cbor().to_vec(),
         era,
         parent_hash,
+        certifies_eb: hdr.block_body_contains_leios_cert().unwrap_or(false),
+        announced_eb: hdr.eb_announcement().map(|eb| BlockHash::new(*eb.eb_hash)),
     })
 }
 
@@ -222,6 +269,8 @@ enum UndecodableReply {
     Header(anyhow::Error),
     #[error("undecodable block: {0}")]
     Block(pallas::ledger::traverse::Error),
+    #[error("undecodable endorser block: {0}")]
+    EndorserBlock(minicbor::decode::Error),
 }
 
 /// Why the task driving a peer's `Manager` stops.
@@ -234,6 +283,9 @@ enum ConnectionEnd {
     /// The peer sent something we cannot decode.
     Undecodable(UndecodableReply),
     NoIntersection,
+    /// The peer closed the connection or it failed. Whatever was asked of it is lost:
+    /// pallas-network2 drops the requests without a word.
+    Disconnected(DisconnectReason),
 }
 
 async fn run<I: Interface<AnyMessage>>(
@@ -262,6 +314,11 @@ async fn run<I: Interface<AnyMessage>>(
             // `InitiatorEvent::PeerDisconnected` instead, and drop `ConnectionEnd::NoIntersection`.
             let _ = reporter.write(PeerEvent::Disconnected).await;
         }
+        ConnectionEnd::Disconnected(reason) => {
+            info!(%peer, ?reason, "peer disconnected");
+            // So that the network manager asks other peers for what this one owed.
+            let _ = reporter.write(PeerEvent::Disconnected).await;
+        }
     }
 }
 
@@ -286,6 +343,9 @@ async fn drive<I: Interface<AnyMessage>>(
                 // `None` only means there was nothing to report this time: the manager
                 // keeps running. Not a pattern on the branch, which would disable it.
                 let Some(event) = event else { continue };
+                if let InitiatorEvent::PeerDisconnected(_, reason) = event {
+                    return ConnectionEnd::Disconnected(reason);
+                }
                 match translate(event) {
                     Ok(Some(
                         event @ PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(_)),
@@ -339,6 +399,27 @@ fn translate(event: InitiatorEvent) -> Result<Option<PeerEvent>, UndecodableRepl
                 slot: block.slot(),
                 hash: BlockHash::new(*block.hash()),
                 body,
+            })))
+        }
+        InitiatorEvent::EbFetched(_peer, point, response) => {
+            // The point we asked for (`PeerConnection::request_eb`).
+            let Point::Specific(slot, hash) = point else {
+                return Ok(None);
+            };
+            let reply = match response {
+                leiosfetch::Response::Block(body) => {
+                    let body: EndorserBlock = minicbor::decode(body.raw_bytes())
+                        .map_err(UndecodableReply::EndorserBlock)?;
+                    EbReply::TxCount(body.len())
+                }
+                leiosfetch::Response::BlockTxs { txs } => {
+                    EbReply::Txs(txs.iter().map(|tx| tx.raw_bytes().to_vec()).collect())
+                }
+            };
+            Ok(Some(PeerEvent::EbFetched(EbFetched {
+                slot,
+                hash: BlockHash::try_from(hash).unwrap_or_default(),
+                reply,
             })))
         }
         other => {
@@ -826,16 +907,13 @@ mod tests {
         );
     }
 
-    /// The network manager replaces a peer once it hears it is gone. Here the peer drops the
-    /// connection; the stack is still running, so only `InitiatorBehavior` could tell. In
-    /// pallas-network2 1.5.0 it does not: it resets the peer and reconnects it silently.
-    /// The network manager then still counts the dropped peer as live and waits forever for
-    /// what it asked from it (headers, blocks), where the former pallas-network stack moved on to
-    /// another peer. A peer that goes silent without closing the connection is dropped by the
-    /// keepalive timeout (30 s, pallas' default) since 1.5.0, but just as silently. Waiting for
-    /// <https://github.com/txpipe/pallas/pull/842>: `InitiatorEvent::PeerDisconnected`.
+    /// The network manager replaces a peer once it hears it is gone, and asks other peers for
+    /// what it owed (headers, blocks, endorser blocks). Here the peer drops the connection;
+    /// the stack is still running, so only `InitiatorBehavior` can tell, with
+    /// `InitiatorEvent::PeerDisconnected` (<https://github.com/txpipe/pallas/pull/842>). A
+    /// peer that goes silent without closing the connection needs the keepalive timeout of
+    /// <https://github.com/txpipe/pallas/pull/843> on top.
     #[tokio::test]
-    #[ignore = "pallas-network2 1.5.0 reports no disconnect; waiting for txpipe/pallas#842"]
     async fn lost_connection_is_reported() {
         let mut harness = Harness::new();
         let _connection = harness.open_with::<DroppingPeer>(0, "peer.test:3001");
