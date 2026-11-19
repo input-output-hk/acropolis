@@ -194,6 +194,7 @@ mod test {
             message: Arc::new(RawBlockMessage {
                 header: vec![hdr as u8],
                 body: vec![body as u8],
+                endorsed_txs: vec![],
             }),
         }
     }
