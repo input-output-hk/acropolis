@@ -27,7 +27,7 @@ use pallas_network2::{
 use tokio::{select, sync::mpsc};
 use tracing::{debug, warn};
 
-use crate::network::PeerMessageSender;
+use crate::network::PeerEventReporter;
 
 /// Same interval as pallas' `examples/leios-testnet`. pallas-network2 sends a peer its next
 /// block range on housekeeping only.
@@ -42,12 +42,12 @@ pub struct PeerConnection {
 }
 
 impl PeerConnection {
-    pub fn new(address: String, magic: u32, sender: PeerMessageSender, delay: Duration) -> Self {
+    pub fn new(address: String, magic: u32, reporter: PeerEventReporter, delay: Duration) -> Self {
         Self::open_on(
             TcpInterface::new(),
             address,
             magic,
-            sender,
+            reporter,
             delay,
             HOUSEKEEPING_INTERVAL,
         )
@@ -58,7 +58,7 @@ impl PeerConnection {
         interface: I,
         address: String,
         magic: u32,
-        sender: PeerMessageSender,
+        reporter: PeerEventReporter,
         delay: Duration,
         housekeeping: Duration,
     ) -> Self
@@ -81,7 +81,7 @@ impl PeerConnection {
                 let id = peer.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(delay).await;
-                    run(manager, peer, receiver, sender, housekeeping).await;
+                    run(manager, peer, receiver, reporter, housekeeping).await;
                 });
                 (id, commands)
             });
@@ -217,20 +217,20 @@ async fn run<I: Interface<AnyMessage>>(
     mut manager: Manager<I, InitiatorBehavior, AnyMessage>,
     peer: PeerId,
     commands: mpsc::UnboundedReceiver<InitiatorCommand>,
-    sender: PeerMessageSender,
+    reporter: PeerEventReporter,
     housekeeping: Duration,
 ) {
     manager.execute(InitiatorCommand::IncludePeer(peer.clone()));
-    match drive(manager, commands, &sender, housekeeping).await {
+    match drive(manager, commands, &reporter, housekeeping).await {
         // Nobody is listening any more: there is no one to report the end to.
         ConnectionEnd::ManagerGone => {}
         ConnectionEnd::Released => {
-            let _ = sender.write(PeerEvent::Disconnected).await;
+            let _ = reporter.write(PeerEvent::Disconnected).await;
         }
         ConnectionEnd::Undecodable(reply) => {
             warn!(%peer, "{reply}; dropping the peer");
             // So that the network manager replaces the peer.
-            let _ = sender.write(PeerEvent::Disconnected).await;
+            let _ = reporter.write(PeerEvent::Disconnected).await;
         }
     }
 }
@@ -239,7 +239,7 @@ async fn run<I: Interface<AnyMessage>>(
 async fn drive<I: Interface<AnyMessage>>(
     mut manager: Manager<I, InitiatorBehavior, AnyMessage>,
     mut commands: mpsc::UnboundedReceiver<InitiatorCommand>,
-    sender: &PeerMessageSender,
+    reporter: &PeerEventReporter,
     housekeeping: Duration,
 ) -> ConnectionEnd {
     let mut housekeeping = tokio::time::interval(housekeeping);
@@ -258,7 +258,7 @@ async fn drive<I: Interface<AnyMessage>>(
                 let Some(event) = event else { continue };
                 match translate(event) {
                     Ok(Some(event)) => {
-                        if sender.write(event).await.is_err() {
+                        if reporter.write(event).await.is_err() {
                             return ConnectionEnd::ManagerGone;
                         }
                     }
@@ -652,13 +652,13 @@ mod tests {
         where
             R: Rules<Message = AnyMessage> + Default + Unpin + Send + 'static,
         {
-            let sender = PeerMessageSender::new(ConnectionId(id), self.sink.clone());
+            let reporter = PeerEventReporter::new(ConnectionId(id), self.sink.clone());
             let housekeeping = Duration::from_millis(20);
             PeerConnection::open_on(
                 Emulator::<AnyMessage, R>::default(),
                 address.to_string(),
                 2,
-                sender,
+                reporter,
                 Duration::ZERO,
                 housekeeping,
             )

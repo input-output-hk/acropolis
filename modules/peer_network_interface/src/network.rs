@@ -499,8 +499,8 @@ impl NetworkManager {
     pub fn handle_new_connection(&mut self, address: String, delay: Duration) -> PeerId {
         let id = PeerId(self.next_id);
         self.next_id += 1;
-        let sender = PeerMessageSender::new(id, self.events_sender.clone());
-        let conn = PeerConnection::new(address, self.network_magic, sender, delay);
+        let reporter = PeerEventReporter::new(id, self.events_sender.clone());
+        let conn = PeerConnection::new(address, self.network_magic, reporter, delay);
         let peer = PeerData::new(conn);
         let points = self.flow_handler.handle_new_connection(id, self.sync_point.as_ref());
         peer.find_intersect(points);
@@ -814,12 +814,14 @@ pub enum NetworkEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PeerId(pub u64);
 
-pub struct PeerMessageSender {
+/// Reports a peer connection's events to the network manager, tagged with the peer's id.
+/// In-process only: nothing goes to the remote peer.
+pub struct PeerEventReporter {
     id: PeerId,
     sink: mpsc::Sender<NetworkEvent>,
 }
 
-impl PeerMessageSender {
+impl PeerEventReporter {
     pub(crate) fn new(id: PeerId, sink: mpsc::Sender<NetworkEvent>) -> Self {
         Self { id, sink }
     }
@@ -937,12 +939,12 @@ mod tests {
     }
 
     fn add_test_peer(manager: &mut NetworkManager, peer: PeerId) {
-        let sender = PeerMessageSender::new(peer, manager.events_sender.clone());
+        let reporter = PeerEventReporter::new(peer, manager.events_sender.clone());
         // Delay prevents immediate network activity; tests drive state manually.
         let conn = PeerConnection::new(
             "test-peer:3001".to_string(),
             0,
-            sender,
+            reporter,
             Duration::from_secs(3600),
         );
         manager.peers.insert(peer, PeerData::new(conn));
@@ -1042,8 +1044,8 @@ mod tests {
     }
 
     fn add_test_peer_with_address(manager: &mut NetworkManager, peer: PeerId, address: &str) {
-        let sender = PeerMessageSender::new(peer, manager.events_sender.clone());
-        let conn = PeerConnection::new(address.to_string(), 0, sender, Duration::from_secs(3600));
+        let reporter = PeerEventReporter::new(peer, manager.events_sender.clone());
+        let conn = PeerConnection::new(address.to_string(), 0, reporter, Duration::from_secs(3600));
         manager.peers.insert(peer, PeerData::new(conn));
     }
 
