@@ -8,7 +8,6 @@ use config::Config;
 #[serde(rename_all = "camelCase")]
 pub enum SyncPoint {
     Origin,
-    Tip,
     Cache,
     Dynamic,
 }
@@ -38,6 +37,8 @@ pub struct InterfaceConfig {
     pub churn_interval_secs: u64,
     #[serde(default = "default_peer_sharing_timeout_secs")]
     pub peer_sharing_timeout_secs: u64,
+    // TODO: apply it once pallas-network2 can: its `TcpInterface` has no connect timeout.
+    #[allow(dead_code)]
     #[serde(default = "default_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
     #[serde(default = "default_ipv6_enabled")]
