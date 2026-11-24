@@ -20,12 +20,14 @@ use pallas_network2::protocol::Point;
 use tokio::{sync::mpsc, time};
 use tracing::{debug, info, warn};
 
-/// Blocks requested from all peers whose body has not arrived yet, from which on no peer is
-/// asked for its next header. Catching up, chainsync outruns blockfetch (pallas-network2 sends
-/// a peer one single-block range at a time) and every header waiting for its body stays in
-/// memory (pallas' blockfetch queues, the chain state); without a cap that grows with the
-/// distance to the tip. One cap for all peers together.
-const MAX_PENDING_FETCHES: usize = 512;
+/// Blocks requested from all peers whose body has not arrived yet, endorser blocks whose
+/// transactions have not arrived yet included, from which on no peer is asked for its next
+/// header. Catching up, chainsync outruns blockfetch (pallas-network2 sends a peer one
+/// single-block range at a time) and leios-fetch (one request at a time per peer), and every
+/// header waiting for its body or its endorsed transactions stays in memory (pallas' queues,
+/// the chain state); without a cap that grows with the distance to the tip. One cap for all
+/// peers together.
+const MAX_PENDING_FETCHES: usize = 128;
 
 /// Requested blocks still to arrive down to which a stopped chainsync runs again. That asks
 /// every peer for its next header at once, each of which may request a block: well below the
@@ -670,9 +672,10 @@ impl NetworkManager {
         self.continue_sync(peer);
     }
 
-    /// Blocks requested from all peers whose body has not arrived yet.
+    /// Blocks requested from all peers whose body has not arrived yet, and endorser blocks
+    /// whose transactions have not.
     fn pending_fetches(&self) -> usize {
-        self.peers.values().map(|peer| peer.reqs.len()).sum()
+        self.peers.values().map(|peer| peer.reqs.len() + peer.eb_reqs.len()).sum()
     }
 
     /// Ask the peer, which just sent a chainsync event, for its next header while chainsync
@@ -1451,6 +1454,51 @@ mod tests {
         assert_eq!(continued(), 0, "next header asked while paused");
 
         manager.handle_peer_update(peer, fetched(to_resume - 1));
+        assert_eq!(continued(), 1, "next header not asked at half the cap");
+    }
+
+    #[tokio::test]
+    async fn endorser_blocks_being_fetched_count_toward_the_fetch_cap() {
+        let mut manager = test_consensus_manager().await;
+        let peer = PeerId(4);
+        let (conn, mut commands) = PeerConnection::detached("peer.test:3001");
+        manager.peers.insert(peer, PeerData::new(conn));
+        let mut continued = || {
+            std::iter::from_fn(|| commands.try_recv().ok())
+                .filter(|cmd| matches!(cmd, InitiatorCommand::ContinueSync(_)))
+                .count()
+        };
+        let eb_at = |slot: u64| {
+            let mut bytes = [0; 32];
+            bytes[..8].copy_from_slice(&slot.to_le_bytes());
+            SpecificPoint {
+                slot,
+                hash: BlockHash::new(bytes),
+            }
+        };
+        let txs_fetched = |slot: u64| {
+            PeerEvent::EbFetched(EbFetched {
+                slot,
+                hash: eb_at(slot).hash,
+                reply: EbReply::Txs(vec![]),
+            })
+        };
+        manager.peers.get_mut(&peer).unwrap().eb_reqs =
+            (0..MAX_PENDING_FETCHES as u64).map(eb_at).collect();
+
+        manager.handle_peer_update(
+            peer,
+            PeerEvent::ChainSync(PeerChainSyncEvent::IntersectionFound(Point::Origin)),
+        );
+        assert_eq!(continued(), 0, "next header asked at the cap");
+
+        let to_resume = (MAX_PENDING_FETCHES - RESUME_PENDING_FETCHES) as u64;
+        for slot in 0..to_resume - 1 {
+            manager.handle_peer_update(peer, txs_fetched(slot));
+        }
+        assert_eq!(continued(), 0, "next header asked while paused");
+
+        manager.handle_peer_update(peer, txs_fetched(to_resume - 1));
         assert_eq!(continued(), 1, "next header not asked at half the cap");
     }
 
