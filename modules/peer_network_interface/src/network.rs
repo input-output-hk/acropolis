@@ -16,6 +16,18 @@ use pallas_network2::protocol::Point;
 use tokio::{sync::mpsc, time};
 use tracing::{debug, info, warn};
 
+/// Blocks requested from all peers whose body has not arrived yet, from which on no peer is
+/// asked for its next header. Catching up, chainsync outruns blockfetch (pallas-network2 sends
+/// a peer one single-block range at a time) and every header waiting for its body stays in
+/// memory (pallas' blockfetch queues, the chain state); without a cap that grows with the
+/// distance to the tip. One cap for all peers together.
+const MAX_PENDING_FETCHES: usize = 512;
+
+/// Requested blocks still to arrive down to which a stopped chainsync runs again. That asks
+/// every peer for its next header at once, each of which may request a block: well below the
+/// cap, so that chainsync does not pause again at the next headers.
+const RESUME_PENDING_FETCHES: usize = MAX_PENDING_FETCHES / 2;
+
 struct PeerData {
     conn: PeerConnection,
     reqs: Vec<(BlockHash, u64)>,
@@ -40,6 +52,15 @@ impl PeerData {
         }
         if let Err(error) = self.conn.find_intersect(points) {
             warn!("could not sync {}: {error:#}", self.conn.address);
+        }
+    }
+
+    fn continue_sync(&self) {
+        if let Err(error) = self.conn.continue_sync() {
+            warn!(
+                "could not continue sync with {}: {error:#}",
+                self.conn.address
+            );
         }
     }
 
@@ -75,6 +96,10 @@ pub struct NetworkManager {
     /// no current announcer was available. Retried opportunistically when
     /// peer events arrive.
     pending_wanted: BTreeMap<(u64, BlockHash), ()>,
+    /// Whether chainsync runs: peers are asked for their next header. Stops once requested
+    /// blocks still to arrive reach [`MAX_PENDING_FETCHES`], runs again once they are down to
+    /// [`RESUME_PENDING_FETCHES`]; in between, only this says which of the two applies.
+    chainsync_running: bool,
     sync_point: Option<Point>,
     flow_handler: BlockFlowHandler,
     pub peer_manager: Option<PeerManager>,
@@ -85,10 +110,11 @@ pub struct NetworkManager {
     /// Addresses from the static `node_addresses` config. Configured peers are always
     /// retried on disconnect and are never blacklisted.
     configured_addrs: HashSet<String>,
-    connect_timeout: Duration,
     ipv6_enabled: bool,
     allow_non_public_peer_addrs: bool,
     discovery_interval: Duration,
+    /// Bounds a new peer's TCP connect and its handshake (`connect-timeout-secs`).
+    connect_timeout: Duration,
 }
 
 impl NetworkManager {
@@ -135,16 +161,17 @@ impl NetworkManager {
             block_sink,
             published_blocks: 0,
             pending_wanted: BTreeMap::new(),
+            chainsync_running: true,
             sync_point: None,
             flow_handler,
             peer_manager,
             min_hot_peers,
             cold_origin: HashSet::new(),
             configured_addrs,
-            connect_timeout: Duration::from_secs(connect_timeout_secs),
             ipv6_enabled,
             allow_non_public_peer_addrs,
             discovery_interval: Duration::from_secs(discovery_interval_secs),
+            connect_timeout: Duration::from_secs(connect_timeout_secs),
         };
 
         if peer_sharing_enabled {
@@ -248,6 +275,7 @@ impl NetworkManager {
                 for peer in self.peers.values_mut() {
                     peer.reqs.clear();
                 }
+                self.update_chainsync();
 
                 if let Point::Specific(slot, _) = point {
                     let (epoch, _) = self.block_sink.genesis_values.slot_to_epoch(slot);
@@ -283,6 +311,8 @@ impl NetworkManager {
                 for peer in peers {
                     self.handle_disconnect(peer);
                 }
+                // Requests no other peer announced went away with the dropped peers.
+                self.update_chainsync();
             }
         }
 
@@ -423,6 +453,8 @@ impl NetworkManager {
         self.flow_handler.handle_disconnect(victim_id, self.peers.keys().next().copied());
 
         self.rerequest_inflight(victim.reqs);
+        // Requests no other peer announced went away with the victim.
+        self.update_chainsync();
 
         if let Some(address) = replacement {
             self.promote_reserved_cold_peer(address);
@@ -455,14 +487,11 @@ impl NetworkManager {
     pub fn handle_new_connection(&mut self, address: String, delay: Duration) -> PeerId {
         let id = PeerId(self.next_id);
         self.next_id += 1;
-        let sender = PeerMessageSender {
-            sink: self.events_sender.clone(),
-            id,
-        };
+        let reporter = PeerEventReporter::new(id, self.events_sender.clone());
         let conn = PeerConnection::new(
             address,
             self.network_magic,
-            sender,
+            reporter,
             delay,
             self.connect_timeout,
         );
@@ -494,6 +523,9 @@ impl NetworkManager {
         }
 
         match event {
+            PeerEvent::ChainSync(PeerChainSyncEvent::IntersectionFound) => {
+                self.continue_sync(peer);
+            }
             PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(header, tip)) => {
                 self.flow_handler.handle_tip(peer, tip);
                 let slot = header.slot;
@@ -504,19 +536,25 @@ impl NetworkManager {
                 if let Some(peers) = self.flow_handler.handle_roll_forward(peer, header) {
                     self.request_block(slot, hash, peers);
                 }
+                // Only once this header's block is requested: it then counts toward
+                // `MAX_PENDING_FETCHES` when deciding whether to ask for the next header.
+                self.continue_sync(peer);
+            }
+            PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip)) => {
+                info!(
+                    "peer {:?} has no intersection with our chain, tip {:?}",
+                    peer, tip
+                );
+                self.flow_handler.handle_tip(peer, tip);
+            }
+            PeerEvent::ChainSync(PeerChainSyncEvent::EpochBoundary) => {
+                self.continue_sync(peer);
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::RollBackward(point, tip)) => {
                 self.flow_handler.handle_tip(peer, tip);
                 info!("peer {:?} rolled back to {:?}", peer, point);
                 self.flow_handler.handle_roll_backward(peer, point);
-            }
-            PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip)) => {
-                self.flow_handler.handle_tip(peer, tip.clone());
-                // We called find_intersect on a peer, and it didn't recognize any of the points we passed.
-                // That peer must either be behind us or on a different fork; either way, that chain should sync from its own tip
-                if let Some(peer) = self.peers.get(&peer) {
-                    peer.find_intersect(vec![tip]);
-                }
+                self.continue_sync(peer);
             }
             PeerEvent::BlockFetched(fetched) => {
                 for peer in self.peers.values_mut() {
@@ -532,6 +570,47 @@ impl NetworkManager {
         // Retry wants that were temporarily unresolved (e.g. out-of-order
         // BlockWanted vs announcement, or announcer churn during disconnects).
         self.retry_pending_wanted();
+        // Bodies arrived or requests went away: chainsync may resume.
+        self.update_chainsync();
+    }
+
+    /// Blocks requested from all peers whose body has not arrived yet.
+    fn pending_fetches(&self) -> usize {
+        self.peers.values().map(|peer| peer.reqs.len()).sum()
+    }
+
+    /// Ask the peer, which just sent a chainsync event, for its next header while chainsync
+    /// runs.
+    fn continue_sync(&mut self, id: PeerId) {
+        if self.update_chainsync() {
+            // Running again: every peer was just asked, this one included.
+            return;
+        }
+        if self.chainsync_running
+            && let Some(peer) = self.peers.get(&id)
+        {
+            peer.continue_sync();
+        }
+    }
+
+    /// Stop chainsync once requested blocks reach [`MAX_PENDING_FETCHES`]; run it again once
+    /// they are down to [`RESUME_PENDING_FETCHES`], asking every peer for its next header, and
+    /// say so. A peer still waiting for a header ignores that: pallas-network2 asks only a peer
+    /// whose chainsync is idle. Since txpipe/pallas#818 (in Sundae's `leios-musashi`), a peer
+    /// whose `RequestNext` is queued but not sent yet still counts as idle: pallas defers a
+    /// second `RequestNext` until the answer, so that peer sends one header more.
+    fn update_chainsync(&mut self) -> bool {
+        let pending = self.pending_fetches();
+        if self.chainsync_running && pending >= MAX_PENDING_FETCHES {
+            self.chainsync_running = false;
+        } else if !self.chainsync_running && pending <= RESUME_PENDING_FETCHES {
+            self.chainsync_running = true;
+            for peer in self.peers.values() {
+                peer.continue_sync();
+            }
+            return true;
+        }
+        false
     }
 
     /// Called when a hot peer disconnects. Removes from `peers`, re-routes in-flight fetches,
@@ -682,12 +761,18 @@ pub enum NetworkEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PeerId(pub u64);
 
-pub struct PeerMessageSender {
+/// Reports a peer connection's events to the network manager, tagged with the peer's id.
+/// In-process only: nothing goes to the remote peer.
+pub struct PeerEventReporter {
     id: PeerId,
     sink: mpsc::Sender<NetworkEvent>,
 }
 
-impl PeerMessageSender {
+impl PeerEventReporter {
+    pub(crate) fn new(id: PeerId, sink: mpsc::Sender<NetworkEvent>) -> Self {
+        Self { id, sink }
+    }
+
     pub async fn write(&self, event: PeerEvent) -> Result<()> {
         self.sink
             .send(NetworkEvent::PeerUpdate {
@@ -704,7 +789,7 @@ mod tests {
     use super::*;
     use crate::block_flow::BlockFlowHandler;
     use crate::configuration::{InterfaceConfig, SyncPoint};
-    use crate::connection::{Header, PeerChainSyncEvent, PeerEvent};
+    use crate::connection::{BlockFetched, Header, PeerChainSyncEvent, PeerEvent};
     use acropolis_common::configuration::BlockFlowMode;
     use acropolis_common::messages::Message;
     use acropolis_common::{BlockHash, Era};
@@ -712,6 +797,7 @@ mod tests {
     use caryatid_sdk::Context;
     use caryatid_sdk::mock_bus::MockBus;
     use config::Config;
+    use pallas_network2::behavior::initiator::InitiatorCommand;
     use std::path::PathBuf;
     use std::sync::Arc;
     use tokio::sync::watch;
@@ -801,17 +887,14 @@ mod tests {
     }
 
     fn add_test_peer(manager: &mut NetworkManager, peer: PeerId) {
-        let sender = PeerMessageSender {
-            sink: manager.events_sender.clone(),
-            id: peer,
-        };
+        let reporter = PeerEventReporter::new(peer, manager.events_sender.clone());
         // Delay prevents immediate network activity; tests drive state manually.
         let conn = PeerConnection::new(
             "test-peer:3001".to_string(),
             0,
-            sender,
+            reporter,
             Duration::from_secs(3600),
-            Duration::from_secs(15),
+            manager.connect_timeout,
         );
         manager.peers.insert(peer, PeerData::new(conn));
     }
@@ -910,16 +993,13 @@ mod tests {
     }
 
     fn add_test_peer_with_address(manager: &mut NetworkManager, peer: PeerId, address: &str) {
-        let sender = PeerMessageSender {
-            sink: manager.events_sender.clone(),
-            id: peer,
-        };
+        let reporter = PeerEventReporter::new(peer, manager.events_sender.clone());
         let conn = PeerConnection::new(
             address.to_string(),
             0,
-            sender,
+            reporter,
             Duration::from_secs(3600),
-            Duration::from_secs(15),
+            manager.connect_timeout,
         );
         manager.peers.insert(peer, PeerData::new(conn));
     }
@@ -1127,5 +1207,53 @@ mod tests {
             !manager.pending_wanted.contains_key(&(slot, hash)),
             "stale entry for unknown block should be evicted"
         );
+    }
+
+    #[tokio::test]
+    async fn chainsync_pauses_at_the_fetch_cap_until_half_of_it() {
+        let mut manager = test_consensus_manager().await;
+        let peer = PeerId(4);
+        let (conn, mut commands) = PeerConnection::detached("peer.test:3001");
+        manager.peers.insert(peer, PeerData::new(conn));
+        let mut continued = || {
+            std::iter::from_fn(|| commands.try_recv().ok())
+                .filter(|cmd| matches!(cmd, InitiatorCommand::ContinueSync(_)))
+                .count()
+        };
+        // One hash per slot: a body acknowledges every request for its hash.
+        let hash_at = |slot: u64| {
+            let mut bytes = [0; 32];
+            bytes[..8].copy_from_slice(&slot.to_le_bytes());
+            BlockHash::new(bytes)
+        };
+        let fetched = |slot: u64| {
+            PeerEvent::BlockFetched(BlockFetched {
+                slot,
+                hash: hash_at(slot),
+                body: vec![],
+            })
+        };
+        manager.peers.get_mut(&peer).unwrap().reqs =
+            (0..MAX_PENDING_FETCHES as u64).map(|slot| (hash_at(slot), slot)).collect();
+
+        manager.handle_peer_update(
+            peer,
+            PeerEvent::ChainSync(PeerChainSyncEvent::IntersectionFound),
+        );
+        assert_eq!(continued(), 0, "next header asked at the cap");
+
+        // Below the cap, above half of it: still paused, also for a peer reporting a header.
+        let to_resume = (MAX_PENDING_FETCHES - RESUME_PENDING_FETCHES) as u64;
+        for slot in 0..to_resume - 1 {
+            manager.handle_peer_update(peer, fetched(slot));
+        }
+        manager.handle_peer_update(
+            peer,
+            PeerEvent::ChainSync(PeerChainSyncEvent::EpochBoundary),
+        );
+        assert_eq!(continued(), 0, "next header asked while paused");
+
+        manager.handle_peer_update(peer, fetched(to_resume - 1));
+        assert_eq!(continued(), 1, "next header not asked at half the cap");
     }
 }
