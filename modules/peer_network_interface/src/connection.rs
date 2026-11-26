@@ -10,10 +10,7 @@ use pallas::{
         miniprotocols::{blockfetch, chainsync},
     },
 };
-use tokio::{
-    select,
-    sync::{mpsc, oneshot},
-};
+use tokio::{select, sync::mpsc};
 use tracing::debug;
 
 use crate::network::PeerMessageSender;
@@ -49,12 +46,6 @@ impl PeerConnection {
             chainsync: chainsync_tx,
             blockfetch: blockfetch_tx,
         }
-    }
-
-    pub async fn find_tip(&self) -> Result<Point> {
-        let (tx, rx) = oneshot::channel();
-        self.chainsync.send(ChainsyncCommand::FindTip(tx))?;
-        Ok(rx.await?)
     }
 
     pub fn find_intersect(&self, points: Vec<Point>) -> Result<()> {
@@ -168,13 +159,6 @@ impl PeerConnectionWorker {
                                 self.sender.write(PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip.0))).await?;
                             }
                         }
-                        ChainsyncCommand::FindTip(done) => {
-                            let points = reached.as_slice().to_vec();
-                            let (_, tip) = client.find_intersect(points).await?;
-                            if done.send(tip.0).is_err() {
-                                bail!("parent process has disconnected");
-                            }
-                        }
                     }
                 }
             }
@@ -240,7 +224,6 @@ impl PeerConnectionWorker {
 
 enum ChainsyncCommand {
     FindIntersect(Vec<Point>),
-    FindTip(oneshot::Sender<Point>),
 }
 
 struct ParsedChainsyncMessage {
