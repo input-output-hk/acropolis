@@ -58,9 +58,16 @@ impl BlockUnpacker {
                                         );
                                     }
 
-                                    // Encode the Tx into hex, and take ownership
-                                    let txs: Vec<_> =
-                                        block.txs().into_iter().map(|tx| tx.encode()).collect();
+                                    // Encode the Tx into hex, and take ownership. Leios: the
+                                    // transactions of the endorser block it certifies come
+                                    // first, as the ledger applies them.
+                                    let body_txs = block.txs().into_iter().map(|tx| tx.encode());
+                                    let txs: Vec<_> = block_msg
+                                        .endorsed_txs
+                                        .iter()
+                                        .cloned()
+                                        .chain(body_txs)
+                                        .collect();
 
                                     let tx_message = RawTxsMessage { txs };
                                     let message_enum = Message::Cardano((

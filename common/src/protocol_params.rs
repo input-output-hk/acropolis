@@ -560,7 +560,7 @@ impl Nonces {
         // smaller (3k/f vs 4k/f slots) stability window here for
         // backwards-compatibility.
         let window = match era {
-            Era::Conway => params.randomness_stabilization_window,
+            Era::Conway | Era::Dijkstra => params.randomness_stabilization_window,
             _ => params.stability_window,
         };
 

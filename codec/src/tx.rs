@@ -77,7 +77,7 @@ pub fn map_transaction_consumes_produces(
         match output.address() {
             Ok(pallas_address) => match map_address(&pallas_address) {
                 Ok(address) => {
-                    let reference_script = map_reference_script(&output.script_ref());
+                    let reference_script = map_reference_script(&output.multi_era_script_ref());
                     let script_ref = reference_script.as_ref().map(|s| s.get_script_ref());
 
                     if let (Some(r_script), Some(s_ref)) =
@@ -155,11 +155,13 @@ pub fn map_metadata(metadata: &MultiEraMeta) -> Option<Metadata> {
 pub fn map_scripts_witnesses(tx: &MultiEraTx) -> Vec<(ScriptHash, ReferenceScript)> {
     let mut scripts_provided = Vec::new();
 
-    for script in tx.native_scripts() {
-        scripts_provided.push((
-            ScriptHash::from(*script.original_hash()),
-            ReferenceScript::Native(map_native_script(script)),
-        ));
+    for script in tx.multi_era_native_scripts() {
+        if let Some(native) = script.as_alonzo_compatible() {
+            scripts_provided.push((
+                ScriptHash::from(*script.hash()),
+                ReferenceScript::Native(map_native_script(native)),
+            ));
+        }
     }
 
     for script in tx.plutus_v1_scripts() {

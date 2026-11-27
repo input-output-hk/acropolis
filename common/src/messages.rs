@@ -48,6 +48,11 @@ pub struct RawBlockMessage {
 
     /// Body raw data
     pub body: Vec<u8>,
+
+    /// Leios: the transactions of the endorser block this block certifies, in their block
+    /// form, applied before the body's
+    #[serde(default)]
+    pub endorsed_txs: Vec<Vec<u8>>,
 }
 
 /// Rollback message
