@@ -8,7 +8,6 @@ use config::Config;
 #[serde(rename_all = "camelCase")]
 pub enum SyncPoint {
     Origin,
-    Tip,
     Cache,
     Dynamic,
 }

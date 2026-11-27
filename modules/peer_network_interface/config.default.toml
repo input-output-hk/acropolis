@@ -14,7 +14,6 @@ node-addresses = [
 
 # The initial point to start syncing from. Options:
 # - "origin": sync from the very start of the chain
-# - "tip": sync from the very end of the chain
 # - "cache": replay messages from a local filesystem cache, then sync from the point right after that cache.
 # - "dynamic": awaits a sync command to begin fetching blocks, can change sync point at runtime.
 sync-point = "dynamic"
@@ -38,7 +37,7 @@ peer-sharing-enabled = true
 churn-interval-secs = 600
 # Timeout in seconds for a full peer-sharing exchange
 peer-sharing-timeout-secs = 10
-# Timeout in seconds for TCP connect to a peer
+# Timeout in seconds for TCP connect to a peer, and again for the handshake that follows
 connect-timeout-secs = 15
 # Accept IPv6 peer addresses from peer-sharing (set true on dual-stack hosts)
 ipv6-enabled = false
