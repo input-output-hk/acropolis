@@ -1,7 +1,7 @@
 use crate::{utils::to_hash, witness::map_native_script};
 use acropolis_common::*;
 use pallas_primitives::conway;
-use pallas_traverse::{MultiEraPolicyAssets, MultiEraValue};
+use pallas_traverse::{MultiEraPolicyAssets, MultiEraScriptRef, MultiEraValue};
 
 pub fn map_value(pallas_value: &MultiEraValue) -> Value {
     let lovelace = pallas_value.coin();
@@ -71,8 +71,8 @@ pub fn map_datum(datum: &Option<conway::DatumOption>) -> Option<Datum> {
     }
 }
 
-pub fn map_reference_script(script: &Option<conway::ScriptRef>) -> Option<ReferenceScript> {
-    match script {
+pub fn map_reference_script(script: &Option<MultiEraScriptRef>) -> Option<ReferenceScript> {
+    match script.as_ref().and_then(|s| s.as_conway()) {
         Some(conway::ScriptRef::NativeScript(script)) => {
             Some(ReferenceScript::Native(map_native_script(script)))
         }
