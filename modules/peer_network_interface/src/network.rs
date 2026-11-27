@@ -6,6 +6,7 @@ use std::{
 use crate::{
     BlockSink,
     block_flow::BlockFlowHandler,
+    chain_state::SpecificPoint,
     connection::{HOUSEKEEPING_INTERVAL, PeerChainSyncEvent, PeerConnection, PeerEvent, header_of},
     peer_manager::{PeerManager, PeerManagerConfig},
     peer_sharing::request_peers,
@@ -33,33 +34,191 @@ const RESUME_PENDING_FETCHES: usize = MAX_PENDING_FETCHES / 2;
 /// on its own housekeeping, whose ticks are not aligned with these.
 const FETCH_STALL_INTERVAL: Duration = HOUSEKEEPING_INTERVAL.saturating_mul(2);
 
+/// What is fetched of peers, each kind with its own requests and stall check: blocks over
+/// blockfetch.
+trait Fetch {
+    /// For logs.
+    const WHAT: &'static str;
+
+    fn requests(peer: &PeerData) -> &Pending;
+    fn requests_mut(peer: &mut PeerData) -> &mut Pending;
+    fn send(conn: &PeerConnection, point: &SpecificPoint) -> Result<()>;
+
+    /// The peers to ask, in order, for a request `stalled` left unanswered: `None` if it is no
+    /// longer wanted, none if it is given up on.
+    fn rerequest_to(
+        flow: &BlockFlowHandler,
+        point: &SpecificPoint,
+        stalled: PeerId,
+    ) -> Option<Vec<PeerId>>;
+
+    /// The requests taken from a stalled peer, before they go to other peers.
+    fn on_stalled(_manager: &mut NetworkManager, _id: PeerId, _reqs: &mut Vec<SpecificPoint>) {}
+
+    /// What a reply brings.
+    type Reply;
+    /// What a reply that serves the request brings.
+    type Content;
+
+    /// The content of a reply from `peer`; `None` if it only leads to another request to it.
+    fn content(
+        manager: &mut NetworkManager,
+        peer: PeerId,
+        point: &SpecificPoint,
+        reply: Self::Reply,
+    ) -> Option<Self::Content>;
+
+    fn deliver(
+        manager: &mut NetworkManager,
+        peer: PeerId,
+        point: SpecificPoint,
+        content: Self::Content,
+    );
+}
+
+struct RBs;
+
+impl Fetch for RBs {
+    const WHAT: &'static str = "block body";
+
+    fn requests(peer: &PeerData) -> &Pending {
+        &peer.reqs.rbs
+    }
+
+    fn requests_mut(peer: &mut PeerData) -> &mut Pending {
+        &mut peer.reqs.rbs
+    }
+
+    fn send(conn: &PeerConnection, block: &SpecificPoint) -> Result<()> {
+        conn.request_block(block.hash, block.slot)
+    }
+
+    /// Peers that announced the block, `stalled` last: a block asked for is never given up on
+    /// while announced (consensus wants it once, Direct mode publishes in order), so a lone
+    /// announcer is asked again. Its body is still used if it arrives late.
+    fn rerequest_to(
+        flow: &BlockFlowHandler,
+        block: &SpecificPoint,
+        stalled: PeerId,
+    ) -> Option<Vec<PeerId>> {
+        let mut announcers = flow.block_announcers(block.slot, block.hash)?;
+        announcers.sort_by_key(|announcer| *announcer == stalled);
+        Some(announcers)
+    }
+
+    fn on_stalled(manager: &mut NetworkManager, id: PeerId, reqs: &mut Vec<SpecificPoint>) {
+        let Some(intersection) =
+            manager.peers.get_mut(&id).and_then(|peer| peer.intersection.take())
+        else {
+            return;
+        };
+        // Only this peer was asked: chainsync goes on without that header.
+        // TODO: Leios. A next block that certifies an endorser block then cannot say which:
+        // the node must stop rather than apply it without the endorsed transactions.
+        reqs.retain(|req| *req != intersection);
+        manager.continue_sync(id);
+    }
+
+    type Reply = Vec<u8>;
+    type Content = Vec<u8>;
+
+    fn content(
+        _manager: &mut NetworkManager,
+        _peer: PeerId,
+        _block: &SpecificPoint,
+        body: Self::Reply,
+    ) -> Option<Self::Content> {
+        Some(body)
+    }
+
+    fn deliver(manager: &mut NetworkManager, peer: PeerId, block: SpecificPoint, body: Vec<u8>) {
+        let at_intersection = manager.peers.get_mut(&peer).is_some_and(|data| {
+            data.intersection.take_if(|intersection| *intersection == block).is_some()
+        });
+        if at_intersection {
+            manager.handle_intersection_block(peer, &body);
+        } else {
+            manager.flow_handler.handle_block_fetched(block.slot, block.hash, body);
+        }
+    }
+}
+
+/// Requests asked of a peer and not served yet, each kind with its own stall check.
+struct Requests {
+    rbs: Pending,
+}
+
+impl Requests {
+    fn new() -> Self {
+        Self {
+            rbs: Pending::new(),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.rbs.reqs.clear();
+    }
+
+    fn len(&self) -> usize {
+        self.rbs.reqs.len()
+    }
+}
+
+/// Requests of one kind, with the state of their stall check.
+struct Pending {
+    reqs: Vec<SpecificPoint>,
+    /// Whether a reply arrived since the last stall check.
+    replied: bool,
+    /// Whether requests were pending at the last stall check.
+    awaited: bool,
+}
+
+impl Pending {
+    fn new() -> Self {
+        Self {
+            reqs: vec![],
+            replied: false,
+            awaited: false,
+        }
+    }
+
+    fn ack(&mut self, point: &SpecificPoint) {
+        self.reqs.retain(|req| req != point);
+    }
+
+    /// Whether the peer sent no reply over a whole interval while asked.
+    fn stalled(&self) -> bool {
+        self.awaited && !self.replied && !self.reqs.is_empty()
+    }
+
+    /// Start the next interval.
+    fn rearm(&mut self) {
+        self.awaited = !self.reqs.is_empty();
+        self.replied = false;
+    }
+}
+
 struct PeerData {
     conn: PeerConnection,
-    reqs: Vec<(BlockHash, u64)>,
+    reqs: Requests,
     /// True once any protocol event has been received from this peer (ChainSync, BlockFetch,
     /// etc.). Used to distinguish a cold-promoted peer that never managed to connect from
     /// one that ran successfully and then disconnected.
     established: bool,
-    /// Whether a block body arrived from this peer since the last stall check.
-    body_since_check: bool,
-    /// Whether blocks were requested from this peer at the last stall check.
-    awaited_at_check: bool,
     /// Leios: the block at the intersection, until it arrives. A block may certify the
     /// endorser block its parent announced, and only the parent's header says which. The
     /// intersection is a point we gave, known by slot and hash only, and the block there is
     /// the parent of the first block chainsync brings: its header has to come first, so this
     /// peer is not asked for its next header meanwhile.
-    intersection: Option<(BlockHash, u64)>,
+    intersection: Option<SpecificPoint>,
 }
 
 impl PeerData {
     fn new(conn: PeerConnection) -> Self {
         Self {
             conn,
-            reqs: vec![],
+            reqs: Requests::new(),
             established: false,
-            body_since_check: false,
-            awaited_at_check: false,
             intersection: None,
         }
     }
@@ -86,23 +245,19 @@ impl PeerData {
         }
     }
 
-    fn request_block(&mut self, hash: BlockHash, slot: u64) -> bool {
-        if self.reqs.contains(&(hash, slot)) {
+    fn request<F: Fetch>(&mut self, point: &SpecificPoint) -> bool {
+        if F::requests(self).reqs.contains(point) {
             return true;
         }
-        if let Err(error) = self.conn.request_block(hash, slot) {
+        if let Err(error) = F::send(&self.conn, point) {
             warn!(
-                "could not request block from {}: {error:#}",
-                self.conn.address
+                "could not request {:?} from {}: {error:#}",
+                point, self.conn.address
             );
             return false;
         }
-        self.reqs.push((hash, slot));
+        F::requests_mut(self).reqs.push(point.clone());
         true
-    }
-
-    fn ack_block(&mut self, hash: BlockHash) {
-        self.reqs.retain(|(h, _)| *h != hash);
     }
 }
 
@@ -317,7 +472,7 @@ impl NetworkManager {
             }
             NetworkEvent::BlockWanted { hash, slot } => {
                 if let Some(announcers) = self.flow_handler.block_announcers(slot, hash) {
-                    self.request_block(slot, hash, announcers);
+                    self.request::<RBs>(&SpecificPoint { slot, hash }, announcers);
                     self.pending_wanted.remove(&(slot, hash));
                 } else {
                     if self.flow_handler.knows_block(slot, hash) {
@@ -479,7 +634,7 @@ impl NetworkManager {
         // Disconnect the peer's connection task
         self.flow_handler.handle_disconnect(victim_id, self.peers.keys().next().copied());
 
-        self.rerequest_inflight(victim.reqs);
+        self.rerequest_inflight(victim.reqs.rbs.reqs);
         // Requests no other peer announced went away with the victim.
         self.update_chainsync();
 
@@ -561,7 +716,7 @@ impl NetworkManager {
                 // TODO: Temporary. In Direct mode returns announcers then fetches blocks, in
                 // Consensus mode: returns None, so no block fetch
                 if let Some(peers) = self.flow_handler.handle_roll_forward(peer, header) {
-                    self.request_block(slot, hash, peers);
+                    self.request::<RBs>(&SpecificPoint { slot, hash }, peers);
                 }
                 // Only once this header's block is requested: it then counts toward
                 // `MAX_PENDING_FETCHES` when deciding whether to ask for the next header.
@@ -583,28 +738,14 @@ impl NetworkManager {
                 self.flow_handler.handle_roll_backward(peer, point);
                 self.continue_sync(peer);
             }
-            PeerEvent::BlockFetched(fetched) => {
-                let mut at_intersection = false;
-                if let Some(data) = self.peers.get_mut(&peer) {
-                    data.body_since_check = true;
-                    at_intersection = data
-                        .intersection
-                        .take_if(|intersection| *intersection == (fetched.hash, fetched.slot))
-                        .is_some();
-                }
-                for peer in self.peers.values_mut() {
-                    peer.ack_block(fetched.hash);
-                }
-                if at_intersection {
-                    self.handle_intersection_block(peer, &fetched.body);
-                } else {
-                    self.flow_handler.handle_block_fetched(
-                        fetched.slot,
-                        fetched.hash,
-                        fetched.body,
-                    );
-                }
-            }
+            PeerEvent::BlockFetched(fetched) => self.handle_reply::<RBs>(
+                peer,
+                SpecificPoint {
+                    slot: fetched.slot,
+                    hash: fetched.hash,
+                },
+                fetched.body,
+            ),
             PeerEvent::Disconnected => {
                 self.handle_disconnect(peer);
             }
@@ -636,8 +777,9 @@ impl NetworkManager {
         let Some(peer) = self.peers.get_mut(&id) else {
             return;
         };
-        if peer.request_block(hash, slot) {
-            peer.intersection = Some((hash, slot));
+        let block = SpecificPoint { slot, hash };
+        if peer.request::<RBs>(&block) {
+            peer.intersection = Some(block);
         } else {
             self.handle_disconnect(id);
         }
@@ -699,62 +841,77 @@ impl NetworkManager {
     }
 
     /// Requests a peer leaves unanswered (e.g. a block it no longer has) would count forever
-    /// and, once at the cap, hold every peer's chainsync. A peer that sent no body over a whole
-    /// interval while blocks were requested from it is asked for none of them any more: each
-    /// goes to another peer that announced it (its body is still used if the stalled peer sends
-    /// it late).
+    /// and, once at the cap, hold every peer's chainsync.
     fn on_fetch_stall_tick(&mut self) {
+        self.on_fetch_stall::<RBs>();
+    }
+
+    /// A peer that sent no reply over a whole interval while asked is asked for none of those
+    /// requests any more: each goes to the peers [`Fetch::rerequest_to`] says, the stalled
+    /// one's reply still used if it comes late.
+    fn on_fetch_stall<F: Fetch>(&mut self) {
         let stalled: Vec<PeerId> = self
             .peers
             .iter()
-            .filter(|(_, peer)| {
-                peer.awaited_at_check && !peer.body_since_check && !peer.reqs.is_empty()
-            })
+            .filter(|(_, peer)| F::requests(peer).stalled())
             .map(|(id, _)| *id)
             .collect();
         for id in stalled {
             let Some(peer) = self.peers.get_mut(&id) else {
                 continue;
             };
-            let mut reqs = std::mem::take(&mut peer.reqs);
-            let intersection = peer.intersection.take();
+            let mut reqs = std::mem::take(&mut F::requests_mut(peer).reqs);
             warn!(
                 address = %peer.conn.address,
                 pending = reqs.len(),
-                ?intersection,
-                "no block body over a stall interval; asking other peers"
+                intersection = ?peer.intersection,
+                "no {} over a stall interval; asking other peers",
+                F::WHAT
             );
-            if let Some(intersection) = intersection {
-                // Only this peer was asked: chainsync goes on without that header.
-                // TODO: Leios. A next block that certifies an endorser block then cannot say
-                // which: the node must stop rather than apply it without the endorsed
-                // transactions.
-                reqs.retain(|req| *req != intersection);
-                self.continue_sync(id);
-            }
-            self.rerequest_elsewhere(id, reqs);
+            F::on_stalled(self, id, &mut reqs);
+            self.rerequest_elsewhere::<F>(id, reqs);
         }
         for peer in self.peers.values_mut() {
-            peer.awaited_at_check = !peer.reqs.is_empty();
-            peer.body_since_check = false;
+            F::requests_mut(peer).rearm();
         }
         self.update_chainsync();
     }
 
-    /// Request blocks from peers that announced them, `stalled` last: a block asked for is
-    /// never given up on while announced (consensus wants it once, Direct mode publishes in
-    /// order), so a lone announcer is asked again.
-    fn rerequest_elsewhere(&mut self, stalled: PeerId, reqs: Vec<(BlockHash, u64)>) {
-        for (hash, slot) in reqs {
-            let Some(mut announcers) = self.flow_handler.block_announcers(slot, hash) else {
+    fn rerequest_elsewhere<F: Fetch>(&mut self, stalled: PeerId, reqs: Vec<SpecificPoint>) {
+        for req in reqs {
+            let Some(others) = F::rerequest_to(&self.flow_handler, &req, stalled) else {
                 continue; // no longer wanted
             };
-            if announcers.is_empty() {
-                warn!(%hash, slot, "no peer announces the block any more; no longer waiting for it");
+            if others.is_empty() {
+                warn!(
+                    ?req,
+                    "no peer announces it any more; no longer waiting for it"
+                );
                 continue;
             }
-            announcers.sort_by_key(|announcer| *announcer == stalled);
-            self.request_block(slot, hash, announcers);
+            self.request::<F>(&req, others);
+        }
+    }
+
+    fn handle_reply<F: Fetch>(&mut self, peer: PeerId, point: SpecificPoint, reply: F::Reply) {
+        self.mark_replied::<F>(peer);
+        if let Some(content) = F::content(self, peer, &point, reply) {
+            self.ack_on_every_peer::<F>(&point);
+            F::deliver(self, peer, point, content);
+        }
+    }
+
+    fn mark_replied<F: Fetch>(&mut self, peer: PeerId) {
+        if let Some(data) = self.peers.get_mut(&peer) {
+            F::requests_mut(data).replied = true;
+        }
+    }
+
+    /// A reply serves the request wherever it was asked: one a stalled peer answers late was
+    /// asked again of another peer meanwhile.
+    fn ack_on_every_peer<F: Fetch>(&mut self, point: &SpecificPoint) {
+        for peer in self.peers.values_mut() {
+            F::requests_mut(peer).ack(point);
         }
     }
 
@@ -787,7 +944,7 @@ impl NetworkManager {
         // The next peer is temporary needed for Direct mode flow handler only
         self.flow_handler.handle_disconnect(id, self.peers.keys().next().copied());
 
-        self.rerequest_inflight(peer.reqs);
+        self.rerequest_inflight(peer.reqs.rbs.reqs);
 
         if self.peer_manager.is_none() {
             // Disabled mode: reconnect with 5s backoff
@@ -852,32 +1009,32 @@ impl NetworkManager {
             }
 
             if let Some(announcers) = self.flow_handler.block_announcers(slot, hash) {
-                self.request_block(slot, hash, announcers);
+                self.request::<RBs>(&SpecificPoint { slot, hash }, announcers);
                 self.pending_wanted.remove(&(slot, hash));
             }
         }
     }
 
-    fn rerequest_inflight(&mut self, reqs: Vec<(BlockHash, u64)>) {
-        for (hash, slot) in reqs {
-            if let Some(announcers) = self.flow_handler.block_announcers(slot, hash) {
-                self.request_block(slot, hash, announcers);
+    fn rerequest_inflight(&mut self, reqs: Vec<SpecificPoint>) {
+        for block in reqs {
+            if let Some(announcers) = self.flow_handler.block_announcers(block.slot, block.hash) {
+                self.request::<RBs>(&block, announcers);
             }
         }
     }
 
     /// Ask the first of `announcers` that takes the request, unless a peer already has it.
-    fn request_block(&mut self, slot: u64, hash: BlockHash, announcers: Vec<PeerId>) {
+    fn request<F: Fetch>(&mut self, point: &SpecificPoint, announcers: Vec<PeerId>) {
         for announcer in announcers {
             // Checked each time: the disconnect of a peer that failed to take it may have asked
             // another one.
-            if self.is_asked(slot, hash) {
+            if self.is_asked::<F>(point) {
                 return;
             }
             let Some(peer) = self.peers.get_mut(&announcer) else {
                 continue;
             };
-            if peer.request_block(hash, slot) {
+            if peer.request::<F>(point) {
                 break; // only fetch from one
             } else {
                 self.handle_disconnect(announcer);
@@ -885,8 +1042,8 @@ impl NetworkManager {
         }
     }
 
-    fn is_asked(&self, slot: u64, hash: BlockHash) -> bool {
-        self.peers.values().any(|peer| peer.reqs.contains(&(hash, slot)))
+    fn is_asked<F: Fetch>(&self, point: &SpecificPoint) -> bool {
+        self.peers.values().any(|peer| F::requests(peer).reqs.contains(point))
     }
 }
 
@@ -1304,9 +1461,9 @@ mod tests {
             "wanted must not remain pending once a fetched announcer exists"
         );
 
-        let reqs = &manager.peers.get(&peer).unwrap().reqs;
+        let reqs = &manager.peers.get(&peer).unwrap().reqs.rbs.reqs;
         assert!(
-            reqs.contains(&(hash, slot)),
+            reqs.contains(&SpecificPoint { slot, hash }),
             "peer should receive a fetch request for re-wanted fetched block"
         );
     }
@@ -1337,9 +1494,9 @@ mod tests {
             !manager.pending_wanted.contains_key(&(slot, hash)),
             "pending wanted should be cleared once announcement arrives"
         );
-        let reqs = &manager.peers.get(&peer).unwrap().reqs;
+        let reqs = &manager.peers.get(&peer).unwrap().reqs.rbs.reqs;
         assert!(
-            reqs.contains(&(hash, slot)),
+            reqs.contains(&SpecificPoint { slot, hash }),
             "late announcement should trigger block fetch retry"
         );
     }
@@ -1361,6 +1518,42 @@ mod tests {
         assert!(
             !manager.pending_wanted.contains_key(&(slot, hash)),
             "stale entry for unknown block should be evicted"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_wanted_block_its_lone_announcer_does_not_serve_is_asked_of_the_next_one() {
+        let mut manager = test_consensus_manager().await;
+        let (stalled, next) = (PeerId(3), PeerId(4));
+        add_test_peer(&mut manager, stalled);
+        add_test_peer(&mut manager, next);
+        let slot = 300;
+        let hash = BlockHash::new([5; 32]);
+        let announce = |manager: &mut NetworkManager, peer| {
+            manager.handle_peer_update(
+                peer,
+                PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(
+                    test_header(slot, 30, hash, BlockHash::new([6; 32])),
+                    Point::Specific(slot, hash.to_vec()),
+                )),
+            )
+        };
+        let block = SpecificPoint { slot, hash };
+        announce(&mut manager, stalled);
+        manager.on_network_event(NetworkEvent::BlockWanted { hash, slot }).await.unwrap();
+        manager.on_fetch_stall_tick();
+        manager.on_fetch_stall_tick();
+        assert!(
+            manager.peers[&stalled].reqs.rbs.reqs.contains(&block),
+            "block given up on while its lone announcer is still there"
+        );
+
+        announce(&mut manager, next);
+        manager.on_fetch_stall_tick();
+
+        assert!(
+            manager.peers[&next].reqs.rbs.reqs.contains(&block),
+            "wanted block not asked of the peer announcing it next"
         );
     }
 
@@ -1388,8 +1581,12 @@ mod tests {
                 body: vec![],
             })
         };
-        manager.peers.get_mut(&peer).unwrap().reqs =
-            (0..MAX_PENDING_FETCHES as u64).map(|slot| (hash_at(slot), slot)).collect();
+        manager.peers.get_mut(&peer).unwrap().reqs.rbs.reqs = (0..MAX_PENDING_FETCHES as u64)
+            .map(|slot| SpecificPoint {
+                slot,
+                hash: hash_at(slot),
+            })
+            .collect();
 
         manager.handle_peer_update(
             peer,
@@ -1426,62 +1623,27 @@ mod tests {
                 .flow_handler
                 .handle_roll_forward(peer, test_header(slot, 40, hash, BlockHash::new([8; 32])));
         }
-        manager.request_block(slot, hash, vec![stalled]);
+        manager.request::<RBs>(&SpecificPoint { slot, hash }, vec![stalled]);
 
         // The first check sees the request, the second one a whole interval without a body.
         manager.on_fetch_stall_tick();
-        assert!(manager.peers[&stalled].reqs.contains(&(hash, slot)));
+        assert!(manager.peers[&stalled].reqs.rbs.reqs.contains(&SpecificPoint { slot, hash }));
         manager.on_fetch_stall_tick();
 
         assert!(
-            manager.peers[&stalled].reqs.is_empty(),
+            manager.peers[&stalled].reqs.rbs.reqs.is_empty(),
             "request left on the stalled peer"
         );
         assert!(
-            manager.peers[&other].reqs.contains(&(hash, slot)),
+            manager.peers[&other].reqs.rbs.reqs.contains(&SpecificPoint { slot, hash }),
             "block not asked of the other announcer"
         );
 
         // Asked for again while the other peer has it in flight.
-        manager.request_block(slot, hash, vec![stalled, other]);
+        manager.request::<RBs>(&SpecificPoint { slot, hash }, vec![stalled, other]);
         assert!(
-            manager.peers[&stalled].reqs.is_empty(),
+            manager.peers[&stalled].reqs.rbs.reqs.is_empty(),
             "block asked of two peers at once"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_wanted_block_its_lone_announcer_does_not_serve_is_asked_of_the_next_one() {
-        let mut manager = test_consensus_manager().await;
-        let (stalled, next) = (PeerId(3), PeerId(4));
-        add_test_peer(&mut manager, stalled);
-        add_test_peer(&mut manager, next);
-        let slot = 300;
-        let hash = BlockHash::new([5; 32]);
-        let announce = |manager: &mut NetworkManager, peer| {
-            manager.handle_peer_update(
-                peer,
-                PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(
-                    test_header(slot, 30, hash, BlockHash::new([6; 32])),
-                    Point::Specific(slot, hash.to_vec()),
-                )),
-            )
-        };
-        announce(&mut manager, stalled);
-        manager.on_network_event(NetworkEvent::BlockWanted { hash, slot }).await.unwrap();
-        manager.on_fetch_stall_tick();
-        manager.on_fetch_stall_tick();
-        assert!(
-            manager.peers[&stalled].reqs.contains(&(hash, slot)),
-            "block given up on while its lone announcer is still there"
-        );
-
-        announce(&mut manager, next);
-        manager.on_fetch_stall_tick();
-
-        assert!(
-            manager.peers[&next].reqs.contains(&(hash, slot)),
-            "wanted block not asked of the peer announcing it next"
         );
     }
 
@@ -1560,6 +1722,9 @@ mod tests {
             matches!(&asked[..], [InitiatorCommand::ContinueSync(_)]),
             "next header after the stall, got {asked:?}"
         );
-        assert!(manager.peers[&peer].reqs.is_empty(), "block still awaited");
+        assert!(
+            manager.peers[&peer].reqs.rbs.reqs.is_empty(),
+            "block still awaited"
+        );
     }
 }
