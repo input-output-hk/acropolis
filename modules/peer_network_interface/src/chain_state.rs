@@ -181,6 +181,7 @@ impl ChainState {
         let hash = header.hash;
         let slot_blocks = self.blocks.entry(header.slot).or_default();
         slot_blocks.track_announcement(id, header);
+        let body_held = slot_blocks.body(hash).is_some();
         if is_preferred {
             if self.waiting_for_first_message {
                 self.switch_head_to_peer(id);
@@ -188,6 +189,9 @@ impl ChainState {
                 let point = SpecificPoint { slot, hash };
                 self.unpublished_blocks.push_back(point);
             }
+        }
+        if body_held {
+            return vec![];
         }
         self.block_announcers(slot, hash)
     }
@@ -714,6 +718,21 @@ mod tests {
     }
 
     #[test]
+    fn a_block_body_already_held_is_not_fetched_again() {
+        let mut state = make_test_chain_state();
+        let (p1, p2) = (PeerId(0), PeerId(1));
+        state.handle_new_preferred_upstream(p1);
+        let (header, body) = make_block(0, "block");
+
+        assert_eq!(state.handle_roll_forward(p1, header.clone()), vec![p1]);
+        assert_eq!(state.handle_roll_forward(p2, header.clone()), vec![p1, p2]);
+        state.handle_body_fetched(header.slot, header.hash, body);
+
+        let p3 = PeerId(2);
+        assert_eq!(state.handle_roll_forward(p3, header), vec![]);
+    }
+
+    #[test]
     fn should_gracefully_switch_to_chain_on_fork() {
         let mut state = make_test_chain_state();
         let p1 = PeerId(0);
@@ -760,8 +779,8 @@ mod tests {
         );
         state.handle_event_published();
 
-        // that other chain forked
-        assert_eq!(state.handle_roll_forward(p2, h1.clone()), vec![p1, p2]);
+        // that other chain forked after our first block, whose body we already hold
+        assert_eq!(state.handle_roll_forward(p2, h1.clone()), vec![]);
         assert_eq!(state.handle_roll_forward(p2, p2h2.clone()), vec![p2]);
         state.handle_body_fetched(p2h2.slot, p2h2.hash, p2b2.clone());
         assert_eq!(state.handle_roll_forward(p2, p2h3.clone()), vec![p2]);
@@ -856,8 +875,8 @@ mod tests {
         state.handle_event_published();
         assert_eq!(state.next_unpublished_event(), None);
 
-        // and when they roll forward to the next block, we follow
-        assert_eq!(state.handle_roll_forward(p2, h2.clone()), vec![p1, p2]);
+        // and when they roll forward to the next block, we follow, publishing the body we hold
+        assert_eq!(state.handle_roll_forward(p2, h2.clone()), vec![]);
         assert_eq!(
             state.next_unpublished_event(),
             Some(ChainEvent::RollForward {

@@ -168,14 +168,6 @@ impl BlockFlowHandler {
         }
     }
 
-    /// Get the preferred upstream peer (Direct mode), or None (Consensus mode).
-    pub fn preferred_upstream(&self) -> Option<PeerId> {
-        match self {
-            BlockFlowHandler::Direct { chain } => chain.preferred_upstream,
-            BlockFlowHandler::Consensus(_) => None,
-        }
-    }
-
     /// Handle a new peer connection.
     /// Returns the points to use for find_intersect, if any.
     /// Uses chain state points (or falls back to sync_point).
